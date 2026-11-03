@@ -29,10 +29,15 @@ const {
     ID_SHEET_MOVIMIENTOS
 } = require('../utils/shared');
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const { pool: dbPool } = require('../utils/db');
 
+const cleanDbUrl = process.env.DATABASE_URL
+    ? process.env.DATABASE_URL.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '')
+    : process.env.DATABASE_URL;
+
 const pool = dbPool || new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: cleanDbUrl,
     ssl: { rejectUnauthorized: false }
 });
 

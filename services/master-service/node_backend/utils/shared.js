@@ -1,4 +1,4 @@
-// ==============================================================
+﻿// ==============================================================
 // 🔧 UTILIDADES COMPARTIDAS — Módulo Central
 // ==============================================================
 let WebSocketImpl;
@@ -59,9 +59,22 @@ const ID_SHEET_MOVIMIENTOS = process.env.MES_MOVIMIENTOS_ID || '1z66kNDjMki1k9cs
 // ==============================================================
 // 🔐 Instancias de autenticación
 // ==============================================================
-const serviceAccountAuth = (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) ? new JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+let saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+let saKey = process.env.GOOGLE_PRIVATE_KEY;
+
+if ((!saEmail || !saKey) && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+        const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+        saEmail = saEmail || parsed.client_email;
+        saKey = saKey || parsed.private_key;
+    } catch (e) {
+        console.warn('?? No se pudo parsear GOOGLE_SERVICE_ACCOUNT_JSON en shared.js:', e.message);
+    }
+}
+
+const serviceAccountAuth = (saEmail && saKey) ? new JWT({
+    email: saEmail,
+    key: saKey.replace(/\\n/g, '\n'),
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 }) : null;
 

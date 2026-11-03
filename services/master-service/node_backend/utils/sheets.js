@@ -1,4 +1,4 @@
-const { JWT } = require('google-auth-library');
+﻿const { JWT } = require('google-auth-library');
 
 const mesesAbrev = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const mesesLargo = [
@@ -10,11 +10,21 @@ let serviceAccountAuth = null;
 
 function getAuthClient() {
     if (!serviceAccountAuth) {
-        const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-        const key = process.env.GOOGLE_PRIVATE_KEY ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') : '';
+        let email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+        let key = process.env.GOOGLE_PRIVATE_KEY ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') : '';
+
+        if ((!email || !key) && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+            try {
+                const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+                email = email || parsed.client_email;
+                key = key || (parsed.private_key ? parsed.private_key.replace(/\\n/g, '\n') : '');
+            } catch (e) {
+                console.warn('⚠️ No se pudo parsear GOOGLE_SERVICE_ACCOUNT_JSON en sheets.js:', e.message);
+            }
+        }
 
         if (!email || !key) {
-            throw new Error('Faltan variables GOOGLE_SERVICE_ACCOUNT_EMAIL o GOOGLE_PRIVATE_KEY en el entorno (.env)');
+            throw new Error('Faltan variables de autenticación de Google (GOOGLE_SERVICE_ACCOUNT_EMAIL/KEY o GOOGLE_SERVICE_ACCOUNT_JSON)');
         }
 
         serviceAccountAuth = new JWT({

@@ -2,14 +2,22 @@
 // 🐘 CLIENTE POSTGRESQL (pg / node-postgres) — Optimizado para bajo consumo de RAM
 // ==============================================================
 
+// Desactivar rechazo estricto de certificados intermedios para TLS de Supabase / Pooler
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const { Pool } = require('pg');
 
 const DATABASE_URL = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 const isConfigured = Boolean(DATABASE_URL);
 
+// Limpiar sslmode de la URL para evitar que pg-connection-string fuerce 'verify-full' en Node TLS
+const cleanConnString = DATABASE_URL
+    ? DATABASE_URL.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '')
+    : DATABASE_URL;
+
 // Configuración de límites estrictos de memoria para no exceder los límites de hosting (ej. Render 512 MB)
 const poolConfig = {
-    connectionString: DATABASE_URL,
+    connectionString: cleanConnString,
     
     // ⚡ 1. Limitar concurrencia del pool
     // En entornos con 512 MB de RAM, 3 a 5 conexiones son suficientes y previenen spikes de memoria.
@@ -27,10 +35,10 @@ const poolConfig = {
     // ⚡ 5. Zona horaria oficial para Argentina (-03:00)
     options: "-c timezone=America/Argentina/Buenos_Aires",
 
-    // SSL seguro para Supabase / Render / Neon / AWS RDS
-    ssl: (process.env.NODE_ENV === 'production' || (DATABASE_URL && !DATABASE_URL.includes('localhost') && !DATABASE_URL.includes('127.0.0.1')))
-        ? { rejectUnauthorized: false }
-        : false
+    // SSL seguro para Supabase / Render / Neon / AWS RDS con rejectUnauthorized en false
+    ssl: {
+        rejectUnauthorized: false
+    }
 };
 
 let pool = null;

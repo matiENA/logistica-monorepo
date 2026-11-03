@@ -1,10 +1,9 @@
 const express = require('express');
 const sharp = require('sharp');
-const { Pool } = require('pg');
+const db = require('../utils/db');
 const { supabase, serviceAccountAuth, ID_SPREADSHEET_MASTER } = require('../utils/shared');
 const { emitirDatosSiCambiaron } = require('../cache/builder');
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rsvajuxihvmpmrmlcbul.supabase.co';
 
 module.exports = function createFotosRouter(cacheDatosGlobales, io) {
@@ -46,7 +45,7 @@ module.exports = function createFotosRouter(cacheDatosGlobales, io) {
 
             // 3. Persistir en PostgreSQL (public.choferes)
             try {
-                await pool.query(
+                await db.query(
                     `UPDATE public.choferes 
                      SET foto = $1, actualizado_el = NOW() 
                      WHERE REPLACE(REPLACE(dni, '.', ''), ' ', '') = $2`,
