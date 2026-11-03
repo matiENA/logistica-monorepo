@@ -93,3 +93,66 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://diaria-operativas.onrender.com
+
+  # ------------------------------------------------------------
+  # 4. SERVICIO PAÑOL MONOLITH (Web Service en producción srv-d9adns3eo5us739q897g)
+  # Conservado idéntico a producción (sin cambios de código)
+  # ------------------------------------------------------------
+  - type: web
+    name: panol-monolith-service
+    env: node
+    plan: free
+    region: oregon
+    rootDir: apps/panol
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.rsvajuxihvmpmrmlcbul:kMmGplQEcWDYUBAB@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+      - key: SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: SUPABASE_KEY
+        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
+      - key: SPREADSHEET_ID
+        value: 1aKptNgy8a9Ca3rDW-HSlWEiriMRJMOIJuFsdViwEGFc
+      - key: SOURCE_SPREADSHEET_ID
+        value: 1HKXGsRC149Kw4aBXQwGcPVpAvObvTUFis6YV6R5cTXk
+      - key: MES_MOVIMIENTOS_ID
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: OT_SYNC_INTERVAL_MINUTES
+        value: "2"
+      - key: SYSTEM_USER
+        value: taller
+      - key: SYSTEM_PASSWORD
+        value: taller2026
+      - key: SYSTEM_AUTH_SECRET
+        value: panol-secret-auth-key-2026-xyz
+      - key: DIAGRAMAS_URL
+        value: https://diagramasnode-production.up.railway.app/api/datos
+      - key: PG_MAX_CONNECTIONS
+        value: "5"
+      - key: PG_IDLE_TIMEOUT
+        value: "10000"
+
+  # ------------------------------------------------------------
+  # 5. FRONTEND PAÑOL (Static Site — React / Vite)
+  # ------------------------------------------------------------
+  - type: static
+    name: panol-static-site
+    region: oregon
+    rootDir: apps/panol/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_BACKEND_URL
+        value: https://panolnd.onrender.com
+      - key: VITE_SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
