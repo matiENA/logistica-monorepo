@@ -74,37 +74,106 @@ EXECUTION_STATE: Dict[str, Any] = {
 # Previene que dos subprocesos pesados de Google Sheets compitan o saturen la memoria a la vez.
 EXECUTION_LOCK = threading.Lock()
 
+DEFAULT_TIMEOUTS: Dict[str, int] = {
+    "poll_vacio": 900,     # 15 min máximo para escaneo y merge multi-día
+    "unified": 900,
+    "all": 900,
+    "cordillera": 300,     # 5 min
+    "conf_viaje": 300,     # 5 min
+    "tracking": 300,
+    "vacio": 300,
+    "seguimiento": 300,
+    "dispo": 180,
+    "limpiar": 300
+}
 
-def run_command(cmd: list, key: str) -> Dict[str, Any]:
-    """Ejecuta un comando capturando la salida y actualizando el estado de forma serializada."""
+
+def run_command(cmd: list, key: str, timeout: Optional[int] = None) -> Dict[str, Any]:
+    """Ejecuta un comando transmitiendo la salida en vivo a consola y actualizando el estado de forma serializada."""
     t0 = datetime.now()
     if EXECUTION_LOCK.locked():
         EXECUTION_STATE[key]["status"] = "waiting (en cola)"
 
     with EXECUTION_LOCK:
         EXECUTION_STATE[key]["status"] = "running"
+        EXECUTION_STATE[key]["last_run"] = t0.isoformat()
+        EXECUTION_STATE[key]["duration"] = 0
+
+        max_sec = timeout or DEFAULT_TIMEOUTS.get(key, 600)
+        output_lines = []
+        error_lines = []
+        returncode = -1
+        timed_out = False
+
+        print(f"\n==================================================================", flush=True)
+        print(f"▶ [{datetime.now().strftime('%H:%M:%S')}] INICIANDO TAREA: {key} (Timeout máx: {max_sec}s)", flush=True)
+        print(f"  Comando: {' '.join(str(c) for c in cmd)}", flush=True)
+        print(f"==================================================================", flush=True)
+
         try:
-            proc = subprocess.run(
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+
+            proc = subprocess.Popen(
                 cmd,
                 cwd=str(BASE_DIR),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
-                errors="replace"
+                errors="replace",
+                env=env,
+                bufsize=1
             )
+
+            # Transmisión en tiempo real a stdout/stderr de Render para evitar silencios en logs
+            def stream_pipe(pipe, collector, is_err=False):
+                try:
+                    for line in iter(pipe.readline, ''):
+                        if not line:
+                            break
+                        collector.append(line)
+                        prefix = f"[{key}:err] " if is_err else f"[{key}] "
+                        sys.stdout.write(prefix + line)
+                        sys.stdout.flush()
+                except Exception:
+                    pass
+                finally:
+                    pipe.close()
+
+            t_stdout = threading.Thread(target=stream_pipe, args=(proc.stdout, output_lines, False))
+            t_stderr = threading.Thread(target=stream_pipe, args=(proc.stderr, error_lines, True))
+            t_stdout.daemon = True
+            t_stderr.daemon = True
+            t_stdout.start()
+            t_stderr.start()
+
+            try:
+                proc.wait(timeout=max_sec)
+                returncode = proc.returncode
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                print(f"\n⏰ [{key}] TIMEOUT EXCEDIDO ({max_sec}s). Terminando subproceso forzadamente...", flush=True)
+                proc.kill()
+                proc.wait()
+                returncode = -9
+                error_lines.append(f"Timeout de {max_sec}s excedido")
+
+            t_stdout.join(timeout=2)
+            t_stderr.join(timeout=2)
+
             # Forzar limpieza inmediata de memoria tras salida del subproceso
             gc.collect()
 
             elapsed = round((datetime.now() - t0).total_seconds(), 2)
-            success = (proc.returncode == 0)
-            stdout_txt = proc.stdout.strip()
-            stderr_txt = proc.stderr.strip()
+            success = (returncode == 0) and not timed_out
+            stdout_txt = "".join(output_lines).strip()
+            stderr_txt = "".join(error_lines).strip()
 
             result = {
                 "task": key,
                 "success": success,
-                "exit_code": proc.returncode,
+                "exit_code": returncode,
                 "duration_seconds": elapsed,
                 "timestamp": t0.isoformat(),
                 "output": stdout_txt if success else (stderr_txt or stdout_txt),
@@ -112,10 +181,13 @@ def run_command(cmd: list, key: str) -> Dict[str, Any]:
             }
             EXECUTION_STATE[key] = {
                 "last_run": t0.isoformat(),
-                "status": "success" if success else "failed",
+                "status": "success" if success else ("timeout" if timed_out else "failed"),
                 "duration": elapsed,
                 "output": result["output"][:500]
             }
+
+            estado_str = "ÉXITO" if success else ("TIMEOUT" if timed_out else "FALLO")
+            print(f"⏹ [{datetime.now().strftime('%H:%M:%S')}] FIN TAREA {key}: {estado_str} en {elapsed}s (Exit code: {returncode})\n", flush=True)
 
             # Notificación a Telegram (fallos inmediatos o todas según TELEGRAM_NOTIFY_ALL)
             try:
@@ -127,9 +199,10 @@ def run_command(cmd: list, key: str) -> Dict[str, Any]:
                     output_preview=stdout_txt
                 )
             except Exception as e_tg:
-                print(f"[TELEGRAM] ⚠️ Error en handler de notificación: {e_tg}")
+                print(f"[TELEGRAM] ⚠️ Error en handler de notificación: {e_tg}", flush=True)
 
             return result
+
         except Exception as e:
             elapsed = round((datetime.now() - t0).total_seconds(), 2)
             res_err = {
@@ -148,6 +221,8 @@ def run_command(cmd: list, key: str) -> Dict[str, Any]:
                 "output": str(e)
             }
 
+            print(f"💥 [{datetime.now().strftime('%H:%M:%S')}] ERROR EN TAREA {key}: {e} en {elapsed}s\n", flush=True)
+
             try:
                 notify_task_result(
                     task_name=key,
@@ -157,7 +232,7 @@ def run_command(cmd: list, key: str) -> Dict[str, Any]:
                     output_preview=""
                 )
             except Exception as e_tg:
-                print(f"[TELEGRAM] ⚠️ Error en handler de notificación: {e_tg}")
+                print(f"[TELEGRAM] ⚠️ Error en handler de notificación: {e_tg}", flush=True)
 
             return res_err
 

@@ -11,43 +11,99 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
 
     // GET /api/dash/flota — Lista ligera para autocompletado y enriquecimiento
     // Devuelve estructura limpia: _safeId, nom, srv_chofer, ut, dias
-    router.get('/flota', (req, res) => {
-        if (!cacheDatosGlobales.diagramas || !cacheDatosGlobales.diagramas.diagramas) {
-            return res.status(503).json({ error: "Cargando DB..." });
+    router.get('/flota', async (req, res) => {
+        // 1. Si cache en RAM está disponible, devolver de RAM
+        if (cacheDatosGlobales.diagramas && cacheDatosGlobales.diagramas.diagramas) {
+            const flotaLite = cacheDatosGlobales.diagramas.diagramas.map(ch => ({
+                _safeId: ch._safeId,
+                nom: ch.nom,
+                srv_chofer: ch.srv_chofer || 'S/A',
+                dni: ch.dni || '',
+                foto: ch.foto || '',
+                ut: ch.ut || null,
+                tractor: ch.tractor || ch.ut?.tractor?.patente || '',
+                semi: ch.semi || ch.ut?.semi?.patente || '',
+                cisternado: ch.cisternado || ch.ut?.semi?.cisternado || ch.ut?.tractor?.semi?.cisternado || ch.ut?.tractor?.cisternado || '',
+                n_ute: ch.n_ute || ch.ut?.n_ute || '',
+                dias: ch.dias || {},
+                diagrama_tipo: ch.diagrama_tipo || null,
+                diagrama_json: ch.diagrama_json || null,
+                contabilizador: ch.contabilizador || null
+            }));
+
+            return res.json({
+                success: true,
+                flota: flotaLite,
+                ut: cacheDatosGlobales.diagramas.ut || [],
+                unidades: cacheDatosGlobales.diagramas.unidades || [],
+                utMap: cacheDatosGlobales.diagramas.utMap || {},
+                // Flota indexada por nombre normalizado para búsqueda rápida
+                flotaMap: cacheDatosGlobales.diagramas.flota || {},
+                tractores: cacheDatosGlobales.tractores || cacheDatosGlobales.diagramas?.tractores || [],
+                semis: cacheDatosGlobales.semis || cacheDatosGlobales.diagramas?.semis || [],
+                servicios_unidades: cacheDatosGlobales.serviciosUnidades || cacheDatosGlobales.diagramas?.servicios_unidades || [],
+                servicios_choferes: cacheDatosGlobales.serviciosChoferes || cacheDatosGlobales.diagramas?.servicios_choferes || [],
+                usuarios: cacheDatosGlobales.usuarios || [],
+                timestamp: cacheDatosGlobales.ultimaActualizacion
+            });
         }
 
-        const flotaLite = cacheDatosGlobales.diagramas.diagramas.map(ch => ({
-            _safeId: ch._safeId,
-            nom: ch.nom,
-            srv_chofer: ch.srv_chofer || 'S/A',
-            dni: ch.dni || '',
-            foto: ch.foto || '',
-            ut: ch.ut || null,
-            tractor: ch.tractor || ch.ut?.tractor?.patente || '',
-            semi: ch.semi || ch.ut?.semi?.patente || '',
-            cisternado: ch.cisternado || ch.ut?.semi?.cisternado || ch.ut?.tractor?.semi?.cisternado || ch.ut?.tractor?.cisternado || '',
-            n_ute: ch.n_ute || ch.ut?.n_ute || '',
-            dias: ch.dias || {},
-            diagrama_tipo: ch.diagrama_tipo || null,
-            diagrama_json: ch.diagrama_json || null,
-            contabilizador: ch.contabilizador || null
-        }));
+        // 2. Fallback SQL a PostgreSQL view_dash_flota (cuando ENABLE_RAM_CACHE_POLLING=false)
+        try {
+            if (db && db.isConfigured()) {
+                const { rows } = await db.query('SELECT * FROM public.view_dash_flota ORDER BY nom ASC');
+                const { normalizar } = require('../utils/shared');
+                const flotaMap = {};
 
-        res.json({
-            success: true,
-            flota: flotaLite,
-            ut: cacheDatosGlobales.diagramas.ut || [],
-            unidades: cacheDatosGlobales.diagramas.unidades || [],
-            utMap: cacheDatosGlobales.diagramas.utMap || {},
-            // Flota indexada por nombre normalizado para búsqueda rápida
-            flotaMap: cacheDatosGlobales.diagramas.flota || {},
-            tractores: cacheDatosGlobales.tractores || cacheDatosGlobales.diagramas?.tractores || [],
-            semis: cacheDatosGlobales.semis || cacheDatosGlobales.diagramas?.semis || [],
-            servicios_unidades: cacheDatosGlobales.serviciosUnidades || cacheDatosGlobales.diagramas?.servicios_unidades || [],
-            servicios_choferes: cacheDatosGlobales.serviciosChoferes || cacheDatosGlobales.diagramas?.servicios_choferes || [],
-            usuarios: cacheDatosGlobales.usuarios || [],
-            timestamp: cacheDatosGlobales.ultimaActualizacion
-        });
+                const flotaLite = rows.map(ch => {
+                    const item = {
+                        _safeId: ch.chofer_id || ch.nom,
+                        nom: ch.nom,
+                        nombre: ch.nom,
+                        chofer_id: ch.chofer_id,
+                        srv_chofer: ch.srv || ch.servicio || 'S/A',
+                        srv: ch.srv || ch.servicio || 'S/A',
+                        servicio: ch.servicio || ch.srv || 'S/A',
+                        dni: ch.dni || '',
+                        foto: ch.foto || '',
+                        ut: ch.unidad_id ? { id: ch.unidad_id, n_ute: ch.n_ute } : null,
+                        tractor: ch.tractor || '',
+                        semi: ch.semi || '',
+                        cisternado: ch.cisternado || '',
+                        n_ute: ch.n_ute || '',
+                        estado_chofer: ch.estado_chofer || 'circulando',
+                        estado_unidad: ch.estado_unidad || 'operativo',
+                        ot_activa: ch.ot_activa || null,
+                        unidad_id: ch.unidad_id || null,
+                        vtv_tr: ch.vtv_tr || null,
+                        mas_tr: ch.mas_tr || null,
+                        vtv_semi: ch.vtv_semi || null,
+                        mas_semi: ch.mas_semi || null,
+                        esp_es: ch.esp_es || null,
+                        vi: ch.vi || null,
+                        ve: ch.ve || null,
+                        dias: {}
+                    };
+                    if (ch.nom) {
+                        flotaMap[normalizar(ch.nom)] = item;
+                    }
+                    return item;
+                });
+
+                return res.json({
+                    success: true,
+                    fuente: "POSTGRES_VIEW_DASH_FLOTA",
+                    flota: flotaLite,
+                    flotaMap,
+                    vencimientosObj: [],
+                    timestamp: new Date().toISOString()
+                });
+            }
+        } catch (dbErr) {
+            console.error("❌ [DASH] Error consultando view_dash_flota en Postgres:", dbErr.message);
+        }
+
+        return res.status(503).json({ error: "Cargando DB..." });
     });
 
     // GET /api/dash/ut o /api/dash/unidades — Catálogo completo de unidades de Movimientos
@@ -67,10 +123,24 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
     });
 
     // GET /api/dash/usuarios — Lista de usuarios para @menciones
-    router.get('/usuarios', (req, res) => {
+    router.get('/usuarios', async (req, res) => {
+        if (cacheDatosGlobales.usuarios && cacheDatosGlobales.usuarios.length > 0) {
+            return res.json({
+                success: true,
+                data: cacheDatosGlobales.usuarios
+            });
+        }
+        try {
+            if (db && db.isConfigured()) {
+                const { rows } = await db.query('SELECT * FROM public.view_dash_usuarios ORDER BY usuario ASC');
+                return res.json({ success: true, fuente: "POSTGRES", data: rows || [] });
+            }
+        } catch (e) {
+            console.warn("⚠️ [DASH] Error consultando view_dash_usuarios:", e.message);
+        }
         res.json({
             success: true,
-            data: cacheDatosGlobales.usuarios || []
+            data: []
         });
     });
 

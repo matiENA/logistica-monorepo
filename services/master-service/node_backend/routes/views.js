@@ -215,6 +215,16 @@ module.exports = function createViewsRouter() {
             });
 
         } catch (err) {
+            if (err.message && (err.message.includes('does not exist') || err.message.includes('no existe'))) {
+                console.warn("⚠️ [Views] Vista public.view_cards_diarias no existe en Postgres, devolviendo array vacío:", err.message);
+                return res.json({
+                    success: true,
+                    vista: "public.view_cards_diarias (fallback_vacio)",
+                    latenciaMs: Date.now() - t0,
+                    paginacion: { total: 0, limit: limitNum, offset: offsetNum, retornados: 0, hay_mas: false },
+                    datos: []
+                });
+            }
             console.error("❌ Error en GET /api/views/cards:", err.message);
             res.status(500).json({ success: false, error: err.message });
         }
@@ -372,6 +382,16 @@ module.exports = function createViewsRouter() {
             });
 
         } catch (err) {
+            if (err.message && (err.message.includes('does not exist') || err.message.includes('no existe'))) {
+                console.warn("⚠️ [Views] Vista public.view_inducciones_recientes no existe en Postgres, devolviendo array vacío:", err.message);
+                return res.json({
+                    success: true,
+                    vista: "public.view_inducciones_recientes (fallback_vacio)",
+                    latenciaMs: Date.now() - t0,
+                    total: 0,
+                    datos: []
+                });
+            }
             console.error("❌ Error en GET /api/views/inducciones:", err.message);
             res.status(500).json({ success: false, error: err.message });
         }
