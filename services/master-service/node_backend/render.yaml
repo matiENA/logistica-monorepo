@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: sheet-render
+    env: node
+    plan: free
+    region: virginia
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: TZ
+        value: America/Argentina/Buenos_Aires
+      - key: NODE_VERSION
+        value: 22.x
+      - key: SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: NEW_SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: SUPABASE_KEY
+        sync: false
+      - key: NEW_SUPABASE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PG_MAX_CONNECTIONS
+        value: 5
+      - key: PG_IDLE_TIMEOUT
+        value: 10000
+      - key: KM_RAM_DIAS
+        value: 60
+      - key: KM_SERVICE_URL
+        value: https://km-extractor-service.onrender.com
+      - key: ID_SPREADSHEET_MASTER
+        value: 1eQ9Y5diL5fwxYTxvseNgZJFbX-lSUQ13axbp3cLiqPc
+      - key: SPREADSHEET_ID
+        value: 1eQ9Y5diL5fwxYTxvseNgZJFbX-lSUQ13axbp3cLiqPc
+      - key: ID_SHEET_MOVIMIENTOS
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: MES_MOVIMIENTOS_ID
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: ID_SPREADSHEET_DIAGRAMAS
+        value: 14jgQZF0gkbT7k3mps1k3dM3qtoaseoCOUfK4PFRozKU
+      - key: SHEET_KM_ID
+        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+      - key: ID_SHEET_KM
+        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+      - key: IMGBB_API_KEY
+        value: 30fdf72c3d5272a8c3e804f3db258673
+      - key: GOOGLE_SERVICE_ACCOUNT_EMAIL
+        value: firebase-adminsdk-fbsvc@ute-logistica.iam.gserviceaccount.com
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false

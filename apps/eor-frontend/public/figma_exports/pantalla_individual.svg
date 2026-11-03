@@ -1,0 +1,678 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1140" width="1440" height="1140">
+  <defs>
+    <!-- Sombras nativas para Figma -->
+    <filter id="shadow-sm" x="-4%" y="-4%" width="108%" height="112%" filterUnits="objectBoundingBox">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.05"/>
+    </filter>
+    <filter id="shadow-md" x="-5%" y="-5%" width="110%" height="116%" filterUnits="objectBoundingBox">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <filter id="shadow-floating" x="-4%" y="-10%" width="108%" height="130%" filterUnits="objectBoundingBox">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0f172a" flood-opacity="0.18"/>
+    </filter>
+    <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#19407e"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="avatar-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#eff6ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ==========================================
+       FONDO DE APLICACIÓN (var(--bg-app))
+       ========================================== -->
+  <g id="App_Background">
+    <rect x="0" y="0" width="1440" height="1140" fill="#f1f5f9"/>
+  </g>
+
+  <!-- ==========================================
+       1. HEADER Y NAVEGACIÓN PRINCIPAL (HeaderNav)
+       ========================================== -->
+  <g id="Header_Nav">
+    <rect id="Header_Surface" x="0" y="0" width="1440" height="64" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+
+    <!-- Brand Identity -->
+    <g id="Header_Brand" transform="translate(24, 13)">
+      <rect id="Brand_Badge" x="0" y="0" width="38" height="38" rx="12" ry="12" fill="url(#brand-grad)"/>
+      <!-- Truck Icon -->
+      <g id="Icon_Truck" transform="translate(9, 9)" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M10 17h4V5H2v12h3"/>
+        <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5"/>
+        <path d="M14 17h1"/>
+        <circle cx="7.5" cy="17.5" r="2.5"/>
+        <circle cx="17.5" cy="17.5" r="2.5"/>
+      </g>
+      <text x="50" y="19" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="18" font-weight="800" fill="#0f172a">EOR</text>
+      <text x="50" y="33" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#64748b" letter-spacing="0.5">LOGÍSTICA &amp; DIAGRAMAS</text>
+    </g>
+
+    <!-- Selector de Módulos Central (3 Pestañas) -->
+    <g id="Nav_Modules_Tabs" transform="translate(565, 11)">
+      <rect id="Nav_Pill_Container" x="0" y="0" width="310" height="42" rx="16" ry="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+      
+      <!-- Tab: Diaria -->
+      <g id="Tab_Diaria" transform="translate(4, 4)">
+        <rect x="0" y="0" width="94" height="34" rx="12" ry="12" fill="transparent"/>
+        <text x="47" y="21" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="700" fill="#475569">Diaria</text>
+      </g>
+
+      <!-- Tab: Individual (ACTIVE) -->
+      <g id="Tab_Individual_Active" transform="translate(102, 4)">
+        <rect x="0" y="0" width="106" height="34" rx="12" ry="12" fill="#ffffff" filter="url(#shadow-sm)"/>
+        <text x="53" y="21" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="800" fill="#19407e">Individual</text>
+      </g>
+
+      <!-- Tab: Flota -->
+      <g id="Tab_Flota" transform="translate(212, 4)">
+        <rect x="0" y="0" width="94" height="34" rx="12" ry="12" fill="transparent"/>
+        <text x="47" y="21" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="700" fill="#475569">Flota</text>
+      </g>
+    </g>
+
+    <!-- Acciones Derecha: Reloj, Usuario, Tema -->
+    <g id="Header_Actions" transform="translate(1150, 13)">
+      <text x="0" y="24" font-family="'Roboto Mono', monospace" font-size="14.5" font-weight="700" fill="#0f172a">16:37</text>
+
+      <!-- Pill Usuario Autenticado -->
+      <g id="Auth_User_Pill" transform="translate(54, 3)">
+        <rect x="0" y="0" width="160" height="32" rx="12" ry="12" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+        <circle cx="16" cy="16" r="5" fill="#19407e"/>
+        <text x="28" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#0f172a">MRODRIGUEZ</text>
+        <text x="108" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#64748b">(ADMIN)</text>
+      </g>
+
+      <!-- Botón Modo Oscuro -->
+      <g id="Btn_Theme_Toggle" transform="translate(226, 0)">
+        <rect x="0" y="0" width="38" height="38" rx="12" ry="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" transform="translate(7, 7) scale(0.95)" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       2. LAYOUT PRINCIPAL EN 2 COLUMNAS (individual-layout-grid)
+       ========================================================= -->
+  <g id="Individual_Module_Container" transform="translate(24, 80)">
+
+    <!-- =======================================================
+         COLUMNA IZQUIERDA: SIDEBAR LISTA CHOFERES (290px)
+         ======================================================= -->
+    <g id="Sidebar_Lista_Choferes" filter="url(#shadow-sm)">
+      <rect id="Sidebar_Card_Bg" x="0" y="0" width="290" height="1036" rx="16" ry="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+
+      <!-- Cabecera Sidebar -->
+      <g id="Sidebar_Header" transform="translate(14, 16)">
+        <g id="Icon_Users" transform="translate(0, 2)" stroke="#19407e" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </g>
+        <text x="22" y="13" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="900" fill="#475569" letter-spacing="0.4">LISTA CHOFERES</text>
+        <text x="262" y="13" text-anchor="end" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#64748b">118 conductores</text>
+      </g>
+
+      <!-- Buscador -->
+      <g id="Sidebar_Search_Box" transform="translate(14, 44)">
+        <rect x="0" y="0" width="262" height="36" rx="8" ry="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+        <g id="Icon_Search" transform="translate(10, 11)" stroke="#64748b" stroke-width="2" fill="none">
+          <circle cx="6" cy="6" r="5"/>
+          <line x1="10" y1="10" x2="14" y2="14"/>
+        </g>
+        <text x="32" y="23" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12.5" font-weight="500" fill="#94a3b8">Buscar por Nombre, DNI o Legajo...</text>
+      </g>
+
+      <!-- Lista de Conductores -->
+      <g id="Sidebar_Drivers_List" transform="translate(14, 92)">
+        <!-- Item 1: ACTIVO / SELECCIONADO -->
+        <g id="Driver_Item_1_Selected" transform="translate(0, 0)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#19407e" stroke="#133365" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#ffffff">ACOSTA, MARCELO FABIAN</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#dbeafe">Leg: 1042 • DNI: 28451920</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" fill-opacity="0.2"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#ffffff">YPF</text>
+        </g>
+
+        <!-- Item 2 -->
+        <g id="Driver_Item_2" transform="translate(0, 54)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">AGUIRRE, ROBERTO CARLOS</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1088 • DNI: 31092441</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">SHELL</text>
+        </g>
+
+        <!-- Item 3 -->
+        <g id="Driver_Item_3" transform="translate(0, 108)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">ALVAREZ, DIEGO HERNAN</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1105 • DNI: 33981204</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">YPF</text>
+        </g>
+
+        <!-- Item 4 -->
+        <g id="Driver_Item_4" transform="translate(0, 162)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">BENITEZ, JORGE LUIS</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1129 • DNI: 29554102</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">AXION</text>
+        </g>
+
+        <!-- Item 5 -->
+        <g id="Driver_Item_5" transform="translate(0, 216)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">CABRERA, MATIAS EZEQUIEL</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1140 • DNI: 36712890</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">YPF</text>
+        </g>
+
+        <!-- Item 6 -->
+        <g id="Driver_Item_6" transform="translate(0, 270)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">CASTRO, SERGIO DANIEL</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1164 • DNI: 30112845</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">GEN</text>
+        </g>
+
+        <!-- Item 7 -->
+        <g id="Driver_Item_7" transform="translate(0, 324)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">DIAZ, GUSTAVO ADRIAN</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1192 • DNI: 27849301</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">YPF</text>
+        </g>
+
+        <!-- Item 8 -->
+        <g id="Driver_Item_8" transform="translate(0, 378)">
+          <rect x="0" y="0" width="262" height="48" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="12" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">FERNANDEZ, LUCAS MARTIN</text>
+          <text x="12" y="36" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#64748b">Leg: 1215 • DNI: 38901234</text>
+          <rect x="208" y="14" width="44" height="20" rx="4" ry="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="230" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#475569">SHELL</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- =======================================================
+         COLUMNA DERECHA: MAIN CONTENT (3 BLOQUES APILADOS)
+         ======================================================= -->
+    <g id="Individual_Right_Column" transform="translate(310, 0)">
+
+      <!-- =====================================================
+           BLOQUE 1: FICHA DE CONDUCTOR Y UNIDAD (DriverProfileCard)
+           ===================================================== -->
+      <g id="Driver_Profile_Card" filter="url(#shadow-sm)">
+        <rect id="Profile_Card_Bg" x="0" y="0" width="1082" height="218" rx="16" ry="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+
+        <!-- A. Avatar 3:4 WebP -->
+        <g id="Driver_Avatar_3x4" transform="translate(24, 19)">
+          <rect x="0" y="0" width="135" height="180" rx="12" ry="12" fill="url(#avatar-bg)" stroke="#cbd5e1" stroke-width="1"/>
+          <!-- Silueta Conductor Vectorial -->
+          <circle cx="67.5" cy="64" r="26" fill="#93c5fd"/>
+          <path d="M25 154 C25 118, 110 118, 110 154 Z" fill="#3b82f6" fill-opacity="0.75"/>
+          <!-- Badge 3:4 -->
+          <rect x="96" y="154" width="31" height="18" rx="4" ry="4" fill="#0f172a" fill-opacity="0.65"/>
+          <text x="111.5" y="166" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#ffffff">3:4</text>
+        </g>
+
+        <!-- B. Información Identificatoria y Operativa -->
+        <g id="Driver_Details_Content" transform="translate(184, 24)">
+          <!-- Línea 1: Nombre Completo + Botón Link -->
+          <g id="Driver_Name_Row">
+            <text x="0" y="24" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="23" font-weight="900" fill="#0f172a" letter-spacing="-0.4">ACOSTA, MARCELO FABIAN</text>
+            <g id="Btn_Copy_Permalink" transform="translate(325, 8)" stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </g>
+          </g>
+
+          <!-- Línea 2: Legajo • Alta • DNI • Email • Tel • WhatsApp Chat -->
+          <g id="Driver_Meta_Row" transform="translate(0, 40)">
+            <text x="0" y="16" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#475569">
+              LEGAJO: <tspan font-weight="800" fill="#0f172a">1042</tspan>   •   ALTA: <tspan font-weight="800" fill="#0f172a">14 MAR 2021</tspan>   •   DNI: <tspan font-weight="800" fill="#0f172a">28.451.920</tspan>   •   <tspan fill="#64748b">macosta@logisticaeor.com.ar</tspan>   •   TEL: <tspan font-weight="800" fill="#0f172a">+54 9 11 5482-9104</tspan>
+            </text>
+
+            <!-- Botón WhatsApp Chat -->
+            <g id="Btn_WhatsApp_Chat" transform="translate(712, 0)">
+              <rect x="0" y="0" width="68" height="24" rx="6" ry="6" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1"/>
+              <text x="34" y="16" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#065f46">💬 CHAT</text>
+            </g>
+          </g>
+
+          <!-- Divisor Horizontal -->
+          <line x1="0" y1="78" x2="874" y2="78" stroke="#e2e8f0" stroke-width="1"/>
+
+          <!-- Línea 3: 4 Columnas de Unidad Asignada -->
+          <g id="Driver_Unit_Columns" transform="translate(0, 92)">
+            
+            <!-- Columna 1: N° UTE INTERNO -->
+            <g id="Col_UTE_Interno" transform="translate(0, 0)">
+              <text x="0" y="11" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#64748b">N° UTE INTERNO</text>
+              <rect x="0" y="18" width="195" height="32" rx="6" ry="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+              <text x="10" y="39" font-family="'Roboto Mono', monospace" font-size="15" font-weight="800" fill="#0f172a">UTE-114</text>
+              <rect x="173" y="28" width="11" height="11" rx="2" ry="2" fill="none" stroke="#64748b" stroke-width="1.5"/>
+            </g>
+
+            <!-- Columna 2: TRACTOR -->
+            <g id="Col_Tractor" transform="translate(220, 0)">
+              <text x="0" y="11" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#64748b">TRACTOR</text>
+              <rect x="0" y="18" width="195" height="32" rx="6" ry="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+              <text x="10" y="39" font-family="'Roboto Mono', monospace" font-size="15" font-weight="800" fill="#19407e">AE 452 KL</text>
+              <rect x="173" y="28" width="11" height="11" rx="2" ry="2" fill="none" stroke="#64748b" stroke-width="1.5"/>
+              <text x="0" y="65" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="600" fill="#64748b">Scania R450 A6x2</text>
+            </g>
+
+            <!-- Columna 3: SEMI -->
+            <g id="Col_Semi" transform="translate(440, 0)">
+              <text x="0" y="11" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#64748b">SEMI</text>
+              <rect x="0" y="18" width="195" height="32" rx="6" ry="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+              <text x="10" y="39" font-family="'Roboto Mono', monospace" font-size="15" font-weight="800" fill="#0f172a">AF 891 MN</text>
+              <rect x="173" y="28" width="11" height="11" rx="2" ry="2" fill="none" stroke="#64748b" stroke-width="1.5"/>
+              <text x="0" y="65" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="600" fill="#64748b">Danes Cisterna (37 m³)</text>
+            </g>
+
+            <!-- Columna 4: SERVICIO -->
+            <g id="Col_Servicio" transform="translate(660, 0)">
+              <text x="0" y="11" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="800" fill="#64748b">SERVICIO</text>
+              <rect x="0" y="18" width="145" height="32" rx="6" ry="6" fill="#fef3c7" stroke="#fde68a" stroke-width="1"/>
+              <text x="72.5" y="39" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="900" fill="#92400e">YPF LIVIANOS</text>
+            </g>
+
+          </g>
+        </g>
+      </g>
+
+      <!-- =====================================================
+           BLOQUE 2: CALENDARIO DIAGRAMA KMs (TrimestralCalendar)
+           ===================================================== -->
+      <g id="Trimestral_Calendar_Section" transform="translate(0, 238)" filter="url(#shadow-sm)">
+        <rect id="Calendar_Section_Bg" x="0" y="0" width="1082" height="456" rx="16" ry="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+
+        <!-- Top Bar del Calendario -->
+        <g id="Calendar_Top_Bar" transform="translate(20, 18)">
+          <!-- Título -->
+          <text x="0" y="21" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="15" font-weight="900" fill="#0f172a">📅 DIAGRAMA KMs (90 DÍAS)</text>
+
+          <!-- Toggle Escala 90 Días / 12 Meses -->
+          <g id="Calendar_Scale_Toggle" transform="translate(222, 0)">
+            <rect x="0" y="0" width="278" height="32" rx="10" ry="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+            <rect x="3" y="3" width="136" height="26" rx="7" ry="7" fill="#19407e"/>
+            <text x="71" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#ffffff">90 DÍAS (3 MESES)</text>
+            <text x="208" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#475569">12 MESES (ANUAL)</text>
+          </g>
+
+          <!-- Flechas Navegación Meses -->
+          <g id="Calendar_Nav_Arrows" transform="translate(510, 2)">
+            <rect x="0" y="0" width="28" height="28" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+            <text x="14" y="19" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="#475569">‹</text>
+            <rect x="34" y="0" width="28" height="28" rx="8" ry="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+            <text x="48" y="19" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="#475569">›</text>
+          </g>
+
+          <!-- Indicadores Derecha: Km Rango + Km Vista + Shift Hint -->
+          <g id="Calendar_Top_Indicators" transform="translate(592, 1)">
+            <!-- Badge KM Rango -->
+            <rect x="0" y="0" width="142" height="30" rx="10" ry="10" fill="#e0e7ff" stroke="#a5b4fc" stroke-width="1"/>
+            <text x="10" y="19" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="900" fill="#4f46e5">KM RANGO: <tspan font-family="'Roboto Mono', monospace" font-size="13" fill="#1e1b4b">1.840</tspan> km</text>
+
+            <!-- Badge KM en Vista -->
+            <rect x="150" y="0" width="136" height="30" rx="8" ry="8" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1"/>
+            <text x="218" y="19" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#19407e">⚡ 24.680 km en vista</text>
+
+            <!-- Hint Shift + Clic -->
+            <rect x="294" y="0" width="156" height="30" rx="10" ry="10" fill="#e0e7ff"/>
+            <text x="372" y="19" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="700" fill="#4f46e5">Shift + Clic para rangos</text>
+          </g>
+
+          <line x1="0" y1="44" x2="1042" y2="44" stroke="#e2e8f0" stroke-width="1"/>
+        </g>
+
+        <!-- =================================================
+             CUADRÍCULA DE 3 TARJETAS MENSUALES (90 DÍAS)
+             ================================================= -->
+        <g id="Calendar_Months_Grid" transform="translate(20, 76)">
+
+          <!-- MES 1: AGOSTO 2026 -->
+          <g id="Month_Card_Agosto_2026" transform="translate(0, 0)">
+            <rect x="0" y="0" width="334" height="296" rx="12" ry="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+            <text x="167" y="26" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="800" fill="#0f172a" letter-spacing="0.6">AGOSTO 2026</text>
+            <line x1="14" y1="36" x2="320" y2="36" stroke="#e2e8f0" stroke-width="1"/>
+
+            <!-- Cabecera L M X J V S D -->
+            <g id="Agosto_Weekdays" transform="translate(16, 54)" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="800" fill="#64748b" text-anchor="middle">
+              <text x="19" y="0">L</text>
+              <text x="63" y="0">M</text>
+              <text x="107" y="0">X</text>
+              <text x="151" y="0">J</text>
+              <text x="195" y="0">V</text>
+              <text x="239" y="0">S</text>
+              <text x="283" y="0">D</text>
+            </g>
+
+            <!-- Filas de Celdas Representativas (Agosto) -->
+            <g id="Agosto_Days_Matrix" transform="translate(16, 64)">
+              <!-- Semana 1 -->
+              <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="224" y="10" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="8.5" font-weight="700" fill="#64748b">1</text>
+              <text x="239" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">1</text>
+
+              <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="268" y="10" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="8.5" font-weight="700" fill="#64748b">2</text>
+              <text x="283" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">2</text>
+
+              <!-- Semana 2 (Activos 3..9) -->
+              <g id="Agosto_Row_2" transform="translate(0, 38)">
+                <rect x="0" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="19" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">3</text>
+                <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">4</text>
+                <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">5</text>
+                <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">6</text>
+                <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#b6d7a8"/>
+                <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">F</text>
+                <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#b6d7a8"/>
+                <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">F</text>
+                <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">1</text>
+              </g>
+
+              <!-- Semana 3 -->
+              <g id="Agosto_Row_3" transform="translate(0, 76)">
+                <rect x="0" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="19" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">2</text>
+                <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">3</text>
+                <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">4</text>
+                <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">5</text>
+                <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">6</text>
+                <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">7</text>
+                <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">8</text>
+              </g>
+
+              <!-- Semana 4 (Vacaciones V) -->
+              <g id="Agosto_Row_4" transform="translate(0, 114)">
+                <rect x="0" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="19" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+                <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#ffe599"/>
+                <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">V</text>
+              </g>
+            </g>
+          </g>
+
+          <!-- MES 2: SEPTIEMBRE 2026 (ACTIVE MONTH CON RANGO SELECCIONADO) -->
+          <g id="Month_Card_Septiembre_2026_Active" transform="translate(354, 0)">
+            <rect x="0" y="0" width="334" height="296" rx="12" ry="12" fill="#ffffff" stroke="#6366f1" stroke-width="2"/>
+            <text x="167" y="26" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="800" fill="#0f172a" letter-spacing="0.6">SEPTIEMBRE 2026</text>
+            <line x1="14" y1="36" x2="320" y2="36" stroke="#e2e8f0" stroke-width="1"/>
+
+            <g id="Septiembre_Weekdays" transform="translate(16, 54)" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="800" fill="#64748b" text-anchor="middle">
+              <text x="19" y="0">L</text>
+              <text x="63" y="0">M</text>
+              <text x="107" y="0">X</text>
+              <text x="151" y="0">J</text>
+              <text x="195" y="0">V</text>
+              <text x="239" y="0">S</text>
+              <text x="283" y="0">D</text>
+            </g>
+
+            <g id="Septiembre_Days_Matrix" transform="translate(16, 64)">
+              <!-- Semana 1 -->
+              <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">1</text>
+              <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">2</text>
+              <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">3</text>
+              <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">4</text>
+              <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">5</text>
+              <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">6</text>
+
+              <!-- Semana 2 CON RANGO SELECCIONADO (4 días con borde violeta #4f46e5) -->
+              <g id="Septiembre_Row_2_Selected_Range" transform="translate(0, 38)">
+                <rect x="0" y="0" width="38" height="34" rx="6" ry="6" fill="#eef2ff" stroke="#4f46e5" stroke-width="2.5"/>
+                <text x="19" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#312e81">7</text>
+                <circle cx="19" cy="30" r="2" fill="#6366f1"/>
+
+                <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#eef2ff" stroke="#4f46e5" stroke-width="2.5"/>
+                <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#312e81">8</text>
+                <circle cx="63" cy="30" r="2" fill="#6366f1"/>
+
+                <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#eef2ff" stroke="#4f46e5" stroke-width="2.5"/>
+                <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#312e81">9</text>
+                <circle cx="107" cy="30" r="2" fill="#6366f1"/>
+
+                <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eef2ff" stroke="#4f46e5" stroke-width="2.5"/>
+                <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#312e81">10</text>
+                <circle cx="151" cy="30" r="2" fill="#6366f1"/>
+
+                <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#b6d7a8"/>
+                <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">F</text>
+                <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#b6d7a8"/>
+                <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">F</text>
+                <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#b6d7a8"/>
+                <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1e293b">F</text>
+              </g>
+
+              <!-- Semana 3 -->
+              <g id="Septiembre_Row_3" transform="translate(0, 76)">
+                <rect x="0" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="19" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">1</text>
+                <rect x="44" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="63" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">2</text>
+                <rect x="88" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="107" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">3</text>
+                <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">4</text>
+                <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+                <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">5</text>
+                <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#e06666"/>
+                <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#ffffff">E</text>
+                <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#e06666"/>
+                <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#ffffff">E</text>
+              </g>
+            </g>
+          </g>
+
+          <!-- MES 3: OCTUBRE 2026 -->
+          <g id="Month_Card_Octubre_2026" transform="translate(708, 0)">
+            <rect x="0" y="0" width="334" height="296" rx="12" ry="12" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+            <text x="167" y="26" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="800" fill="#0f172a" letter-spacing="0.6">OCTUBRE 2026</text>
+            <line x1="14" y1="36" x2="320" y2="36" stroke="#e2e8f0" stroke-width="1"/>
+
+            <g id="Octubre_Weekdays" transform="translate(16, 54)" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="800" fill="#64748b" text-anchor="middle">
+              <text x="19" y="0">L</text>
+              <text x="63" y="0">M</text>
+              <text x="107" y="0">X</text>
+              <text x="151" y="0">J</text>
+              <text x="195" y="0">V</text>
+              <text x="239" y="0">S</text>
+              <text x="283" y="0">D</text>
+            </g>
+
+            <g id="Octubre_Days_Matrix" transform="translate(16, 64)">
+              <rect x="132" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="151" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">1</text>
+              <rect x="176" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="195" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">2</text>
+              <rect x="220" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="239" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">3</text>
+              <rect x="264" y="0" width="38" height="34" rx="6" ry="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+              <text x="283" y="22" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="900" fill="#1d4ed8">4</text>
+            </g>
+          </g>
+
+        </g>
+
+        <!-- =================================================
+             BARRA INFERIOR DE ACCIONES DE RANGO (RangeActionBar)
+             ================================================= -->
+        <g id="Range_Action_Bar_Floating" transform="translate(20, 386)" filter="url(#shadow-floating)">
+          <rect x="0" y="0" width="1042" height="54" rx="14" ry="14" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>
+          
+          <!-- Info Izquierda -->
+          <text x="18" y="32" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="800" fill="#0f172a">📆 4 días seleccionados (07/09 al 10/09)</text>
+          
+          <!-- Pill KM Rango -->
+          <g id="Range_KM_Pill" transform="translate(285, 13)">
+            <rect x="0" y="0" width="178" height="28" rx="8" ry="8" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>
+            <text x="89" y="18" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#312e81">🛣️ 1.840 km (4 viajes)</text>
+          </g>
+
+          <!-- Input y Botones de Acción Derecha -->
+          <g id="Range_Actions_Controls" transform="translate(480, 11)">
+            <!-- Input Código -->
+            <rect x="0" y="0" width="128" height="32" rx="6" ry="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="10" y="20" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11" font-weight="500" fill="#94a3b8">Código (F, V, 1..35)</text>
+
+            <!-- Botón Asignar -->
+            <rect x="134" y="0" width="72" height="32" rx="6" ry="6" fill="#19407e"/>
+            <text x="170" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#ffffff">✓ Asignar</text>
+
+            <!-- Botón Día Activo -->
+            <rect x="216" y="0" width="78" height="32" rx="6" ry="6" fill="#2563eb"/>
+            <text x="255" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#ffffff">Día Activo</text>
+
+            <!-- Botón Franco (F) -->
+            <rect x="300" y="0" width="74" height="32" rx="6" ry="6" fill="#b6d7a8" stroke="#86efac" stroke-width="1"/>
+            <text x="337" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#1e293b">Franco (F)</text>
+
+            <!-- Botón Vacaciones (V) -->
+            <rect x="380" y="0" width="94" height="32" rx="6" ry="6" fill="#ffe599" stroke="#fde047" stroke-width="1"/>
+            <text x="427" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#1e293b">Vacaciones (V)</text>
+
+            <!-- Botón Licencia (E) -->
+            <rect x="480" y="0" width="74" height="32" rx="6" ry="6" fill="#fee2e2" stroke="#fca5a5" stroke-width="1"/>
+            <text x="517" y="20" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#991b1b">Licencia (E)</text>
+          </g>
+        </g>
+
+      </g>
+
+      <!-- =====================================================
+           BLOQUE 3: VENCIMIENTOS, OBSERVACIONES Y APTOS (DriverDocAccordion)
+           ===================================================== -->
+      <g id="Driver_Doc_Accordions" transform="translate(0, 712)">
+
+        <!-- 1. Acordeón Abierto: VENCIMIENTOS CHOFER (VENC.) -->
+        <g id="Accordion_Vencimientos_Open" filter="url(#shadow-sm)">
+          <rect x="0" y="0" width="1082" height="202" rx="16" ry="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          
+          <!-- Header Acordeón -->
+          <text x="20" y="28" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13.5" font-weight="900" fill="#0f172a">📄 VENCIMIENTOS CHOFER (VENC.) <tspan font-size="11.5" font-weight="600" fill="#64748b">(Periódico, Licencia, Cargas Peligrosas, Psicofísico)</tspan></text>
+          <text x="1054" y="28" text-anchor="end" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="#64748b">▲</text>
+          <line x1="0" y1="42" x2="1082" y2="42" stroke="#e2e8f0" stroke-width="1"/>
+
+          <!-- Grid de 4 Tarjetas de Documentación -->
+          <g id="Doc_Cards_Grid" transform="translate(20, 56)">
+            
+            <!-- Card 1: PERIÓDICO -->
+            <g id="Doc_Card_Periodico" transform="translate(0, 0)">
+              <rect x="0" y="0" width="248" height="86" rx="12" ry="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="12" y="24" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#0f172a">PERIÓDICO</text>
+              <rect x="172" y="10" width="64" height="20" rx="4" ry="4" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1"/>
+              <text x="204" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#065f46">VIGENTE</text>
+              
+              <rect x="12" y="40" width="190" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="22" y="60" font-family="'Roboto Mono', monospace" font-size="12.5" font-weight="700" fill="#0f172a">2027-04-18</text>
+              <rect x="208" y="40" width="28" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="222" y="60" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" fill="#19407e">💾</text>
+            </g>
+
+            <!-- Card 2: LICENCIA -->
+            <g id="Doc_Card_Licencia" transform="translate(264, 0)">
+              <rect x="0" y="0" width="248" height="86" rx="12" ry="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="12" y="24" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#0f172a">LICENCIA</text>
+              <rect x="172" y="10" width="64" height="20" rx="4" ry="4" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1"/>
+              <text x="204" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#065f46">VIGENTE</text>
+
+              <rect x="12" y="40" width="190" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="22" y="60" font-family="'Roboto Mono', monospace" font-size="12.5" font-weight="700" fill="#0f172a">2028-09-12</text>
+              <rect x="208" y="40" width="28" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="222" y="60" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" fill="#19407e">💾</text>
+            </g>
+
+            <!-- Card 3: CARGAS PELIGROSAS (POR VENCER) -->
+            <g id="Doc_Card_Cargas_Peligrosas" transform="translate(528, 0)">
+              <rect x="0" y="0" width="248" height="86" rx="12" ry="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="12" y="24" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#0f172a">CARGAS PEL.</text>
+              <rect x="156" y="10" width="80" height="20" rx="4" ry="4" fill="#fef3c7" stroke="#fde68a" stroke-width="1"/>
+              <text x="196" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#92400e">POR VENCER</text>
+
+              <rect x="12" y="40" width="190" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="22" y="60" font-family="'Roboto Mono', monospace" font-size="12.5" font-weight="700" fill="#0f172a">2026-11-02</text>
+              <rect x="208" y="40" width="28" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="222" y="60" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" fill="#19407e">💾</text>
+            </g>
+
+            <!-- Card 4: PSICOFÍSICO (VENCIDO) -->
+            <g id="Doc_Card_Psicofisico" transform="translate(794, 0)">
+              <rect x="0" y="0" width="248" height="86" rx="12" ry="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="12" y="24" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="11.5" font-weight="800" fill="#0f172a">PSICOFÍSICO</text>
+              <rect x="172" y="10" width="64" height="20" rx="4" ry="4" fill="#fee2e2" stroke="#fca5a5" stroke-width="1"/>
+              <text x="204" y="24" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10" font-weight="800" fill="#991b1b">VENCIDO</text>
+
+              <rect x="12" y="40" width="190" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="22" y="60" font-family="'Roboto Mono', monospace" font-size="12.5" font-weight="700" fill="#0f172a">2026-09-30</text>
+              <rect x="208" y="40" width="28" height="32" rx="6" ry="6" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+              <text x="222" y="60" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" fill="#19407e">💾</text>
+            </g>
+          </g>
+
+          <!-- Botón Guardar Todos -->
+          <g id="Btn_Guardar_Todos_Vencimientos" transform="translate(924, 154)">
+            <rect x="0" y="0" width="138" height="34" rx="10" ry="10" fill="url(#brand-grad)"/>
+            <text x="69" y="21" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="12" font-weight="800" fill="#ffffff">💾 GUARDAR TODOS</text>
+          </g>
+        </g>
+
+        <!-- 2. Acordeón: OBSERVACIONES -->
+        <g id="Accordion_Observaciones" transform="translate(0, 214)" filter="url(#shadow-sm)">
+          <rect x="0" y="0" width="1082" height="48" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="20" y="29" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="900" fill="#0f172a">📝 OBSERVACIONES</text>
+          <rect x="172" y="13" width="88" height="22" rx="11" ry="11" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="216" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="700" fill="#64748b">3 registradas</text>
+          <text x="1054" y="29" text-anchor="end" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="#64748b">▼</text>
+        </g>
+
+        <!-- 3. Acordeón: AVALADOS Y APTOS -->
+        <g id="Accordion_Avalados_Aptos" transform="translate(0, 274)" filter="url(#shadow-sm)">
+          <rect x="0" y="0" width="1082" height="48" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+          <text x="20" y="29" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="13" font-weight="900" fill="#0f172a">🩺 AVALADOS Y APTOS</text>
+          <rect x="190" y="13" width="72" height="22" rx="6" ry="6" fill="#ecfdf5" stroke="#a7f3d0" stroke-width="1"/>
+          <text x="226" y="28" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="10.5" font-weight="800" fill="#065f46">AVALADO</text>
+          <text x="1054" y="29" text-anchor="end" font-family="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif" font-size="14" font-weight="800" fill="#64748b">▼</text>
+        </g>
+
+      </g>
+
+    </g>
+
+  </g>
+</svg>

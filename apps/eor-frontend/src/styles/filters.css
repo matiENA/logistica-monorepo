@@ -1,0 +1,246 @@
+/* ==============================================================
+   🔍 SIDEBAR DE FILTROS MODULARES
+   ============================================================== */
+.filters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.75rem;
+}
+
+.filters-heading {
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-clear-filters {
+  font-size: 0.75rem;
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.filter-search-box {
+  position: relative;
+  width: 100%;
+}
+
+.filter-search-input {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.55rem 2.2rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+html.dark .filter-search-input {
+  border-color: var(--border-strong);
+}
+
+.filter-search-input:focus {
+  border-color: var(--primary);
+  background-color: var(--bg-surface);
+}
+
+.filter-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 1rem;
+}
+
+.filter-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* Chips de Selección (Servicio, Tipo) */
+.filter-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-chip-btn {
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.filter-chip-btn:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.filter-chip-btn.active {
+  background-color: var(--primary-solid);
+  border-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+}
+
+/* Botón Filtro Personal que Retorna */
+.btn-filter-retorno {
+  background-color: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+.btn-filter-retorno:hover {
+  background-color: #e0e7ff;
+  color: #312e81;
+}
+
+.btn-filter-retorno.active {
+  background-color: #4338ca;
+  color: #ffffff;
+  border-color: #3730a3;
+}
+
+html.dark .btn-filter-retorno {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+html.dark .btn-filter-retorno:hover {
+  background-color: rgba(99, 102, 241, 0.28);
+  color: #e0e7ff;
+}
+
+html.dark .btn-filter-retorno.active {
+  background-color: #4f46e5;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+/* Grilla 5x2 de Micro-Chips para Estado del Día */
+.filter-states-grid-5x2 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.filter-state-chip {
+  aspect-ratio: 1.2 / 1;
+  min-height: 33px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  padding: 0;
+}
+
+.filter-state-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-strong);
+}
+
+.filter-state-chip.active {
+  box-shadow: 0 0 0 2px var(--primary);
+  transform: scale(1.04);
+  font-weight: 900;
+}
+
+/* Variantes cromáticas individuales EOR */
+.filter-state-chip.chip-F { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border-color: var(--novedad-f-border); }
+.filter-state-chip.chip-FSF { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border: 1.5px dashed var(--novedad-f-border); }
+.filter-state-chip.chip-V { background-color: var(--novedad-v-bg); color: var(--novedad-v-text); border-color: var(--novedad-v-border); }
+.filter-state-chip.chip-VSF { background-color: var(--novedad-v-bg); color: var(--novedad-v-text); border: 1.5px dashed var(--novedad-v-border); }
+.filter-state-chip.chip-ACT { background-color: var(--novedad-act-bg); color: var(--novedad-act-text); border-color: var(--novedad-act-border); }
+
+.filter-state-chip.chip-E { background-color: var(--novedad-e-bg); color: var(--novedad-e-text); border-color: var(--novedad-e-border); }
+.filter-state-chip.chip-ART { background-color: var(--novedad-art-bg); color: var(--novedad-art-text); border-color: var(--novedad-art-border); }
+.filter-state-chip.chip-IND { background-color: var(--novedad-ind-bg); color: var(--novedad-ind-text); border-color: var(--novedad-ind-border); }
+.filter-state-chip.chip-S { background-color: var(--novedad-s-bg); color: var(--novedad-s-text); border-color: var(--novedad-s-border); }
+.filter-state-chip.chip-A { background-color: var(--novedad-a-bg); color: var(--novedad-a-text); border-color: var(--novedad-a-border); }
+
+/* Switch Toggle (Headless UI) */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.switch-label-text {
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.headless-switch {
+  position: relative;
+  display: inline-flex;
+  height: 24px;
+  width: 44px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  transition: background-color 0.2s ease-in-out;
+  background-color: var(--border-strong);
+}
+
+.headless-switch[data-checked] {
+  background-color: var(--primary-solid);
+}
+
+.headless-switch-thumb {
+  pointer-events: none;
+  display: inline-block;
+  height: 20px;
+  width: 20px;
+  transform: translateX(0);
+  border-radius: 9999px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease-in-out;
+}
+
+.headless-switch[data-checked] .headless-switch-thumb {
+  transform: translateX(20px);
+}

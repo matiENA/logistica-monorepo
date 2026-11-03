@@ -1,0 +1,462 @@
+{
+  "name": "Operativas Integradas - Cordillera, Movimientos & Disponibilidad (Cloud & Local)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "# 🚀 Central Operativa Integrada: Flotas, Ruteos, Cordillera & Polling Inteligente\n**Pipeline Unificado de Producción** | Módulos 1 al 7 + **Motor de Polling Inteligente (Gatekeeper + Merge)**\nSincronización automatizada entre *Ruteos* y *NOVIEMBRE 2026- Mov.Unidades y Choferes* con protección de cuota API.",
+        "height": 280,
+        "width": 1720,
+        "color": 6
+      },
+      "id": "b2eb8325-6419-40a1-8a37-235c49eb4ae5",
+      "name": "Banner: Lienzo Unificado Operativo",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        224,
+        -3008
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 🌐 ORQUESTADOR GLOBAL\nDisparador maestro para ejecutar **todas** las tareas del circuito operativo en lote con un solo clic.\n\n> 💡 **Uso:** Haz clic en *\"Test step\"* en el Disparador Maestro para correr la sincronización global de las tareas operativas de Noviembre (Polling en Capas + Cordillera + CONF. DE VIAJE + Disponibilidad).\n>\n> Cada carril individual también cuenta con su propio disparador manual aislado.",
+        "height": 2720,
+        "width": 330,
+        "color": 7
+      },
+      "id": "46700b3a-de52-489b-beca-9858c2de77a9",
+      "name": "Nota: Orquestador Global",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        -2560
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f7414b6b-d5b9-41df-860e-f136f26bdb52",
+      "name": "🚀 Disparador Maestro (Ejecutar Todo)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        272,
+        -1360
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🎨 TAREA 4: PINTAR DISPONIBILIDAD (VTV & HABILITACIONES)\n- **Origen:** Base Vencimientos + Configuración activa (`config.json`).\n- **Destino:** 33 Columnas `Dispo.` en Movimientos Mensual.\n- **Regla:** Pinta según vencimiento: 🔴 Rojo (<0 d, vencido), 🔵 Azul (<=10 d, próx. a vencer), ⬜ Normal (#F5F7FA). Protege intactas las cabeceras de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\diaria`\n- **Comando:** `node pintarDisponibilidad.js`",
+        "height": 340,
+        "width": 1350,
+        "color": 2
+      },
+      "id": "7e974e94-aaae-40d0-8912-4e6f61d8a929",
+      "name": "Nota: Tarea 4 - Pintar Disponibilidad",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        592,
+        -1136
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a9097c66-1ef2-4033-ae67-cb0ebb688d20",
+      "name": "⏰ Cron: Disponibilidad (Diario 06:00 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -928
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && node pintarDisponibilidad.js\""
+      },
+      "id": "1137b771-0746-4c99-8768-1233b590047b",
+      "name": "Ejecutar Pintado de Disponibilidad",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -1008
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst stdout = item.stdout || \"\";\nconst stderr = item.stderr || \"\";\nconst exitCode = item.exitCode ?? 0;\nconst lines = stdout.split(\"\\n\").map(l => l.trim()).filter(Boolean);\n\nreturn [{\n  json: {\n    tarea: \"Pintar Disponibilidad (VTV & Habilitaciones)\",\n    origen: \"base datos Uni QM\",\n    destino: \"Movimientos Unidades y Choferes\",\n    estado: exitCode === 0 ? \"EXITOSO\" : \"FALLIDO\",\n    exitCode,\n    resumen: lines.slice(-4).join(\" | \"),\n    logCompleto: stdout,\n    errores: stderr,\n    ejecutadoEn: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "61388bac-8d29-4b79-987c-04af3a593be9",
+      "name": "Resumen Pintar Disponibilidad",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -1008
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🏔️ TAREA 5: VIAJES CORDILLERA ➡️ SEGURIDA VIAL\n- **Origen:** Ruteos (`1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE`).\n- **Destino:** Pestaña `SEGURIDA VIAL` (Columnas contiguas A:V).\n- **Regla:** Viaje completo por TD (Col L) si al menos una parada tiene destino a Cordillera (21 localidades declaradas). Sincroniza 22 columnas ordenadas.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias`\n- **Comando:** `py -3.13 main.py --seguridad-vial`",
+        "height": 340,
+        "width": 1350
+      },
+      "id": "cec1a776-f58c-4eee-9b99-bff083831a56",
+      "name": "Nota: Tarea 5 - Viajes Cordillera",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        592,
+        -736
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "2ac2f3b7-54cd-4383-8767-31b33b3362cb",
+      "name": "⏰ Cron: Viajes Cordillera (Cada 10m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 main.py --seguridad-vial\""
+      },
+      "id": "e976d847-f690-42a7-9fe1-46b3d665af38",
+      "name": "Ejecutar Sync Viajes Cordillera",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst stdout = item.stdout || \"\";\nconst stderr = item.stderr || \"\";\nconst exitCode = item.exitCode ?? 0;\nconst lines = stdout.split(\"\\n\").map(l => l.trim()).filter(Boolean);\n\nreturn [{\n  json: {\n    tarea: \"Sincronización Viajes Cordillera ➡️ SEGURIDA VIAL\",\n    origen: \"Ruteos\",\n    destino: \"SEGURIDA VIAL\",\n    estado: exitCode === 0 ? \"EXITOSO\" : \"FALLIDO\",\n    exitCode,\n    resumen: lines.slice(-5).join(\" | \"),\n    logCompleto: stdout,\n    errores: stderr,\n    ejecutadoEn: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "dc670651-8446-4dc4-a873-edcfd6a2e29c",
+      "name": "Resumen Viajes Cordillera",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📋 TAREA 6: UTE CORDILLERA ➡️ CONF. DE VIAJE\n- **Origen:** Pestaña `UTE Cordillera Noviembre 26` (`1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU`).\n- **Destino:** Pestaña `CONF. DE VIAJE NOVIEMBRE 26` (desde fila 5, Cols A:J).\n- **Regla:** Viaje completo por TD (Col I) si contiene símbolo ⚠️ en Columna F (Marca Temp - Respuesta). Escribe 10 columnas limpias con cliente formateado.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias`\n- **Comando:** `py -3.13 main.py --conf-viaje`",
+        "height": 340,
+        "width": 1350,
+        "color": 6
+      },
+      "id": "4767aeb8-2451-4050-8a52-20b56c48d9a2",
+      "name": "Nota: Tarea 6 - CONF. DE VIAJE",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        592,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "bab48943-e9d3-44c3-b763-1246cc7cc76e",
+      "name": "⏰ Cron: CONF. DE VIAJE (Cada 10m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 main.py --conf-viaje\""
+      },
+      "id": "23b1ec3a-79b0-4696-a855-74d99ebc06e9",
+      "name": "Ejecutar Sync CONF. DE VIAJE",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst stdout = item.stdout || \"\";\nconst stderr = item.stderr || \"\";\nconst exitCode = item.exitCode ?? 0;\nconst lines = stdout.split(\"\\n\").map(l => l.trim()).filter(Boolean);\n\nreturn [{\n  json: {\n    tarea: \"Sincronización UTE Cordillera ➡️ CONF. DE VIAJE (Alerta ⚠️)\",\n    origen: \"UTE Cordillera Noviembre 26\",\n    destino: \"CONF. DE VIAJE NOVIEMBRE 26\",\n    criterio: \"Columna F con símbolo ⚠️\",\n    estado: exitCode === 0 ? \"EXITOSO\" : \"FALLIDO\",\n    exitCode,\n    resumen: lines.slice(-5).join(\" | \"),\n    logCompleto: stdout,\n    errores: stderr,\n    ejecutadoEn: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f76cc566-88ca-4380-a6b4-6a0fa5609141",
+      "name": "Resumen CONF. DE VIAJE",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🧹 TAREA 7: LIMPIEZA DE VACÍO Y RESET (MOVIMIENTOS)\n- **Destino:** Planilla Mensual Movimientos (`1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc`).\n- **Propósito:** Herramienta administrativa para limpiar o resetear encabezados de VACÍO y bordes en hover notes ante arreglos de sheets o corrección de falsos positivos. Preserva intacto el tracking de Col H.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\diaria`\n- **Comando:** `py -3.13 limpiar_vacio.py --apply`\n\n*⚠️ Este carril posee únicamente DISPARADOR MANUAL INDIVIDUAL para evitar limpiezas accidentales no supervisadas. No está vinculado a ningún cron automático ni al orquestador general.*",
+        "height": 340,
+        "width": 1350,
+        "color": 3
+      },
+      "id": "7400727b-92a4-41cd-b7f9-239a171d06a2",
+      "name": "Nota: Tarea 7 - Limpieza de VACÍO (Reset / Cleanup)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        512,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 limpiar_vacio.py --apply\""
+      },
+      "id": "89e26722-95c1-426d-be8c-c7fad076e818",
+      "name": "Ejecutar Limpieza VACIO",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst stdout = item.stdout || \"\";\nconst stderr = item.stderr || \"\";\nconst exitCode = item.exitCode ?? 0;\nconst lines = stdout.split(\"\\n\").map(l => l.trim()).filter(Boolean);\n\nreturn [{\n  json: {\n    tarea: \"Limpieza y Reseteo de VACÍO / Bordes\",\n    destino: \"Movimientos Unidades y Choferes\",\n    estado: exitCode === 0 ? \"EXITOSO\" : \"FALLIDO\",\n    exitCode,\n    resumen: lines.slice(-4).join(\" | \"),\n    logCompleto: stdout,\n    errores: stderr,\n    ejecutadoEn: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "5c29b972-7c5c-459b-bd19-da22d6b5b10a",
+      "name": "Resumen Limpieza VACIO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⭐ Motor de Polling Inteligente Unificado en Capas (Gatekeeper + Capas 1, 2, 3)\n**Fase 1 (Gatekeeper)**: Chequeo ultraliviano SHA-256 de Columna X y Movimientos en ~2s (2 lecturas, 0 escrituras).\n**Fase 2 (Motor Unificado en Capas)**: Si detecta cambios, ejecuta en un único recorrido atómico:\n- Capa 1: Tracking de Col H en hover notes.\n- Capa 2: VACÍO desde Col X (soporta fechas completas y sin hora) + bordes SOLID_MEDIUM.\n- Capa 3: Seguimiento #9fc5e8 (sin nuevo TD) con cleanup automático.\n- Commit: 1 solo batchUpdate atómico consolidado en ~3-4s.",
+        "height": 270,
+        "width": 1150,
+        "color": 6
+      },
+      "id": "1d702d56-b10b-478b-aa9e-97d3f105cae8",
+      "name": "Nota: Polling Inteligente Unificado en Capas",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        592,
+        -2304
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "cee24e78-01ae-44c2-a8a8-58afa0b3e341",
+      "name": "⏰ Cron: Polling Unificado en Capas (Cada 2m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -2112
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 poll_sync_vacio.py --apply --borders\""
+      },
+      "id": "bdcea852-fb63-4296-a2f6-2e27eb150adc",
+      "name": "Ejecutar Polling Inteligente VACIO + Seguimiento",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        -2176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst stdout = item.stdout || \"\";\nconst stderr = item.stderr || \"\";\nconst exitCode = item.exitCode ?? 0;\nconst lines = stdout.split(\"\\n\").map(l => l.trim()).filter(Boolean);\n\nconst sinCambios = stdout.includes(\"GATEKEEPER\") || stdout.includes(\"Sin cambios\");\nconst fase2 = stdout.includes(\"FASE 2\");\n\nreturn [{\n  json: {\n    motor: \"Polling Inteligente (Gatekeeper + Merge)\",\n    estado: exitCode === 0 ? \"EXITOSO\" : \"FALLIDO\",\n    modo: sinCambios ? \"FAST-GATE (Sin cambios, omitido)\" : (fase2 ? \"SYNC COMPLETO (Cambio detectado)\" : \"EJECUTADO\"),\n    exitCode,\n    resumen: lines.slice(-5).join(\" | \"),\n    logCompleto: stdout,\n    errores: stderr,\n    ejecutadoEn: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f17fc949-0c03-4b21-a29a-1b3391f7902c",
+      "name": "Resumen Polling Inteligente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -2176
+      ]
+    }
+  ],
+  "connections": {
+    "⏰ Cron: Disponibilidad (Diario 06:00 AM)": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Pintado de Disponibilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Pintado de Disponibilidad": {
+      "main": [
+        [
+          {
+            "node": "Resumen Pintar Disponibilidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Cron: Viajes Cordillera (Cada 10m)": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Sync Viajes Cordillera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Sync Viajes Cordillera": {
+      "main": [
+        [
+          {
+            "node": "Resumen Viajes Cordillera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Cron: CONF. DE VIAJE (Cada 10m)": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Sync CONF. DE VIAJE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Sync CONF. DE VIAJE": {
+      "main": [
+        [
+          {
+            "node": "Resumen CONF. DE VIAJE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚀 Disparador Maestro (Ejecutar Todo)": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Polling Inteligente VACIO + Seguimiento",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ejecutar Sync Viajes Cordillera",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ejecutar Sync CONF. DE VIAJE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Limpieza VACIO": {
+      "main": [
+        [
+          {
+            "node": "Resumen Limpieza VACIO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar Polling Inteligente VACIO + Seguimiento": {
+      "main": [
+        [
+          {
+            "node": "Resumen Polling Inteligente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏰ Cron: Polling Unificado en Capas (Cada 2m)": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar Polling Inteligente VACIO + Seguimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

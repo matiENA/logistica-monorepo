@@ -1,0 +1,95 @@
+# ==============================================================
+# 🚀 BLUEPRINT RENDER — MONOREPO LOGÍSTICA
+# Web Service Único: srv-db4302u0tbcc73ctq4ng (diaria-operativas)
+# Static Sites: dash-aa1f y eor
+# ==============================================================
+
+services:
+  # ------------------------------------------------------------
+  # 1. SERVICIO MAESTRO (Docker Multi-Runtime Python + Node.js)
+  # ------------------------------------------------------------
+  - type: web
+    name: diaria-operativas
+    env: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: services/master-service/Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: TZ
+        value: America/Argentina/Buenos_Aires
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      # Conexión Directa a PostgreSQL (Pooler puerto 6543)
+      - key: DATABASE_URL
+        sync: false
+      - key: PG_MAX_CONNECTIONS
+        value: 5
+      - key: PG_IDLE_TIMEOUT
+        value: 10000
+      - key: KM_RAM_DIAS
+        value: 60
+      # Google Sheets & Credenciales
+      - key: ID_SPREADSHEET_MASTER
+        value: 1eQ9Y5diL5fwxYTxvseNgZJFbX-lSUQ13axbp3cLiqPc
+      - key: ID_SHEET_MOVIMIENTOS
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: MES_MOVIMIENTOS_ID
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: SHEET_KM_ID
+        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+      - key: DEFAULT_RUTEOS_ID
+        value: 1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE
+      - key: CONF_SPREADSHEET_ID
+        value: 1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU
+      - key: CONF_SOURCE_SHEET_NAME
+        value: "UTE Cordillera Noviembre 26"
+      - key: CONF_TARGET_SHEET_NAME
+        value: "CONF. DE VIAJE NOVIEMBRE 26"
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TELEGRAM_NOTIFY_ALL
+        value: "false"
+
+  # ------------------------------------------------------------
+  # 2. FRONTEND DASH (Static Site — React 19 / Vite)
+  # ------------------------------------------------------------
+  - type: web
+    name: dash
+    runtime: static
+    rootDir: apps/dash-frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://diaria-operativas.onrender.com
+      - key: VITE_SOCKET_URL
+        value: https://diaria-operativas.onrender.com
+
+  # ------------------------------------------------------------
+  # 3. FRONTEND EOR / DIAGRAMAS (Static Site — React / Vite)
+  # ------------------------------------------------------------
+  - type: web
+    name: eor
+    runtime: static
+    rootDir: apps/eor-frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://diaria-operativas.onrender.com

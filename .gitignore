@@ -1,0 +1,39 @@
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Archivos de entorno y credenciales locales
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+ute-logistica-key.json
+*.sqlite-wal
+*.sqlite-shm
+
+# Builds y temporales
+dist/
+build/
+.cache/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Reportes generados locales
+reportes/*.xlsx
+reportes/*.json
+last_sync_result.json
+last_sync_conf_viaje.json
+last_poll_state.json

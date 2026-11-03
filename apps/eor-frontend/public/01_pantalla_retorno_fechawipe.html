@@ -1,0 +1,3878 @@
+<!DOCTYPE html>
+<html lang="es" class="dark"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="referrer" content="no-referrer">
+  <title>EOR - Personal que Retorna (Fecha Wipe)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=Roboto+Mono:wght@500;700;800;900&display=swap" rel="stylesheet">
+  <style id="eor-bundled-styles">
+
+/* === theme.css === */
+:root {
+  color-scheme: light;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Roboto Mono', monospace;
+
+  /* Colores Principales */
+  --primary: #19407e;
+  --primary-hover: #133365;
+  --primary-dark: #133365;
+  --primary-solid: #19407e;
+  --primary-solid-hover: #133365;
+  --on-primary-solid: #ffffff;
+  --primary-light: #eef4ff;
+  --accent: #4f46e5;
+  --accent-light: #e0e7ff;
+  --accent-text: #4338ca;
+  
+  /* Estados Operativos */
+  --status-circulando: #059669;
+  --status-circulando-bg: #ecfdf5;
+  --status-disponible: #2563eb;
+  --status-disponible-bg: #eff6ff;
+  --status-taller: #d97706;
+  --status-taller-bg: #fffbeb;
+  --status-baja: #dc2626;
+  --status-baja-bg: #fef2f2;
+  
+  /* Superficies y Fondos Modo Claro */
+  --bg-app: #f1f5f9;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #ffffff;
+  --bg-surface-muted: #f8fafc;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  
+  /* Textos */
+  --text-main: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  /* Sombras */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* ==============================================================
+     🎨 NOVEDADES Y ESTADOS DE DIAGRAMA (EOR DESIGN SYSTEM)
+     ============================================================== */
+  --novedad-f: #3b82f6;
+  --novedad-f-bg: #eff6ff;
+  --novedad-f-text: #1d4ed8;
+  --novedad-f-border: #bfdbfe;
+
+  --novedad-e: #f43f5e;
+  --novedad-e-bg: #ffe4e6;
+  --novedad-e-text: #9f1239;
+  --novedad-e-border: #fecdd3;
+
+  --novedad-v: #10b981;
+  --novedad-v-bg: #ecfdf5;
+  --novedad-v-text: #065f46;
+  --novedad-v-border: #a7f3d0;
+
+  --novedad-act: #059669;
+  --novedad-act-bg: #f0fdf4;
+  --novedad-act-text: #166534;
+  --novedad-act-border: #bbf7d0;
+
+  --novedad-s: #f97316;
+  --novedad-s-bg: #fff7ed;
+  --novedad-s-text: #9a3412;
+  --novedad-s-border: #fed7aa;
+
+  --novedad-a: #ef4444;
+  --novedad-a-bg: #fef2f2;
+  --novedad-a-text: #991b1b;
+  --novedad-a-border: #fecaca;
+
+  --novedad-art: #8b5cf6;
+  --novedad-art-bg: #f5f3ff;
+  --novedad-art-text: #5b21b6;
+  --novedad-art-border: #ddd6fe;
+
+  --novedad-ind: #64748b;
+  --novedad-ind-bg: #f1f5f9;
+  --novedad-ind-text: #334155;
+  --novedad-ind-border: #cbd5e1;
+}
+
+/* 🌙 MODO OSCURO */
+html.dark {
+  color-scheme: dark;
+  --primary: #60a5fa;
+  --primary-hover: #93c5fd;
+  --primary-dark: #1d4ed8;
+  --primary-solid: #2563eb;
+  --primary-solid-hover: #1d4ed8;
+  --on-primary-solid: #ffffff;
+  --primary-light: #1e293b;
+  --accent: #818cf8;
+  --accent-light: #312e81;
+  --accent-text: #c7d2fe;
+
+  --bg-app: #0b0f19;
+  --bg-surface: #111827;
+  --bg-surface-elevated: #1f2937;
+  --bg-surface-muted: #162032;
+  --border-subtle: #334155;
+  --border-strong: #64748b;
+
+  --text-main: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-inverse: #0f172a;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+
+  /* 🌙 Novedades en Modo Oscuro */
+  --novedad-f-bg: rgba(59, 130, 246, 0.18);
+  --novedad-f-text: #93c5fd;
+  --novedad-f-border: rgba(96, 165, 250, 0.35);
+
+  --novedad-e-bg: rgba(244, 63, 94, 0.18);
+  --novedad-e-text: #fecdd3;
+  --novedad-e-border: rgba(251, 113, 133, 0.35);
+
+  --novedad-v-bg: rgba(16, 185, 129, 0.18);
+  --novedad-v-text: #6ee7b7;
+  --novedad-v-border: rgba(52, 211, 153, 0.35);
+
+  --novedad-act-bg: rgba(5, 150, 105, 0.18);
+  --novedad-act-text: #86efac;
+  --novedad-act-border: rgba(34, 197, 94, 0.35);
+
+  --novedad-s-bg: rgba(249, 115, 22, 0.18);
+  --novedad-s-text: #fed7aa;
+  --novedad-s-border: rgba(251, 146, 60, 0.35);
+
+  --novedad-a-bg: rgba(239, 68, 68, 0.20);
+  --novedad-a-text: #fca5a5;
+  --novedad-a-border: rgba(248, 113, 113, 0.40);
+
+  --novedad-art-bg: rgba(139, 92, 246, 0.18);
+  --novedad-art-text: #c4b5fd;
+  --novedad-art-border: rgba(167, 139, 250, 0.35);
+
+  --novedad-ind-bg: rgba(100, 116, 139, 0.20);
+  --novedad-ind-text: #cbd5e1;
+  --novedad-ind-border: rgba(148, 163, 184, 0.35);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* === layout.css === */
+/* ==============================================================
+   🧭 HEADER Y NAVEGACIÓN PRINCIPAL (6 MÓDULOS)
+   ============================================================== */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  backdrop-filter: blur(8px);
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, var(--primary-solid) 0%, #2563eb 100%);
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  font-weight: 800;
+  font-size: 1.1rem;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.brand-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+  line-height: 1.1;
+}
+
+.brand-subtitle {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Selector de Módulos (Tabs) */
+.nav-modules {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-surface-muted);
+  padding: 0.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  gap: 0.25rem;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.nav-tab-btn {
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.nav-tab-btn:hover {
+  color: var(--text-main);
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+html.dark .nav-tab-btn:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.nav-tab-btn.active {
+  background-color: var(--bg-surface);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+  font-weight: 800;
+}
+
+.nav-badge-pill {
+  padding: 0.1rem 0.45rem;
+  background-color: #dc2626;
+  color: #ffffff;
+  border-radius: var(--radius-full);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+/* Acciones a la derecha del Header */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.btn-icon-square {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.btn-icon-square:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.btn-mobile-filters {
+  display: none;
+  padding: 0.45rem 0.8rem;
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 700;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-logout-icon {
+  background: none;
+  border: none;
+  color: #dc2626;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0.15rem;
+  margin-left: 0.2rem;
+}
+
+html.dark .btn-logout-icon {
+  color: #f87171;
+}
+
+/* ==============================================================
+   📐 ESTRUCTURA DE 2 COLUMNAS (WIREFRAME LO-FI)
+   ============================================================== */
+.wireframe-container {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr 310px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.cards-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.filters-column {
+  position: sticky;
+  top: 84px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* RESPONSIVE: En móviles (< 960px) la columna de filtros se oculta y pasa a Drawer */
+@media (max-width: 960px) {
+  .wireframe-container {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+  .filters-column.desktop-only {
+    display: none;
+  }
+  .btn-mobile-filters {
+    display: flex;
+  }
+  .app-header {
+    padding: 0.75rem 1rem;
+  }
+}
+
+/* ==============================================================
+   🗂️ DRAWER MÓVIL (HEADLESS UI DIALOG)
+   ============================================================== */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  transition: opacity 0.25s ease;
+}
+
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 85%;
+  max-width: 360px;
+  background-color: var(--bg-surface);
+  z-index: 51;
+  padding: 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  box-shadow: var(--shadow-lg);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.75rem;
+}
+
+.drawer-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+/* === cards.css === */
+/* ==============================================================
+   💳 CARDS DIARIAS (FEED PRINCIPAL)
+   ============================================================== */
+.cards-feed-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.daily-card-row {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.15rem 1.4rem;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.25rem;
+  align-items: center;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.daily-card-row:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.daily-card-row.card-resolved {
+  opacity: 0.65;
+  background-color: var(--bg-surface-muted);
+}
+
+/* Indicador lateral de color según tipo de novedad */
+.card-indicator-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+}
+
+.type-LIBRES { background-color: #00e5ff; }
+.type-CERTIFICACION_UNIDAD { background-color: #f59e0b; }
+.type-REPARACION { background-color: #6366f1; }
+.type-BAJA_DIAGRAMA { background-color: #ef4444; }
+.type-ESTADO_DEMORA { background-color: #d97706; }
+.type-EXAMEN_CHOFER { background-color: #10b981; }
+.type-EN_SERVICIO { background-color: #3b82f6; }
+.type-OTRO { background-color: #94a3b8; }
+
+/* Columna Izquierda: Badge de Tipo & Fecha */
+.card-left-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 140px;
+}
+
+.card-type-chip {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  width: fit-content;
+}
+
+.chip-LIBRES { background: rgba(0, 229, 255, 0.15); color: #0e7490; }
+.chip-CERTIFICACION_UNIDAD { background: rgba(245, 158, 11, 0.15); color: #92400e; }
+.chip-REPARACION { background: rgba(99, 102, 241, 0.15); color: #4338ca; }
+.chip-BAJA_DIAGRAMA { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+.chip-ESTADO_DEMORA { background: rgba(217, 119, 6, 0.15); color: #92400e; }
+.chip-EXAMEN_CHOFER { background: rgba(16, 185, 129, 0.15); color: #065f46; }
+.chip-EN_SERVICIO { background: rgba(59, 130, 246, 0.15); color: #1d4ed8; }
+.chip-OTRO { background: rgba(148, 163, 184, 0.15); color: #475569; }
+
+html.dark .chip-LIBRES { background: rgba(0, 229, 255, 0.16); color: #67e8f9; }
+html.dark .chip-CERTIFICACION_UNIDAD { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+html.dark .chip-REPARACION { background: rgba(99, 102, 241, 0.18); color: #c7d2fe; }
+html.dark .chip-BAJA_DIAGRAMA { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+html.dark .chip-ESTADO_DEMORA { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+html.dark .chip-EXAMEN_CHOFER { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+html.dark .chip-EN_SERVICIO { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+html.dark .chip-OTRO { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+
+.card-date-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Columna Central: Jerarquía de Datos */
+.card-body-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.card-driver-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-equipment-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.equip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.equip-item strong {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.card-detail-box {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  background-color: var(--bg-surface-muted);
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border-strong);
+  margin-top: 0.25rem;
+}
+
+/* Columna Derecha: Acciones */
+.card-actions-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.btn-resolve-toggle {
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-resolve-toggle.pending {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+html.dark .btn-resolve-toggle.pending {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.btn-resolve-toggle.pending:hover {
+  background-color: #047857;
+  color: #ffffff;
+}
+
+html.dark .btn-resolve-toggle.pending:hover {
+  background-color: #10b981;
+  color: #0f172a;
+}
+
+.btn-resolve-toggle.resolved {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.btn-resolve-toggle.resolved:hover {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+html.dark .btn-resolve-toggle.resolved:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* Centinela de Scroll Infinito */
+.infinite-scroll-sentinel {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.spinner-pulse {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Botón Flotante para Crear Novedad (FAB) */
+.btn-fab-add {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--primary-solid) 0%, #2563eb 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+  z-index: 30;
+  transition: transform 0.2s ease;
+}
+
+.btn-fab-add:hover {
+  transform: scale(1.08) rotate(90deg);
+}
+
+@media (max-width: 640px) {
+  .daily-card-row {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+  .card-actions-col {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    align-items: center;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.5rem;
+  }
+}
+
+/* ==============================================================
+   🚀 GRILLA OPERATIVA DIARIA DE CHOFERES (LEGACY MODERNIZADO)
+   ============================================================== */
+
+/* Barra Superior de Controles y Fecha Contexto */
+.daily-controls-bar {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.daily-date-control-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.25rem 0.5rem;
+}
+
+.btn-date-nav {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-date-nav:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.date-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.35rem;
+}
+
+.date-icon {
+  color: var(--primary);
+}
+
+.date-picker-input {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--text-main);
+  outline: none;
+  cursor: pointer;
+}
+
+.btn-today-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-today-pill:hover {
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+}
+
+.select-service-wrapper {
+  min-width: 170px;
+}
+
+.select-service-input {
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 700;
+  outline: none;
+  cursor: pointer;
+}
+
+html.dark .select-service-input {
+  border-color: var(--border-strong);
+}
+
+.alerts-filter-group {
+  display: flex;
+  align-items: center;
+}
+
+.btn-alert-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-alert-filter:hover {
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.btn-alert-filter.active {
+  background-color: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+html.dark .btn-alert-filter:hover {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fde68a;
+}
+
+html.dark .btn-alert-filter.active {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+}
+
+.dot-alert-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+.daily-count-badge {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: var(--bg-surface-muted);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Tarjeta Diaria de Conductor */
+.daily-driver-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.daily-driver-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.daily-card-main-row {
+  padding: 0.85rem 1.25rem;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+  align-items: center;
+  gap: 1.25rem;
+}
+
+@media (max-width: 1300px) {
+  .daily-card-main-row {
+    gap: 1rem;
+  }
+}
+
+/* Bloque Izquierdo: Avatar + Meta */
+.daily-card-driver-info {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: max-content;
+}
+
+.daily-card-avatar-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--border-subtle);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+  background-color: var(--bg-surface-muted);
+}
+
+.daily-card-avatar-wrap:hover {
+  transform: scale(1.06);
+  border-color: var(--primary);
+}
+
+.daily-card-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+
+.daily-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.daily-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+}
+
+.daily-card-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.daily-card-name:hover {
+  color: var(--primary);
+}
+
+.btn-copy-mini {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-mini:hover {
+  color: var(--text-main);
+  background-color: var(--border-subtle);
+}
+
+.daily-card-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chip-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.chip-service {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+
+html.dark .chip-service {
+  background-color: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+
+.chip-ute {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  font-family: var(--font-mono);
+}
+
+html.dark .chip-ute {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.btn-whatsapp-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #86efac;
+  padding: 0 0.45rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .btn-whatsapp-mini {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.btn-whatsapp-mini:hover {
+  background-color: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+html.dark .btn-whatsapp-mini:hover {
+  background-color: #10b981;
+  color: #0f172a;
+  border-color: #10b981;
+}
+
+.btn-whatsapp-mini:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Bloque Central: Unidad Asignada */
+.daily-card-unit-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+  justify-self: center;
+}
+
+.unit-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-muted);
+  border: 1px dashed #94a3b8;
+  border-radius: var(--radius-sm, 4px);
+  padding: 0 0.55rem;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .unit-badge-pill {
+  background-color: #1e293b;
+  border-color: #64748b;
+}
+
+.unit-badge-pill:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+html.dark .unit-badge-pill:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+}
+
+.unit-badge-pill:hover .unit-val {
+  color: #1d4ed8;
+}
+
+html.dark .unit-badge-pill:hover .unit-val {
+  color: #93c5fd;
+}
+
+.unit-badge-pill:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.unit-badge-pill.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+}
+
+html.dark .unit-badge-pill.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+.unit-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.unit-val {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+.btn-assign-gear-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+html.dark .btn-assign-gear-mini {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+.btn-assign-gear-mini:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background-color: #eff6ff;
+}
+
+html.dark .btn-assign-gear-mini:hover {
+  border-color: #60a5fa;
+  color: #93c5fd;
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+.btn-assign-gear-mini:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.btn-assign-unit-dashed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  gap: 0.35rem;
+  padding: 0 0.65rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.72rem;
+  font-weight: 800;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px dashed #3b82f6;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .btn-assign-unit-dashed {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: #60a5fa;
+}
+
+.btn-assign-unit-dashed:hover {
+  background-color: #dbeafe;
+  border-color: #1d4ed8;
+  color: #1e40af;
+}
+
+html.dark .btn-assign-unit-dashed:hover {
+  background-color: rgba(59, 130, 246, 0.25);
+  border-color: #93c5fd;
+  color: #bfdbfe;
+}
+
+.btn-assign-unit-dashed:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ==============================================================
+   📋 EASYCOPY LEGACY SYSTEM (Badge dashed 1px, WCAG AA)
+   ============================================================== */
+.badge-easycopy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px dashed #94a3b8;
+  background-color: #f8fafc;
+  color: #1e293b;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+html.dark .badge-easycopy {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  border-color: #64748b;
+}
+
+.badge-easycopy:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+
+html.dark .badge-easycopy:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+.badge-easycopy:active {
+  transform: scale(0.97);
+}
+
+.badge-easycopy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-easycopy .easycopy-icon {
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.badge-easycopy:hover .easycopy-icon {
+  opacity: 1;
+}
+
+.badge-easycopy.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .badge-easycopy.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+.badge-easycopy-name {
+  border: 1px dashed #94a3b8;
+  background-color: #f8fafc;
+  border-radius: var(--radius-sm, 4px);
+  height: 28px;
+  padding: 0 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-easycopy-name {
+  background-color: #1e293b;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.badge-easycopy-name:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+}
+
+html.dark .badge-easycopy-name:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+.badge-easycopy-name:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-easycopy-name.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .badge-easycopy-name.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+/* Bloque Derecho: Alertas + Badge de Estado + Toggle */
+.daily-card-right-box {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-left: auto;
+  justify-self: end;
+}
+
+.daily-card-alerts {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+/* Badge Legacy: Retorna HOY / Vuelve en Xd */
+.badge-retorno-legacy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.68rem;
+  font-weight: 800;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #a5b4fc;
+  box-shadow: 0 1px 2px rgba(55, 48, 163, 0.08);
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  user-select: none;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-retorno-legacy {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.alert-mini-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+/* WCAG Compliant Alert Colors (>= 4.5:1 ratio) */
+.alert-mini-pill.alert-red {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .alert-mini-pill.alert-red {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.alert-mini-pill.alert-amber {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+html.dark .alert-mini-pill.alert-amber {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.daily-km-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 22px;
+  background-color: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.68rem;
+  font-weight: 800;
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.1);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .daily-km-badge {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.daily-km-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.daily-km-val {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.daily-km-hr {
+  font-size: 0.62rem;
+  background-color: #ffffff;
+  color: #4338ca;
+  border: 1px solid #e0e7ff;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+html.dark .daily-km-hr {
+  background-color: #1e1b4b;
+  color: #c7d2fe;
+  border-color: #4338ca;
+}
+
+/* Badge del Estado del Día (Fatiga 1..35, F, V, IND) */
+.daily-day-badge {
+  min-width: 58px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.4rem;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.daily-day-badge.day-badge-franco {
+  background-color: #b6d7a8;
+  color: #14532d;
+  border: 1px solid #86efac;
+}
+
+.daily-day-badge.day-badge-vacaciones {
+  background-color: #ffe599;
+  color: #78350f;
+  border: 1px solid #fde047;
+}
+
+.daily-day-badge.day-badge-licencia {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.daily-day-badge.day-badge-operativo {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 2px solid #3b82f6;
+  font-weight: 800;
+}
+
+.daily-day-badge.day-badge-operativo.fatiga-warn {
+  background-color: #fff7ed;
+  color: #c2410c;
+  border: 2.5px solid #f97316;
+  font-weight: 900;
+}
+
+.daily-day-badge.day-badge-operativo.fatiga-crit {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 2.5px solid #ef4444;
+  font-weight: 900;
+}
+
+html.dark .daily-day-badge.day-badge-franco {
+  background-color: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-vacaciones {
+  background-color: rgba(234, 179, 8, 0.18);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-licencia {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-operativo {
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 2px solid rgba(59, 130, 246, 0.5);
+}
+
+html.dark .daily-day-badge.day-badge-operativo.fatiga-warn {
+  background-color: rgba(249, 115, 22, 0.2);
+  color: #fdba74;
+  border: 2.5px solid #f97316;
+}
+
+html.dark .daily-day-badge.day-badge-operativo.fatiga-crit {
+  background-color: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 2.5px solid #ef4444;
+}
+
+.daily-day-badge-val {
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-family: var(--font-mono);
+}
+
+.daily-day-badge-date {
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+
+.btn-card-accordion-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.35rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-card-accordion-toggle:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+/* Panel Desplegable Acordeón */
+.daily-card-expanded-body {
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  padding: 1rem 1.25rem;
+}
+
+.daily-expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.expanded-section-box {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+}
+
+.expanded-box-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin: 0 0 0.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.35rem;
+}
+
+.expanded-doc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.expanded-doc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.expanded-action-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100px;
+  padding: 1rem 0.5rem;
+}
+
+.expanded-action-box .btn-ver-ficha-individual {
+  width: 100%;
+  max-width: 220px;
+}
+
+.btn-ver-ficha-individual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-ver-ficha-individual:hover {
+  background-color: var(--primary-solid-hover);
+}
+
+/* Esqueleto de Carga */
+.daily-driver-skeleton {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.skeleton-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+.skeleton-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeleton-bar {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+.skeleton-badge {
+  width: 58px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.btn-load-more-drivers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.5rem;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-load-more-drivers:hover {
+  background-color: var(--bg-surface-muted);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.daily-empty-box {
+  background-color: var(--bg-surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .daily-card-main-row {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  .daily-card-unit-box {
+    justify-self: start;
+  }
+  .daily-card-right-box {
+    margin-left: 0;
+    justify-content: space-between;
+    width: 100%;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.5rem;
+  }
+}
+
+
+/* === filters.css === */
+/* ==============================================================
+   🔍 SIDEBAR DE FILTROS MODULARES
+   ============================================================== */
+.filters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.75rem;
+}
+
+.filters-heading {
+  font-size: 0.95rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-clear-filters {
+  font-size: 0.75rem;
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.filter-search-box {
+  position: relative;
+  width: 100%;
+}
+
+.filter-search-input {
+  width: 100%;
+  padding: 0.55rem 0.75rem 0.55rem 2.2rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+html.dark .filter-search-input {
+  border-color: var(--border-strong);
+}
+
+.filter-search-input:focus {
+  border-color: var(--primary);
+  background-color: var(--bg-surface);
+}
+
+.filter-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 1rem;
+}
+
+.filter-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.filter-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* Chips de Selección (Servicio, Tipo) */
+.filter-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-chip-btn {
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.filter-chip-btn:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.filter-chip-btn.active {
+  background-color: var(--primary-solid);
+  border-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+}
+
+/* Botón Filtro Personal que Retorna */
+.btn-filter-retorno {
+  background-color: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+.btn-filter-retorno:hover {
+  background-color: #e0e7ff;
+  color: #312e81;
+}
+
+.btn-filter-retorno.active {
+  background-color: #4338ca;
+  color: #ffffff;
+  border-color: #3730a3;
+}
+
+html.dark .btn-filter-retorno {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+html.dark .btn-filter-retorno:hover {
+  background-color: rgba(99, 102, 241, 0.28);
+  color: #e0e7ff;
+}
+
+html.dark .btn-filter-retorno.active {
+  background-color: #4f46e5;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+/* Grilla 5x2 de Micro-Chips para Estado del Día */
+.filter-states-grid-5x2 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.filter-state-chip {
+  aspect-ratio: 1.2 / 1;
+  min-height: 33px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  padding: 0;
+}
+
+.filter-state-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-strong);
+}
+
+.filter-state-chip.active {
+  box-shadow: 0 0 0 2px var(--primary);
+  transform: scale(1.04);
+  font-weight: 900;
+}
+
+/* Variantes cromáticas individuales EOR */
+.filter-state-chip.chip-F { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border-color: var(--novedad-f-border); }
+.filter-state-chip.chip-FSF { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border: 1.5px dashed var(--novedad-f-border); }
+.filter-state-chip.chip-V { background-color: var(--novedad-v-bg); color: var(--novedad-v-text); border-color: var(--novedad-v-border); }
+.filter-state-chip.chip-VSF { background-color: var(--novedad-v-bg); color: var(--novedad-v-text); border: 1.5px dashed var(--novedad-v-border); }
+.filter-state-chip.chip-ACT { background-color: var(--novedad-act-bg); color: var(--novedad-act-text); border-color: var(--novedad-act-border); }
+
+.filter-state-chip.chip-E { background-color: var(--novedad-e-bg); color: var(--novedad-e-text); border-color: var(--novedad-e-border); }
+.filter-state-chip.chip-ART { background-color: var(--novedad-art-bg); color: var(--novedad-art-text); border-color: var(--novedad-art-border); }
+.filter-state-chip.chip-IND { background-color: var(--novedad-ind-bg); color: var(--novedad-ind-text); border-color: var(--novedad-ind-border); }
+.filter-state-chip.chip-S { background-color: var(--novedad-s-bg); color: var(--novedad-s-text); border-color: var(--novedad-s-border); }
+.filter-state-chip.chip-A { background-color: var(--novedad-a-bg); color: var(--novedad-a-text); border-color: var(--novedad-a-border); }
+
+/* Switch Toggle (Headless UI) */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.switch-label-text {
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.headless-switch {
+  position: relative;
+  display: inline-flex;
+  height: 24px;
+  width: 44px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  transition: background-color 0.2s ease-in-out;
+  background-color: var(--border-strong);
+}
+
+.headless-switch[data-checked] {
+  background-color: var(--primary-solid);
+}
+
+.headless-switch-thumb {
+  pointer-events: none;
+  display: inline-block;
+  height: 20px;
+  width: 20px;
+  transform: translateX(0);
+  border-radius: 9999px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease-in-out;
+}
+
+.headless-switch[data-checked] .headless-switch-thumb {
+  transform: translateX(20px);
+}
+
+/* === individual.css === */
+/* ==============================================================
+   👤 FICHA INDIVIDUAL DE CONDUCTOR Y CALENDARIO EMBEBIDO
+   ============================================================== */
+
+/* Layout Principal Reestructurado en 2 Columnas (Wireframe Canónico) */
+.individual-layout-grid {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .individual-layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.individual-left-col {
+  position: sticky;
+  top: 75px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.individual-left-col::-webkit-scrollbar {
+  width: 5px;
+}
+
+.individual-left-col::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.individual-left-col::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+.individual-right-col {
+  min-width: 0;
+}
+
+/* Barra Hover para Dropdown Vencimientos Uni */
+.driver-unit-dropdown-bar:hover {
+  background-color: var(--border-subtle) !important;
+}
+
+@media (max-width: 900px) {
+  .driver-profile-card-master > div:first-child {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Contenedor Principal de la Ficha */
+.driver-profile-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.driver-profile-card.left-col-card {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.85rem !important;
+  padding: 1rem !important;
+}
+
+@media (max-width: 768px) {
+  .driver-profile-card {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Avatar / Foto con aspecto 3:4 y WebP */
+.driver-avatar-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 180px;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.driver-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  user-select: none;
+}
+
+.driver-avatar-wrapper:hover .driver-avatar-img {
+  transform: scale(1.05);
+  opacity: 0.5;
+}
+
+.driver-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.driver-avatar-wrapper:hover .driver-avatar-overlay {
+  opacity: 1;
+}
+
+.driver-avatar-btn-label {
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  box-shadow: var(--shadow-sm);
+}
+
+.driver-avatar-badge-webp {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* Detalles del Conductor */
+.driver-details-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.driver-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.85rem;
+}
+
+.driver-full-name {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.driver-full-name:hover {
+  color: var(--primary);
+}
+
+.driver-meta-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  margin-top: 0.35rem;
+}
+
+.driver-meta-item strong {
+  color: var(--text-main);
+  font-weight: 800;
+}
+
+.btn-whatsapp-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 24px;
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 0 0.6rem;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .btn-whatsapp-chat {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.btn-whatsapp-chat:hover {
+  background-color: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+html.dark .btn-whatsapp-chat:hover {
+  background-color: #10b981;
+  color: #0f172a;
+  border-color: #10b981;
+}
+
+.btn-whatsapp-chat:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Tarjeta de Unidad Operativa */
+.driver-unit-card {
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.driver-unit-header {
+  padding: 0.6rem 1rem;
+  background-color: var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.driver-unit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+}
+
+.driver-unit-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.driver-unit-prop-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.driver-unit-prop-val {
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+.driver-unit-prop-val.badge-easycopy {
+  border: 1px dashed #94a3b8;
+  background-color: #ffffff;
+  height: 30px;
+  padding: 0 0.55rem;
+  border-radius: var(--radius-sm, 4px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  width: 100%;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .driver-unit-prop-val.badge-easycopy {
+  background-color: #1e293b;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.driver-unit-prop-val.badge-easycopy:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+
+html.dark .driver-unit-prop-val.badge-easycopy:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.driver-unit-prop-val.badge-easycopy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.driver-unit-prop-val.badge-easycopy.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .driver-unit-prop-val.badge-easycopy.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+.driver-unit-service-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-sm, 4px);
+  background-color: #fef3c7;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-weight: 900;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  width: fit-content;
+  cursor: default;
+  user-select: none;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .driver-unit-service-badge {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+}
+
+.driver-name-easycopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0.5px dashed #94a3b8;
+  background-color: #f8fafc;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-md, 6px);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+html.dark .driver-name-easycopy {
+  background-color: #1e293b;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.driver-name-easycopy:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+
+html.dark .driver-name-easycopy:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.driver-name-easycopy.copied {
+  border-color: #10b981 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .driver-name-easycopy.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+.driver-unit-alert-strip {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.driver-unit-alert-strip.vencido {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border-top: 1px solid #fecaca;
+}
+
+html.dark .driver-unit-alert-strip.vencido {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-top-color: rgba(239, 68, 68, 0.4);
+}
+
+.driver-unit-alert-strip.por_vencer {
+  background-color: #fffbeb;
+  color: #92400e;
+  border-top: 1px solid #fde68a;
+}
+
+html.dark .driver-unit-alert-strip.por_vencer {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-top-color: rgba(245, 158, 11, 0.4);
+}
+
+/* ==============================================================
+   📅 CALENDARIO TRIMESTRAL / ANUAL MULTI-MES
+   ============================================================== */
+.calendar-trimestre-section {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.calendar-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.85rem;
+}
+
+.calendar-scale-toggle {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.2rem;
+  gap: 0.2rem;
+}
+
+.scale-btn {
+  padding: 0.35rem 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.scale-btn.active {
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+}
+
+.scale-btn:hover:not(.active) {
+  background-color: var(--border-subtle);
+}
+
+.badge-shift-hint {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-text);
+  background-color: var(--accent-light);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.badge-shift-hint kbd {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+/* ==============================================================
+   🛣️ BADGE DE KM EN RANGO (HEADER CALENDARIO)
+   ============================================================== */
+.badge-km-rango {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #a5b4fc;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.78rem;
+  font-weight: 800;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.15);
+  animation: pulseRange 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  white-space: nowrap;
+}
+
+html.dark .badge-km-rango {
+  background-color: #1e1b4b;
+  color: #c7d2fe;
+  border-color: #4338ca;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.badge-km-rango-label {
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4f46e5;
+}
+
+html.dark .badge-km-rango-label {
+  color: #818cf8;
+}
+
+.badge-km-rango-val {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 900;
+  color: #1e1b4b;
+}
+
+html.dark .badge-km-rango-val {
+  color: #ffffff;
+}
+
+.badge-km-rango-unit {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #4f46e5;
+}
+
+html.dark .badge-km-rango-unit {
+  color: #a5b4fc;
+}
+
+@keyframes pulseRange {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.88;
+    transform: scale(1.02);
+  }
+}
+
+/* Cuadrícula de Tarjetas Mensuales */
+.calendar-months-grid {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.calendar-months-grid.zoom-3 {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.calendar-months-grid.zoom-12 {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* Tarjeta de 1 Mes */
+.calendar-month-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: border-color 0.2s ease;
+}
+
+.calendar-month-card.current-active-month {
+  border: 2px solid #6366f1;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.12);
+}
+
+.month-title-header {
+  text-align: center;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-main);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Matriz 7xN de Días */
+.month-days-table {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.day-col-header {
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  padding-bottom: 0.25rem;
+}
+
+.day-cell-placeholder {
+  aspect-ratio: 1;
+}
+
+/* Celda de Día Operativo */
+.calendar-day-cell {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.calendar-day-cell:hover {
+  transform: scale(1.08);
+  z-index: 10;
+}
+
+.calendar-day-cell.selected {
+  outline: 3px solid #4f46e5 !important;
+  outline-offset: -1px;
+  background-color: #eef2ff !important;
+  color: #1e1b4b !important;
+  transform: scale(1.08);
+  z-index: 15;
+  box-shadow: 0 0 10px rgba(79, 70, 229, 0.35);
+}
+
+html.dark .calendar-day-cell.selected {
+  outline: 3px solid #818cf8 !important;
+  background-color: #312e81 !important;
+  color: #eef2ff !important;
+  box-shadow: 0 0 10px rgba(129, 140, 248, 0.4);
+}
+
+.day-corner-number {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: currentColor;
+  opacity: 0.9;
+  line-height: 1;
+}
+
+.calendar-day-cell.status-default .day-corner-number {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+html.dark .calendar-day-cell.selected .day-corner-number {
+  color: #c7d2fe;
+  opacity: 1;
+}
+
+.day-status-value {
+  font-size: 0.85rem;
+  font-weight: 900;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Colores de Fatiga e Indicadores */
+.calendar-day-cell.fatiga-normal {
+  background-color: #ffffff;
+  border: 2px solid #60a5fa;
+  color: #2563eb;
+}
+
+html.dark .calendar-day-cell.fatiga-normal {
+  background-color: rgba(59, 130, 246, 0.16);
+  border-color: rgba(96, 165, 250, 0.55);
+  color: #93c5fd;
+}
+
+.calendar-day-cell.fatiga-warn {
+  background-color: #ffffff;
+  border: 2px solid #fb923c;
+  color: #c2410c;
+}
+
+html.dark .calendar-day-cell.fatiga-warn {
+  background-color: rgba(249, 115, 22, 0.20);
+  border-color: #f97316;
+  color: #fdba74;
+}
+
+.calendar-day-cell.fatiga-crit {
+  background-color: #ffffff;
+  border: 2px solid #ef4444;
+  color: #b91c1c;
+}
+
+html.dark .calendar-day-cell.fatiga-crit {
+  background-color: rgba(239, 68, 68, 0.22);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.calendar-day-cell.status-activo {
+  background-color: #eff6ff;
+  border: 2px solid #3b82f6;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+html.dark .calendar-day-cell.status-activo {
+  background-color: rgba(59, 130, 246, 0.18);
+  border-color: #60a5fa;
+  color: #93c5fd;
+}
+
+.calendar-day-cell.status-franco {
+  background-color: #b6d7a8;
+  color: #1e293b;
+  border: 1px solid #93c5fd00;
+}
+
+html.dark .calendar-day-cell.status-franco {
+  background-color: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.40);
+}
+
+.calendar-day-cell.status-vacaciones {
+  background-color: #ffe599;
+  color: #1e293b;
+  border: 1px solid #93c5fd00;
+}
+
+html.dark .calendar-day-cell.status-vacaciones {
+  background-color: rgba(234, 179, 8, 0.18);
+  color: #fde047;
+  border-color: rgba(234, 179, 8, 0.40);
+}
+
+.calendar-day-cell.status-ausencia {
+  background-color: #e06666;
+  color: #450a0a;
+  border: 1px solid #93c5fd00;
+}
+
+html.dark .calendar-day-cell.status-ausencia {
+  background-color: rgba(239, 68, 68, 0.20);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.calendar-day-cell.status-ind {
+  background-color: var(--novedad-ind-bg, #f1f5f9);
+  color: var(--novedad-ind-text, #334155);
+  border: 1px solid var(--novedad-ind-border, #cbd5e1);
+  font-weight: 800;
+}
+
+html.dark .calendar-day-cell.status-ind {
+  background-color: var(--novedad-ind-bg, rgba(100, 116, 139, 0.20));
+  color: var(--novedad-ind-text, #cbd5e1);
+  border-color: var(--novedad-ind-border, rgba(148, 163, 184, 0.35));
+}
+
+.calendar-day-cell.status-default {
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.day-dot-km {
+  position: absolute;
+  bottom: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: #6366f1;
+}
+
+html.dark .day-dot-km {
+  background-color: #818cf8;
+}
+
+/* ==============================================================
+   🔘 BARRA INFERIOR DE ACCIONES DE RANGO (RANGE ACTION BAR)
+   ============================================================== */
+.range-action-bar-floating {
+  position: sticky;
+  bottom: 1.5rem;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1.25rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  z-index: 30;
+  animation: slideUp 0.25s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.range-info-text {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.range-km-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: #eef2ff;
+  color: #312e81;
+  border: 1px solid #c7d2fe;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.08);
+}
+
+html.dark .range-km-pill {
+  background-color: #1e1b4b;
+  color: #e0e7ff;
+  border-color: #4338ca;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.range-km-pill strong {
+  font-family: var(--font-mono);
+  font-weight: 900;
+  font-size: 0.84rem;
+}
+
+.range-trips-sub {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  font-weight: 600;
+}
+
+.range-actions-btns {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Formulario e Input de Asignación de Diagramas */
+.range-input-form {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.range-status-input {
+  width: 140px;
+  padding: 0.42rem 0.65rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1.5px solid var(--border-strong, #cbd5e1);
+  background-color: var(--bg-surface, #ffffff);
+  color: var(--text-main, #0f172a);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.range-status-input:focus {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  width: 160px;
+}
+
+.range-status-input::placeholder {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+html.dark .range-status-input {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+html.dark .range-status-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.range-actions-separator {
+  width: 1px;
+  height: 22px;
+  background-color: var(--border-subtle, #e2e8f0);
+  margin: 0 0.2rem;
+}
+
+html.dark .range-actions-separator {
+  background-color: #334155;
+}
+
+.btn-range-action {
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 800;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.btn-range-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-range-apply {
+  background-color: var(--primary-solid, #19407e);
+  color: #ffffff;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.btn-range-apply:hover:not(:disabled) {
+  background-color: var(--primary-solid-hover, #133365);
+}
+
+html.dark .btn-range-apply {
+  background-color: var(--primary-solid, #2563eb);
+}
+
+html.dark .btn-range-apply:hover:not(:disabled) {
+  background-color: var(--primary-solid-hover, #1d4ed8);
+}
+
+.btn-range-activo {
+  background-color: var(--primary-solid, #19407e);
+  color: #ffffff;
+  border: none;
+}
+
+.btn-range-activo:hover:not(:disabled) {
+  background-color: var(--primary-solid-hover, #133365);
+}
+
+html.dark .btn-range-activo {
+  background-color: var(--primary-solid, #2563eb);
+  color: #ffffff;
+}
+
+html.dark .btn-range-activo:hover:not(:disabled) {
+  background-color: var(--primary-solid-hover, #1d4ed8);
+}
+
+.btn-range-franco {
+  background-color: #b6d7a8;
+  color: #1e293b;
+  border: 1px solid #86efac;
+}
+
+.btn-range-franco:hover:not(:disabled) {
+  background-color: #a3cc93;
+}
+
+html.dark .btn-range-franco {
+  background-color: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+html.dark .btn-range-franco:hover:not(:disabled) {
+  background-color: rgba(34, 197, 94, 0.28);
+}
+
+.btn-range-vacaciones {
+  background-color: #ffe599;
+  color: #1e293b;
+  border: 1px solid #fde047;
+}
+
+.btn-range-vacaciones:hover:not(:disabled) {
+  background-color: #fcd777;
+}
+
+html.dark .btn-range-vacaciones {
+  background-color: rgba(234, 179, 8, 0.18);
+  color: #fde047;
+  border-color: rgba(234, 179, 8, 0.4);
+}
+
+html.dark .btn-range-vacaciones:hover:not(:disabled) {
+  background-color: rgba(234, 179, 8, 0.28);
+}
+
+.btn-range-licencia {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.btn-range-licencia:hover:not(:disabled) {
+  background-color: #fecaca;
+}
+
+html.dark .btn-range-licencia {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+html.dark .btn-range-licencia:hover:not(:disabled) {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+
+.btn-range-limpiar {
+  background-color: var(--bg-surface-muted, #f1f5f9);
+  color: var(--text-secondary, #475569);
+  border: 1px dashed var(--border-strong, #cbd5e1);
+}
+
+.btn-range-limpiar:hover:not(:disabled) {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+html.dark .btn-range-limpiar {
+  background-color: #1e293b;
+  color: #cbd5e1;
+  border-color: #64748b;
+}
+
+html.dark .btn-range-limpiar:hover:not(:disabled) {
+  background-color: #450a0a;
+  color: #fca5a5;
+  border-color: #991b1b;
+}
+
+.btn-range-clear {
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+html.dark .btn-range-clear {
+  background-color: #1e293b;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+/* ==============================================================
+   📄 ACORDEONES DE DOCUMENTACIÓN Y OBSERVACIONES (HEADLESS UI)
+   ============================================================== */
+.doc-disclosure-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.2s ease;
+}
+
+.doc-disclosure-card:hover {
+  border-color: var(--border-strong);
+}
+
+.doc-disclosure-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background-color: var(--bg-surface);
+  transition: background-color 0.15s ease;
+  cursor: pointer;
+  border: none;
+  outline: none;
+}
+
+.doc-disclosure-header:hover {
+  background-color: var(--bg-surface-muted);
+}
+
+.doc-disclosure-title {
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-main);
+}
+
+.doc-count-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+}
+
+.doc-chevron-icon {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+}
+
+.doc-disclosure-body {
+  padding: 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+}
+
+.doc-empty-box {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.doc-empty-text {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+/* Tarjetas de Documentos (PERIÓDICO, LICENCIA, CERTIFICADO M.P) */
+.doc-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+.doc-item-box {
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.doc-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.doc-item-name {
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+}
+
+.doc-field-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.doc-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  box-sizing: border-box;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.doc-status-badge.badge-VIGENTE {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+html.dark .doc-status-badge.badge-VIGENTE {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.doc-status-badge.badge-POR_VENCER {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+html.dark .doc-status-badge.badge-POR_VENCER {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.doc-status-badge.badge-VENCIDO {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .doc-status-badge.badge-VENCIDO {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.doc-status-badge.badge-S_D {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+html.dark .doc-status-badge.badge-S_D {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+.doc-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.doc-date-input {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-main);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+html.dark .doc-date-input {
+  border-color: var(--border-strong);
+}
+
+.doc-date-input:focus {
+  border-color: var(--primary);
+}
+
+.btn-save-individual {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-save-individual:hover {
+  background-color: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.btn-save-individual.saved {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+
+html.dark .btn-save-individual.saved {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.doc-avalado-chip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 0 0.5rem;
+  height: 22px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .doc-avalado-chip {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.btn-guardar-vencimientos-global {
+  padding: 0.65rem 1.4rem;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--primary-solid) 0%, #2563eb 100%);
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-guardar-vencimientos-global:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+}
+
+
+/* === modules.css === */
+/* ==============================================================
+   📊 ESTILOS PARA MÓDULOS (FLOTA, DIAGRAMA, MÉTRICAS, INDUCCIONES)
+   ============================================================== */
+.module-container {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.module-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.module-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ==============================================================
+   TABLES (Flota, Diagrama, Inducciones)
+   ============================================================== */
+.data-table-wrapper {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.data-table th {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+}
+
+.data-table tr:hover {
+  background-color: var(--bg-surface-muted);
+}
+
+/* Badges de Vencimientos VTV / MAS y Día Diagrama (Grilla de Flota) */
+.badge-vtv {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 24px;
+  min-width: 90px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  box-sizing: border-box;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge-vtv.AL_DIA {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+html.dark .badge-vtv.AL_DIA {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.badge-vtv.POR_VENCER {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+html.dark .badge-vtv.POR_VENCER {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.badge-vtv.VENCIDO {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .badge-vtv.VENCIDO {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.badge-vtv.S_D {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+html.dark .badge-vtv.S_D {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+.badge-flota-diag-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 24px;
+  min-width: 44px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.8rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  line-height: 1;
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+html.dark .badge-flota-diag-btn {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.badge-flota-diag-btn:hover {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  transform: translateY(-1px);
+}
+
+html.dark .badge-flota-diag-btn:hover {
+  background-color: var(--primary-solid);
+  color: #ffffff;
+  border-color: var(--primary-solid);
+}
+
+/* Estados de Error y Modal de Asignación de Unidad */
+.module-error-banner {
+  padding: 2rem;
+  color: var(--novedad-a-text);
+  font-weight: 700;
+}
+
+.unit-modal-unassign-btn {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .unit-modal-unassign-btn {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.unit-modal-feedback.error {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+html.dark .unit-modal-feedback.error {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.unit-modal-feedback.success {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+html.dark .unit-modal-feedback.success {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+.unit-modal-feedback.info {
+  background-color: #eff6ff;
+  color: #1e40af;
+}
+
+html.dark .unit-modal-feedback.info {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.badge-flota-diag-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-flota-diag-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 44px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-flota-diag-empty {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+/* ==============================================================
+   DIAGRAMA MENSUAL GRID
+   ============================================================== */
+.diagrama-grid-table td.cell-day {
+  padding: 0.35rem 0.2rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  min-width: 28px;
+}
+
+.day-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.day-badge.work { background-color: #dbeafe; color: #1e40af; }
+.day-badge.franco { background-color: #f1f5f9; color: #64748b; font-weight: 800; }
+.day-badge.vacaciones { background-color: #fef3c7; color: #b45309; }
+.day-badge.ausencia { background-color: #fee2e2; color: #b91c1c; }
+
+/* ==============================================================
+   MÉTRICAS / KPIS CARDS
+   ============================================================== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.kpi-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kpi-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.kpi-value {
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: var(--text-main);
+  line-height: 1;
+}
+
+.kpi-subtext {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+  
+/* ==============================================================
+   🔄 MODO RETORNO + FECHA WIPE (Directivas de Obsidian)
+   ============================================================== */
+.daily-retorno-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.retorno-group-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.retorno-group-title {
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: #F59E0B;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  margin: 0 0 15px 0; /* Spacing card - title: 15px */
+  padding: 0 0.25rem;
+}
+
+.retorno-group-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+</style>
+</head>
+<body>
+  <div id="root"><div class="app-layout" style="min-height: 100vh; display: flex; flex-direction: column;"><header class="app-header"><div class="header-brand"><div class="brand-badge"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></div><div><h1 class="brand-title">EOR</h1><p class="brand-subtitle">Logística &amp; Diagramas</p></div></div><nav class="nav-modules" aria-label="Módulos Principales"><button class="nav-tab-btn active"><span>Diaria</span></button><button class="nav-tab-btn "><span>Individual</span></button><button class="nav-tab-btn "><span>Flota</span></button></nav><div class="header-actions"><div style="font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; padding: 0px 0.25rem;">13:25</div><div style="display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.6rem; background-color: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user-check" aria-hidden="true" style="color: var(--primary); flex-shrink: 0;"><path d="m16 11 2 2 4-4"></path><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg><span style="font-size: 0.75rem; font-weight: 800; color: var(--text-main);">ADMINISTRADOR</span><span style="font-size: 0.65rem; text-transform: uppercase; color: var(--text-secondary); font-weight: 600;">(admin)</span><button class="btn-logout-icon" title="Cerrar Sesión"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out" aria-hidden="true"><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path></svg></button></div><button class="btn-mobile-filters" title="Abrir Filtros"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-funnel lucide-filter" aria-hidden="true"><path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"></path></svg><span>Filtros</span></button><button class="btn-icon-square" title="Cambiar a Modo Oscuro"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-moon" aria-hidden="true"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></svg></button></div></header><main style="flex: 1 1 0%;"><div class="daily-dashboard-wrapper"><div class="daily-controls-bar"><div class="filter-search-box" style="max-width: 380px; flex: 1 1 0%;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search filter-search-icon" aria-hidden="true"><path d="m21 21-4.34-4.34"></path><circle cx="11" cy="11" r="8"></circle></svg><input placeholder="Buscar chofer, tractor, semi, UTE..." class="filter-search-input" type="text" value=""></div><div class="select-service-wrapper"><select class="select-service-input"><option value="TODOS">Todos los Servicios</option><option value="METANOL">METANOL</option><option value="LIVIANO">LIVIANO</option><option value="CAMPO">CAMPO</option><option value="GLP">GLP</option><option value="YPF">YPF</option><option value="ABASTECEDORES">ABASTECEDORES</option></select></div><div class="daily-count-badge"><span>265 Conductores</span></div></div><div class="wireframe-container" style="margin-top: 1rem;"><section class="cards-column"><div style="display: flex; flex-direction: column; gap: 0.75rem;">
+<div class="daily-retorno-feed">
+  <!-- Grupo 1: VUELVE HOY 29/10 -->
+  <section class="retorno-group-section" style="margin-top: 0px;">
+    <h1 class="retorno-group-title">VUELVE HOY 29/10</h1>
+    <div class="retorno-group-cards">
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ACOSTA CRISTHIAN GABRIEL"><img alt="ACOSTA CRISTHIAN GABRIEL" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/36692543.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ACOSTA CRISTHIAN GABRIEL" aria-label="Copiar nombre: ACOSTA CRISTHIAN GABRIEL"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ACOSTA CRISTHIAN GABRIEL</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-chips"><span class="chip-badge chip-service">LIVIANO</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 36692543" aria-label="Copiar DNI: 36692543"><span>DNI: 36692543</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AG037RR" aria-label="Copiar Tractor: AG037RR"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AG037RR</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: PCA267" aria-label="Copiar Semi: PCA267"><span class="unit-label">SEMI</span><span class="unit-val font-mono">PCA267</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 239" aria-label="Copiar UTE: 239"><span class="unit-label">UTE:</span><span class="unit-val font-mono">239</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"><span class="alert-mini-pill alert-red" title="VTV o MASS de la unidad vencido">🚚 UNIDAD</span></div><div class="daily-day-badge day-badge-operativo " title="Estado: 2 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">2</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_0_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ACUÑA RAFAEL SANTIAGO"><img alt="ACUÑA RAFAEL SANTIAGO" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/40442308.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ACUÑA RAFAEL SANTIAGO" aria-label="Copiar nombre: ACUÑA RAFAEL SANTIAGO"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ACUÑA RAFAEL SANTIAGO</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5492995928391" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 2995928391" aria-label="Enviar WhatsApp a ACUÑA RAFAEL SANTIAGO"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">METANOL</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 40442308" aria-label="Copiar DNI: 40442308"><span>DNI: 40442308</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AF534YF" aria-label="Copiar Tractor: AF534YF"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AF534YF</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: AF751XF" aria-label="Copiar Semi: AF751XF"><span class="unit-label">SEMI</span><span class="unit-val font-mono">AF751XF</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 291" aria-label="Copiar UTE: 291"><span class="unit-label">UTE:</span><span class="unit-val font-mono">291</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"></div><div class="daily-day-badge day-badge-operativo fatiga-crit" title="Estado: 27 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">27</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_1_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ADASME RODRIGO NADIN"><img alt="ADASME RODRIGO NADIN" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/33276714.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ADASME RODRIGO NADIN" aria-label="Copiar nombre: ADASME RODRIGO NADIN"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ADASME RODRIGO NADIN</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5492995473569" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 2995473569" aria-label="Enviar WhatsApp a ADASME RODRIGO NADIN"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">METANOL</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 33276714" aria-label="Copiar DNI: 33276714"><span>DNI: 33276714</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AH751FC" aria-label="Copiar Tractor: AH751FC"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AH751FC</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: AH732DI" aria-label="Copiar Semi: AH732DI"><span class="unit-label">SEMI</span><span class="unit-val font-mono">AH732DI</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 487" aria-label="Copiar UTE: 487"><span class="unit-label">UTE:</span><span class="unit-val font-mono">487</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"><span class="alert-mini-pill alert-amber" title="Documentación del chofer por vencer (&lt;30d)">🟡 DOCS</span><span class="alert-mini-pill alert-red" title="VTV o MASS de la unidad vencido">🚚 UNIDAD</span></div><div class="daily-day-badge day-badge-operativo fatiga-crit" title="Estado: 25 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">25</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_2_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+    </div>
+  </section>
+
+  <!-- Grupo 2: VUELVE MAÑANA 30/10 (Separación 35px) -->
+  <section class="retorno-group-section" style="margin-top: 35px;">
+    <h1 class="retorno-group-title">VUELVE MAÑANA 30/10</h1>
+    <div class="retorno-group-cards">
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de AGUERO ALEXIS DAMIAN"><img alt="AGUERO ALEXIS DAMIAN" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/42797881.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: AGUERO ALEXIS DAMIAN" aria-label="Copiar nombre: AGUERO ALEXIS DAMIAN"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">AGUERO ALEXIS DAMIAN</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5493865349330" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 3865349330" aria-label="Enviar WhatsApp a AGUERO ALEXIS DAMIAN"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">LIVIANO</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 42797881" aria-label="Copiar DNI: 42797881"><span>DNI: 42797881</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AE732AE" aria-label="Copiar Tractor: AE732AE"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AE732AE</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: AE732AJ" aria-label="Copiar Semi: AE732AJ"><span class="unit-label">SEMI</span><span class="unit-val font-mono">AE732AJ</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 257" aria-label="Copiar UTE: 257"><span class="unit-label">UTE:</span><span class="unit-val font-mono">257</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"><span class="alert-mini-pill alert-red" title="VTV o MASS de la unidad vencido">🚚 UNIDAD</span></div><div class="daily-day-badge day-badge-operativo fatiga-warn" title="Estado: 19 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">19</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_3_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+    </div>
+  </section>
+
+  <!-- Grupo 3: VUELVE EL 31/10 (Separación 35px) -->
+  <section class="retorno-group-section" style="margin-top: 35px;">
+    <h1 class="retorno-group-title">VUELVE EL 31/10</h1>
+    <div class="retorno-group-cards">
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ALANIZ CRISTIAN PAULO"><img alt="ALANIZ CRISTIAN PAULO" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/31819918.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ALANIZ CRISTIAN PAULO" aria-label="Copiar nombre: ALANIZ CRISTIAN PAULO"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ALANIZ CRISTIAN PAULO</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5492995013777" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 2995013777" aria-label="Enviar WhatsApp a ALANIZ CRISTIAN PAULO"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">LIVIANO</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 31819918" aria-label="Copiar DNI: 31819918"><span>DNI: 31819918</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="btn-assign-unit-dashed" title="Asignar unidad operativa a este chofer" aria-label="Asignar unidad operativa a este chofer"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg><span>+ Asignar</span></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"></div><div class="daily-day-badge day-badge-franco " title="Estado: F (FRANCO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">F</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_4_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ALCAZAR CLAUDIO ANGEL"><img alt="ALCAZAR CLAUDIO ANGEL" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/28226622.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ALCAZAR CLAUDIO ANGEL" aria-label="Copiar nombre: ALCAZAR CLAUDIO ANGEL"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ALCAZAR CLAUDIO ANGEL</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5492617250677" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 2617250677" aria-label="Enviar WhatsApp a ALCAZAR CLAUDIO ANGEL"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">LIVIANO</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 28226622" aria-label="Copiar DNI: 28226622"><span>DNI: 28226622</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AF858FE" aria-label="Copiar Tractor: AF858FE"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AF858FE</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: AF887GA" aria-label="Copiar Semi: AF887GA"><span class="unit-label">SEMI</span><span class="unit-val font-mono">AF887GA</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 298" aria-label="Copiar UTE: 298"><span class="unit-label">UTE:</span><span class="unit-val font-mono">298</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"></div><div class="daily-day-badge day-badge-operativo fatiga-crit" title="Estado: 23 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">23</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_5_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+    </div>
+  </section>
+
+  <!-- Grupo 4: VUELVE EL 1/11 (Separación 35px) -->
+  <section class="retorno-group-section" style="margin-top: 35px;">
+    <h1 class="retorno-group-title">VUELVE EL 1/11</h1>
+    <div class="retorno-group-cards">
+      <div class="daily-driver-card"><div class="daily-card-main-row"><div class="daily-card-driver-info"><div class="daily-card-avatar-wrap" title="Ver ficha completa de ALEGRIA ROLANDO GABRIEL"><img alt="ALEGRIA ROLANDO GABRIEL" class="daily-card-avatar-img" loading="lazy" src="https://rsvajuxihvmpmrmlcbul.supabase.co/storage/v1/object/public/choferes-fotos/32234558.webp"></div><div class="daily-card-meta"><div class="daily-card-name-row"><div role="button" tabindex="0" class="badge-easycopy-name " title="Clic para copiar Nombre: ALEGRIA ROLANDO GABRIEL" aria-label="Copiar nombre: ALEGRIA ROLANDO GABRIEL"><h3 class="daily-card-name" style="margin: 0px; white-space: nowrap;">ALEGRIA ROLANDO GABRIEL</h3><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><a href="https://wa.me/5492995332277" target="_blank" rel="noreferrer" class="btn-whatsapp-mini" title="WhatsApp: 2995332277 (INTERNO)" aria-label="Enviar WhatsApp a ALEGRIA ROLANDO GABRIEL"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-circle" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"></path></svg><span>Chat</span></a></div><div class="daily-card-chips"><span class="chip-badge chip-service">METANOL</span><span role="button" tabindex="0" class="badge-easycopy " title="Clic para copiar DNI: 32234558" aria-label="Copiar DNI: 32234558"><span>DNI: 32234558</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></span></div></div></div><div class="daily-card-unit-box"><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Tractor: AI336GY" aria-label="Copiar Tractor: AI336GY"><span class="unit-label">TRAC</span><span class="unit-val font-mono">AI336GY</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar Semi: AF125US" aria-label="Copiar Semi: AF125US"><span class="unit-label">SEMI</span><span class="unit-val font-mono">AF125US</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div><button type="button" class="btn-assign-gear-mini" title="Cambiar o reasignar tractor / semi" aria-label="Cambiar o reasignar tractor o semi"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-truck" aria-hidden="true"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"></path><path d="M15 18H9"></path><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"></path><circle cx="17" cy="18" r="2"></circle><circle cx="7" cy="18" r="2"></circle></svg></button><div role="button" tabindex="0" class="unit-badge-pill " title="Clic para copiar UTE: 472" aria-label="Copiar UTE: 472"><span class="unit-label">UTE:</span><span class="unit-val font-mono">472</span><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy easycopy-icon" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></div></div><div class="daily-card-right-box"><div class="daily-card-alerts"><span class="alert-mini-pill alert-amber" title="Documentación del chofer por vencer (&lt;30d)">🟡 DOCS</span></div><div class="daily-day-badge day-badge-operativo fatiga-warn" title="Estado: 20 (OPERATIVO) • Fecha: 2026-10-24 • Tipo: 22X6"><span class="daily-day-badge-val">20</span><span class="daily-day-badge-date">10/24</span></div><button class="btn-card-accordion-toggle" title="Ver detalle de vencimientos y métricas" aria-label="Desplegar detalle de conductor" id="headlessui-disclosure-button-_r_6_" type="button" aria-expanded="false" data-headlessui-state=""><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></div></div></div>
+    </div>
+  </section>
+</div>
+<div style="padding: 1.5rem; text-align: center;">

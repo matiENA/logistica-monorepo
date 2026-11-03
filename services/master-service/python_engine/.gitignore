@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+.venv/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Logs y temporales
+*.log
+last_sync_*.json
+last_poll_*.json
+cache_ruteos_*.json
+.sync.lock
+reportes/reporte_*.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credenciales y llaves sensibles
+credentials.json
+ute-logistica-key.json
+gs account/
+.service_account_*.json
+*.tmp.json
+
+# Archivos web locales
+public/

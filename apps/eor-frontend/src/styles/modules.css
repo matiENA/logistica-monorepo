@@ -1,0 +1,321 @@
+/* ==============================================================
+   📊 ESTILOS PARA MÓDULOS (FLOTA, DIAGRAMA, MÉTRICAS, INDUCCIONES)
+   ============================================================== */
+.module-container {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.module-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.module-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ==============================================================
+   TABLES (Flota, Diagrama, Inducciones)
+   ============================================================== */
+.data-table-wrapper {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.data-table th {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+}
+
+.data-table tr:hover {
+  background-color: var(--bg-surface-muted);
+}
+
+/* Badges de Vencimientos VTV / MAS y Día Diagrama (Grilla de Flota) */
+.badge-vtv {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 24px;
+  min-width: 90px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  box-sizing: border-box;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.badge-vtv.AL_DIA {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+html.dark .badge-vtv.AL_DIA {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.badge-vtv.POR_VENCER {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+html.dark .badge-vtv.POR_VENCER {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.badge-vtv.VENCIDO {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .badge-vtv.VENCIDO {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.badge-vtv.S_D {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+html.dark .badge-vtv.S_D {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+.badge-flota-diag-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 24px;
+  min-width: 44px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.8rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  line-height: 1;
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+html.dark .badge-flota-diag-btn {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.badge-flota-diag-btn:hover {
+  background-color: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  transform: translateY(-1px);
+}
+
+html.dark .badge-flota-diag-btn:hover {
+  background-color: var(--primary-solid);
+  color: #ffffff;
+  border-color: var(--primary-solid);
+}
+
+/* Estados de Error y Modal de Asignación de Unidad */
+.module-error-banner {
+  padding: 2rem;
+  color: var(--novedad-a-text);
+  font-weight: 700;
+}
+
+.unit-modal-unassign-btn {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .unit-modal-unassign-btn {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.unit-modal-feedback.error {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+html.dark .unit-modal-feedback.error {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+
+.unit-modal-feedback.success {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+html.dark .unit-modal-feedback.success {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+.unit-modal-feedback.info {
+  background-color: #eff6ff;
+  color: #1e40af;
+}
+
+html.dark .unit-modal-feedback.info {
+  background-color: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
+.badge-flota-diag-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-flota-diag-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 44px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-flota-diag-empty {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+/* ==============================================================
+   DIAGRAMA MENSUAL GRID
+   ============================================================== */
+.diagrama-grid-table td.cell-day {
+  padding: 0.35rem 0.2rem;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  min-width: 28px;
+}
+
+.day-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.day-badge.work { background-color: #dbeafe; color: #1e40af; }
+.day-badge.franco { background-color: #f1f5f9; color: #64748b; font-weight: 800; }
+.day-badge.vacaciones { background-color: #fef3c7; color: #b45309; }
+.day-badge.ausencia { background-color: #fee2e2; color: #b91c1c; }
+
+/* ==============================================================
+   MÉTRICAS / KPIS CARDS
+   ============================================================== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.25rem;
+}
+
+.kpi-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kpi-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.kpi-value {
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: var(--text-main);
+  line-height: 1;
+}
+
+.kpi-subtext {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}

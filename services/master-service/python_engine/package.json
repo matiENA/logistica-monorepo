@@ -1,0 +1,13 @@
+{
+  "name": "diaria-operativas",
+  "version": "1.0.0",
+  "description": "Plataforma integrada de operativas diarias para flotas y hojas de ruta",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dispo": "node pintarDisponibilidad.js"
+  },
+  "dependencies": {
+    "googleapis": "^144.0.0"
+  }
+}

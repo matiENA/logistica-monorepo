@@ -1,0 +1,60 @@
+{
+  "spreadsheetId": "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc",
+  "planillasGuardadas": [
+    {
+      "id": "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc",
+      "nombre": "Noviembre 2026 (Activa)",
+      "pestaña": "NOVIEMBRE 2026- Mov.Unidades y Choferes"
+    },
+    {
+      "id": "14Mb5rD853zxDkaLDS-IrW-OBDTDBjuJxn_3olXeWlkc",
+      "nombre": "Octubre 2026",
+      "pestaña": "OCTUBRE 2026- Mov.Unidades y Choferes"
+    },
+    {
+      "id": "1Bwj8WCykMn_FbZhQ_FqnDH3K_WCod52YTSvsaxIDNS8",
+      "nombre": "Septiembre 2026",
+      "pestaña": "SEPTIEMBRE 2026- Mov.Unidades y Choferes"
+    },
+    {
+      "id": "1vYw-Zm51m50PeJmvLqshW4lBDonI7KTvBD14uIJioAU",
+      "nombre": "Agosto 2026",
+      "pestaña": "AGOSTO 2026- Mov.Unidades y Choferes"
+    }
+  ],
+  "colsDispo": [
+    29,
+    42,
+    55,
+    68,
+    81,
+    94,
+    107,
+    120,
+    133,
+    146,
+    159,
+    172,
+    185,
+    198,
+    211,
+    224,
+    237,
+    250,
+    263,
+    276,
+    289,
+    302,
+    315,
+    328,
+    341,
+    354,
+    367,
+    380,
+    393,
+    406,
+    415,
+    419,
+    428
+  ]
+}

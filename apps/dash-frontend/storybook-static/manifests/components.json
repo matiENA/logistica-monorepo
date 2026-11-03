@@ -1,0 +1,332 @@
+{
+  "v": 0,
+  "components": {
+    "dash-kanban-noveltycard": {
+      "id": "dash-kanban-noveltycard",
+      "name": "NoveltyCard",
+      "path": "./src/components/kanban/NoveltyCard.stories.tsx",
+      "jsDocTags": {},
+      "reactDocgen": {
+        "description": "",
+        "methods": [],
+        "displayName": "NoveltyCard",
+        "definedInFile": "C:\\Users\\Matias Rodriguez\\Documents\\dash\\frontend-react\\src\\components\\kanban\\NoveltyCard.tsx",
+        "actualName": "NoveltyCard",
+        "exportName": "NoveltyCard",
+        "props": {
+          "novedad": {
+            "required": true,
+            "tsType": {
+              "name": "Novedad"
+            },
+            "description": ""
+          },
+          "usuarios": {
+            "required": true,
+            "tsType": {
+              "name": "Array",
+              "elements": [
+                {
+                  "name": "Usuario"
+                }
+              ],
+              "raw": "Usuario[]"
+            },
+            "description": ""
+          },
+          "onResolver": {
+            "required": true,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(id: number | string, nuevoServicio?: string) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "union",
+                      "raw": "number | string",
+                      "elements": [
+                        {
+                          "name": "number"
+                        },
+                        {
+                          "name": "string"
+                        }
+                      ]
+                    },
+                    "name": "id"
+                  },
+                  {
+                    "type": {
+                      "name": "string"
+                    },
+                    "name": "nuevoServicio"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          },
+          "onEditar": {
+            "required": false,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(novedad: Novedad) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "Novedad"
+                    },
+                    "name": "novedad"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          },
+          "onCambiarTerminal": {
+            "required": false,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(id: number | string, terminal: string) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "union",
+                      "raw": "number | string",
+                      "elements": [
+                        {
+                          "name": "number"
+                        },
+                        {
+                          "name": "string"
+                        }
+                      ]
+                    },
+                    "name": "id"
+                  },
+                  {
+                    "type": {
+                      "name": "string"
+                    },
+                    "name": "terminal"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          },
+          "onCambiarServicio": {
+            "required": false,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(id: number | string, servicio: string) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "union",
+                      "raw": "number | string",
+                      "elements": [
+                        {
+                          "name": "number"
+                        },
+                        {
+                          "name": "string"
+                        }
+                      ]
+                    },
+                    "name": "id"
+                  },
+                  {
+                    "type": {
+                      "name": "string"
+                    },
+                    "name": "servicio"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          },
+          "onAgregarMencion": {
+            "required": false,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(id: number | string, usuario: string) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "union",
+                      "raw": "number | string",
+                      "elements": [
+                        {
+                          "name": "number"
+                        },
+                        {
+                          "name": "string"
+                        }
+                      ]
+                    },
+                    "name": "id"
+                  },
+                  {
+                    "type": {
+                      "name": "string"
+                    },
+                    "name": "usuario"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          },
+          "onQuitarMencion": {
+            "required": false,
+            "tsType": {
+              "name": "signature",
+              "type": "function",
+              "raw": "(id: number | string, usuario: string) => void",
+              "signature": {
+                "arguments": [
+                  {
+                    "type": {
+                      "name": "union",
+                      "raw": "number | string",
+                      "elements": [
+                        {
+                          "name": "number"
+                        },
+                        {
+                          "name": "string"
+                        }
+                      ]
+                    },
+                    "name": "id"
+                  },
+                  {
+                    "type": {
+                      "name": "string"
+                    },
+                    "name": "usuario"
+                  }
+                ],
+                "return": {
+                  "name": "void"
+                }
+              }
+            },
+            "description": ""
+          }
+        }
+      },
+      "stories": [
+        {
+          "id": "dash-kanban-noveltycard--libre-cyan",
+          "name": "Libre Cyan",
+          "snippet": "const LibreCyan = () => <NoveltyCard\r\n    usuarios={[\r\n      { id: '1', usuario: 'MATIAS', rol: 'operador' },\r\n      { id: '2', usuario: 'ADMIN', rol: 'admin' },\r\n      { id: '3', usuario: 'TRANSER', rol: 'operador' }\r\n    ]}\r\n    novedad={{\r\n      id: '101',\r\n      tipo_novedad: 'LIBRES',\r\n      nom: 'GONZALEZ JUAN CARLOS',\r\n      tractor: 'AG123BC',\r\n      srv: 'EURO',\r\n      servicio: 'EURO',\r\n      n_ute: '102',\r\n      cisternado: 'CIST-04',\r\n      terminal: 'DOCK SUD',\r\n      fecha_objetivo: null,\r\n      detalle: 'Disponible en base Dock Sud listo para asignación de viaje.',\r\n      resuelto: false,\r\n      creador: 'OPERADOR',\r\n      timestamp: new Date().toISOString(),\r\n      menciones: ['MATIAS']\r\n    }} />;"
+        },
+        {
+          "id": "dash-kanban-noveltycard--baja-diagrama",
+          "name": "Baja Diagrama",
+          "snippet": "const BajaDiagrama = () => <NoveltyCard\r\n    usuarios={[\r\n      { id: '1', usuario: 'MATIAS', rol: 'operador' },\r\n      { id: '2', usuario: 'ADMIN', rol: 'admin' },\r\n      { id: '3', usuario: 'TRANSER', rol: 'operador' }\r\n    ]}\r\n    novedad={{\r\n      id: '102',\r\n      tipo_novedad: 'BAJA_DIAGRAMA',\r\n      nom: 'RODRIGUEZ PEDRO',\r\n      tractor: 'AF987LK',\r\n      srv: 'CM',\r\n      n_ute: '54',\r\n      terminal: 'TPH',\r\n      fecha_objetivo: '2026-10-15',\r\n      detalle: 'Baja programada por franco compensatorio.',\r\n      resuelto: false,\r\n      creador: 'COORDINADOR',\r\n      timestamp: new Date().toISOString(),\r\n      menciones: []\r\n    }} />;"
+        },
+        {
+          "id": "dash-kanban-noveltycard--certificacion-vtv-mass",
+          "name": "Certificacion Vtv Mass",
+          "snippet": "const CertificacionVtvMass = () => <NoveltyCard\r\n    usuarios={[\r\n      { id: '1', usuario: 'MATIAS', rol: 'operador' },\r\n      { id: '2', usuario: 'ADMIN', rol: 'admin' },\r\n      { id: '3', usuario: 'TRANSER', rol: 'operador' }\r\n    ]}\r\n    novedad={{\r\n      id: '103',\r\n      tipo_novedad: 'CERTIFICACION_UNIDAD',\r\n      nom: 'MARTINEZ CARLOS',\r\n      tractor: 'AE444ZZ',\r\n      srv: 'LIVIANO',\r\n      n_ute: '18',\r\n      terminal: 'AÑELO',\r\n      fecha_objetivo: '2026-10-20',\r\n      detalle: '[VTV / MASS]\\n\\nRenovación obligatoria de técnica anual.',\r\n      resuelto: false,\r\n      creador: 'SEGURIDAD',\r\n      timestamp: new Date().toISOString(),\r\n      menciones: ['TRANSER']\r\n    }} />;"
+        },
+        {
+          "id": "dash-kanban-noveltycard--resuelto",
+          "name": "Resuelto",
+          "snippet": "const Resuelto = () => <NoveltyCard\r\n    usuarios={[\r\n      { id: '1', usuario: 'MATIAS', rol: 'operador' },\r\n      { id: '2', usuario: 'ADMIN', rol: 'admin' },\r\n      { id: '3', usuario: 'TRANSER', rol: 'operador' }\r\n    ]}\r\n    novedad={{\r\n      id: '104',\r\n      tipo_novedad: 'REPARACION',\r\n      nom: 'FERNANDEZ LUCAS',\r\n      tractor: 'AD555RT',\r\n      srv: 'TDS',\r\n      n_ute: '07',\r\n      terminal: 'TLC',\r\n      fecha_objetivo: '2026-10-08',\r\n      detalle: 'Frenos reparados y alineación completa en taller oficial.',\r\n      resuelto: true,\r\n      creador: 'TALLER',\r\n      timestamp: new Date().toISOString(),\r\n      menciones: []\r\n    }} />;"
+        }
+      ],
+      "import": "import { NoveltyCard } from 'dash-frontend-react';"
+    },
+    "dash-kanban-returncolumn": {
+      "id": "dash-kanban-returncolumn",
+      "name": "ReturnColumn",
+      "path": "./src/components/kanban/ReturnColumn.stories.tsx",
+      "jsDocTags": {},
+      "reactDocgen": {
+        "description": "",
+        "methods": [],
+        "displayName": "ReturnColumn",
+        "definedInFile": "C:\\Users\\Matias Rodriguez\\Documents\\dash\\frontend-react\\src\\components\\kanban\\ReturnColumn.tsx",
+        "actualName": "ReturnColumn",
+        "exportName": "ReturnColumn",
+        "props": {
+          "retornos": {
+            "required": true,
+            "tsType": {
+              "name": "Array",
+              "elements": [
+                {
+                  "name": "RetornoItem"
+                }
+              ],
+              "raw": "RetornoItem[]"
+            },
+            "description": ""
+          },
+          "flota": {
+            "required": true,
+            "tsType": {
+              "name": "Array",
+              "elements": [
+                {
+                  "name": "FlotaItem"
+                }
+              ],
+              "raw": "FlotaItem[]"
+            },
+            "description": ""
+          },
+          "flexWeight": {
+            "required": true,
+            "tsType": {
+              "name": "number"
+            },
+            "description": ""
+          }
+        }
+      },
+      "stories": [
+        {
+          "id": "dash-kanban-returncolumn--default",
+          "name": "Default",
+          "snippet": "const Default = () => <ReturnColumn\r\n    retornos={[\r\n      {\r\n        nom: 'ALVAREZ MIGUEL',\r\n        tractor: 'AG777CC',\r\n        retorna_cuando: 'HOY',\r\n        codigo_ayer: 'F',\r\n        codigo_hoy: '-',\r\n        codigo_manana: '-'\r\n      },\r\n      {\r\n        nom: 'BENITEZ RAMIRO',\r\n        tractor: 'AF321MN',\r\n        retorna_cuando: 'HOY',\r\n        codigo_ayer: 'V',\r\n        codigo_hoy: '-',\r\n        codigo_manana: '-'\r\n      },\r\n      {\r\n        nom: 'CASTRO DANIEL',\r\n        tractor: 'AD111OP',\r\n        retorna_cuando: 'MANANA',\r\n        codigo_ayer: 'S',\r\n        codigo_hoy: 'F',\r\n        codigo_manana: '-'\r\n      }\r\n    ]}\r\n    flota={[]}\r\n    flexWeight={1} />;"
+        }
+      ],
+      "import": "import { ReturnColumn } from 'dash-frontend-react';"
+    }
+  },
+  "meta": {
+    "docgen": "react-docgen",
+    "durationMs": 1743
+  }
+}

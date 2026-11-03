@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+body {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+}
+
+/* Ocultar scrollbars en todo el sitio para estética limpia */
+::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+* {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+
+.custom-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Animación física de salida de tarjeta al resolver */
+.fade-out {
+  opacity: 0 !important;
+  transform: translateX(120px) scale(0.92) rotate(1.5deg) !important;
+  transition: transform 0.15s cubic-bezier(0.4, 0, 1, 1), opacity 0.12s ease-out !important;
+  pointer-events: none;
+}
+
+/* Estilos glassmorphism de header */
+.glass-header {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.glow-accent {
+  box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.25);
+}
+
+/* Modo Cartelera / Vista Sólida (Deshabilita edición en TV/Monitores pasivos) */
+.modo-cartelera .btn-card-edit,
+.modo-cartelera .btn-card-resolve,
+.modo-cartelera .btn-card-terminal,
+.modo-cartelera .btn-card-servicio,
+.modo-cartelera #btn-quick-libre,
+.modo-cartelera .mention-input-wrapper,
+.modo-cartelera #btn-fab-nueva,
+.modo-cartelera .btn-mention-remove {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.modo-cartelera article {
+  cursor: default !important;
+}
+
+/* Input date icon visible */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: none;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.2);
+  opacity: 0.9;
+}

@@ -1,0 +1,37 @@
+# ==============================================================================
+# Blueprint para Render — Operativas Diarias (Automático en Nube 24/7)
+# ==============================================================================
+services:
+  - type: web
+    name: diaria-operativas
+    env: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      - key: TZ
+        value: America/Argentina/Buenos_Aires
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false # Pega aquí el JSON completo del Service Account en el panel de Render
+      - key: DEFAULT_RUTEOS_ID
+        value: 1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE
+      - key: DEFAULT_MOV_ID
+        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+      - key: CONF_SPREADSHEET_ID
+        value: 1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU
+      - key: CONF_SOURCE_SHEET_NAME
+        value: "UTE Cordillera Noviembre 26"
+      - key: CONF_TARGET_SHEET_NAME
+        value: "CONF. DE VIAJE NOVIEMBRE 26"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false # Token de @BotFather en Telegram
+      - key: TELEGRAM_CHAT_ID
+        sync: false # Chat ID del receptor en Telegram
+      - key: TELEGRAM_NOTIFY_ALL
+        value: "false" # false = solo errores; true = todas las tareas

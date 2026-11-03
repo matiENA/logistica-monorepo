@@ -1,0 +1,1690 @@
+/* ==============================================================
+   💳 CARDS DIARIAS (FEED PRINCIPAL)
+   ============================================================== */
+.cards-feed-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.daily-card-row {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.15rem 1.4rem;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.25rem;
+  align-items: center;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.daily-card-row:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.daily-card-row.card-resolved {
+  opacity: 0.65;
+  background-color: var(--bg-surface-muted);
+}
+
+/* Indicador lateral de color según tipo de novedad */
+.card-indicator-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+}
+
+.type-LIBRES { background-color: #00e5ff; }
+.type-CERTIFICACION_UNIDAD { background-color: #f59e0b; }
+.type-REPARACION { background-color: #6366f1; }
+.type-BAJA_DIAGRAMA { background-color: #ef4444; }
+.type-ESTADO_DEMORA { background-color: #d97706; }
+.type-EXAMEN_CHOFER { background-color: #10b981; }
+.type-EN_SERVICIO { background-color: #3b82f6; }
+.type-OTRO { background-color: #94a3b8; }
+
+/* Columna Izquierda: Badge de Tipo & Fecha */
+.card-left-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 140px;
+}
+
+.card-type-chip {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  width: fit-content;
+}
+
+.chip-LIBRES { background: rgba(0, 229, 255, 0.15); color: #0e7490; }
+.chip-CERTIFICACION_UNIDAD { background: rgba(245, 158, 11, 0.15); color: #92400e; }
+.chip-REPARACION { background: rgba(99, 102, 241, 0.15); color: #4338ca; }
+.chip-BAJA_DIAGRAMA { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+.chip-ESTADO_DEMORA { background: rgba(217, 119, 6, 0.15); color: #92400e; }
+.chip-EXAMEN_CHOFER { background: rgba(16, 185, 129, 0.15); color: #065f46; }
+.chip-EN_SERVICIO { background: rgba(59, 130, 246, 0.15); color: #1d4ed8; }
+.chip-OTRO { background: rgba(148, 163, 184, 0.15); color: #475569; }
+
+html.dark .chip-LIBRES { background: rgba(0, 229, 255, 0.16); color: #67e8f9; }
+html.dark .chip-CERTIFICACION_UNIDAD { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+html.dark .chip-REPARACION { background: rgba(99, 102, 241, 0.18); color: #c7d2fe; }
+html.dark .chip-BAJA_DIAGRAMA { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+html.dark .chip-ESTADO_DEMORA { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+html.dark .chip-EXAMEN_CHOFER { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+html.dark .chip-EN_SERVICIO { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+html.dark .chip-OTRO { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+
+.card-date-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Columna Central: Jerarquía de Datos */
+.card-body-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.card-driver-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-equipment-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.equip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.equip-item strong {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.card-detail-box {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  background-color: var(--bg-surface-muted);
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border-strong);
+  margin-top: 0.25rem;
+}
+
+/* Columna Derecha: Acciones */
+.card-actions-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.btn-resolve-toggle {
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-resolve-toggle.pending {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+html.dark .btn-resolve-toggle.pending {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.btn-resolve-toggle.pending:hover {
+  background-color: #047857;
+  color: #ffffff;
+}
+
+html.dark .btn-resolve-toggle.pending:hover {
+  background-color: #10b981;
+  color: #0f172a;
+}
+
+.btn-resolve-toggle.resolved {
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.btn-resolve-toggle.resolved:hover {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+html.dark .btn-resolve-toggle.resolved:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* Centinela de Scroll Infinito */
+.infinite-scroll-sentinel {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.spinner-pulse {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Botón Flotante para Crear Novedad (FAB) */
+.btn-fab-add {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--primary-solid) 0%, #2563eb 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.4);
+  z-index: 30;
+  transition: transform 0.2s ease;
+}
+
+.btn-fab-add:hover {
+  transform: scale(1.08) rotate(90deg);
+}
+
+@media (max-width: 640px) {
+  .daily-card-row {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+  .card-actions-col {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    align-items: center;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.5rem;
+  }
+}
+
+/* ==============================================================
+   🚀 GRILLA OPERATIVA DIARIA DE CHOFERES (LEGACY MODERNIZADO)
+   ============================================================== */
+
+/* Barra Superior de Controles y Fecha Contexto */
+.daily-controls-bar {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.daily-date-control-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.25rem 0.5rem;
+}
+
+.btn-date-nav {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-date-nav:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+.date-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.35rem;
+}
+
+.date-icon {
+  color: var(--primary);
+}
+
+.date-picker-input {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--text-main);
+  outline: none;
+  cursor: pointer;
+}
+
+.btn-today-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-today-pill:hover {
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+}
+
+.select-service-wrapper {
+  min-width: 170px;
+}
+
+.select-service-input {
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  font-size: 0.82rem;
+  font-weight: 700;
+  outline: none;
+  cursor: pointer;
+}
+
+html.dark .select-service-input {
+  border-color: var(--border-strong);
+}
+
+.alerts-filter-group {
+  display: flex;
+  align-items: center;
+}
+
+.btn-alert-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-alert-filter:hover {
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.btn-alert-filter.active {
+  background-color: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+html.dark .btn-alert-filter:hover {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fde68a;
+}
+
+html.dark .btn-alert-filter.active {
+  background-color: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fde68a;
+}
+
+.dot-alert-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+.daily-count-badge {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: var(--bg-surface-muted);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+/* Tarjeta Diaria de Conductor */
+.daily-driver-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.daily-driver-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.daily-card-main-row {
+  padding: 0.85rem 1.25rem;
+  display: grid;
+  grid-template-columns: 315px 72px 1fr auto;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+@media (max-width: 1400px) {
+  .daily-card-main-row {
+    grid-template-columns: 295px 68px 1fr auto;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 1200px) {
+  .daily-card-main-row {
+    grid-template-columns: 275px 65px 1fr auto;
+    gap: 0.75rem;
+  }
+}
+
+/* Bloque Izquierdo: Avatar + Meta */
+.daily-card-driver-info {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.daily-card-avatar-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--border-subtle);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+  background-color: var(--bg-surface-muted);
+}
+
+.daily-card-avatar-wrap:hover {
+  transform: scale(1.06);
+  border-color: var(--primary);
+}
+
+.daily-card-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+
+.daily-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.daily-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.daily-card-name {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease;
+}
+
+.daily-card-name:hover {
+  color: var(--primary);
+}
+
+.btn-copy-mini {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+
+.btn-copy-mini:hover {
+  color: var(--text-main);
+  background-color: var(--border-subtle);
+}
+
+.daily-card-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chip-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.chip-service {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+}
+
+html.dark .chip-service {
+  background-color: rgba(96, 165, 250, 0.15);
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+
+.chip-ute {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  font-family: var(--font-mono);
+}
+
+html.dark .chip-ute {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.btn-whatsapp-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #86efac;
+  padding: 0 0.45rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .btn-whatsapp-mini {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+.btn-whatsapp-mini:hover {
+  background-color: #059669;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+html.dark .btn-whatsapp-mini:hover {
+  background-color: #10b981;
+  color: #0f172a;
+  border-color: #10b981;
+}
+
+.btn-whatsapp-mini:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Slot de Comunicación: Botón Chat WhatsApp */
+.daily-card-chat-slot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+/* Bloque Central: Unidad Asignada y Badges Operativos */
+.daily-card-unit-box {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+  justify-self: start;
+  min-width: 0;
+}
+
+.unit-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  gap: 0.35rem;
+  background-color: var(--bg-surface-muted);
+  border: 1px dashed #94a3b8;
+  border-radius: var(--radius-sm, 4px);
+  padding: 0 0.55rem;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .unit-badge-pill {
+  background-color: #1e293b;
+  border-color: #64748b;
+}
+
+.unit-badge-pill:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+}
+
+html.dark .unit-badge-pill:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+}
+
+.unit-badge-pill:hover .unit-val {
+  color: #1d4ed8;
+}
+
+html.dark .unit-badge-pill:hover .unit-val {
+  color: #93c5fd;
+}
+
+.unit-badge-pill:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.unit-badge-pill.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+}
+
+html.dark .unit-badge-pill.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+.unit-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.unit-val {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* ==============================================================
+   🇦🇷 CHAPA PATENTE MERCOSUR 1:1 PURA (COPIABLE RAW DATA)
+   ============================================================== */
+.patente-mercosur-plate {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff !important;
+  border: 1.5px solid #000000;
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 68px;
+  height: 24px;
+  box-sizing: border-box;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  user-select: all;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+  width: fit-content;
+}
+
+.patente-plate-field {
+  min-width: 76px;
+  height: 26px;
+}
+
+.patente-mercosur-plate:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.patente-mercosur-plate:active {
+  transform: scale(0.95);
+}
+
+.patente-mercosur-plate:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.patente-mercosur-plate.copied {
+  border-color: #047857;
+}
+
+/* Franja Superior Azul Mercosur (#003399) */
+.patente-mercosur-band {
+  width: 100%;
+  height: 5px;
+  background-color: #003399 !important;
+  flex-shrink: 0;
+}
+
+/* Cuerpo Blanco de la Patente */
+.patente-mercosur-body {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px 1px 6px;
+  background-color: #ffffff !important;
+}
+
+.patente-mercosur-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  color: #000000 !important;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.patente-plate-field .patente-mercosur-text {
+  font-size: 11.5px;
+}
+
+.patente-mercosur-copied-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 900;
+  color: #047857 !important;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.patente-empty-val {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 0 0.25rem;
+}
+
+.btn-assign-gear-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+html.dark .btn-assign-gear-mini {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+.btn-assign-gear-mini:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background-color: #eff6ff;
+}
+
+html.dark .btn-assign-gear-mini:hover {
+  border-color: #60a5fa;
+  color: #93c5fd;
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+.btn-assign-gear-mini:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.btn-assign-unit-dashed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  gap: 0.35rem;
+  padding: 0 0.65rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.72rem;
+  font-weight: 800;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px dashed #3b82f6;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .btn-assign-unit-dashed {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border-color: #60a5fa;
+}
+
+.btn-assign-unit-dashed:hover {
+  background-color: #dbeafe;
+  border-color: #1d4ed8;
+  color: #1e40af;
+}
+
+html.dark .btn-assign-unit-dashed:hover {
+  background-color: rgba(59, 130, 246, 0.25);
+  border-color: #93c5fd;
+  color: #bfdbfe;
+}
+
+.btn-assign-unit-dashed:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ==============================================================
+   📋 EASYCOPY LEGACY SYSTEM (Badge dashed 1px, WCAG AA)
+   ============================================================== */
+.badge-easycopy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px dashed #94a3b8;
+  background-color: #f8fafc;
+  color: #1e293b;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+html.dark .badge-easycopy {
+  background-color: #1e293b;
+  color: #f1f5f9;
+  border-color: #64748b;
+}
+
+.badge-easycopy:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+
+html.dark .badge-easycopy:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+.badge-easycopy:active {
+  transform: scale(0.97);
+}
+
+.badge-easycopy:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-easycopy .easycopy-icon {
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.badge-easycopy:hover .easycopy-icon {
+  opacity: 1;
+}
+
+.badge-easycopy.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .badge-easycopy.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+.badge-easycopy-name {
+  border: 1px dashed #94a3b8;
+  background-color: #f8fafc;
+  border-radius: var(--radius-sm, 4px);
+  height: 28px;
+  padding: 0 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-easycopy-name {
+  background-color: #1e293b;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.badge-easycopy-name:hover {
+  border-color: #2563eb;
+  background-color: #eff6ff;
+  color: #1d4ed8;
+}
+
+html.dark .badge-easycopy-name:hover {
+  border-color: #60a5fa;
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+
+.badge-easycopy-name:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.badge-easycopy-name.copied {
+  border-color: #059669 !important;
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important;
+}
+
+html.dark .badge-easycopy-name.copied {
+  border-color: #10b981 !important;
+  background-color: rgba(16, 185, 129, 0.2) !important;
+  color: #6ee7b7 !important;
+}
+
+/* Bloque Derecho: Alertas + Badge de Estado + Toggle */
+.daily-card-right-box {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-left: auto;
+  justify-self: end;
+}
+
+.daily-card-alerts {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+/* Badge Legacy: Retorna HOY / Vuelve en Xd */
+.badge-retorno-legacy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.68rem;
+  font-weight: 800;
+  background-color: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #a5b4fc;
+  box-shadow: 0 1px 2px rgba(55, 48, 163, 0.08);
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  user-select: none;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .badge-retorno-legacy {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.alert-mini-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  height: 22px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+/* WCAG Compliant Alert Colors (>= 4.5:1 ratio) */
+.alert-mini-pill.alert-red {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+html.dark .alert-mini-pill.alert-red {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.alert-mini-pill.alert-amber {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+html.dark .alert-mini-pill.alert-amber {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.daily-km-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 22px;
+  background-color: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.68rem;
+  font-weight: 800;
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.1);
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1;
+}
+
+html.dark .daily-km-badge {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.daily-km-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.daily-km-val {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.daily-km-hr {
+  font-size: 0.62rem;
+  background-color: #ffffff;
+  color: #4338ca;
+  border: 1px solid #e0e7ff;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+html.dark .daily-km-hr {
+  background-color: #1e1b4b;
+  color: #c7d2fe;
+  border-color: #4338ca;
+}
+
+/* Badge del Estado del Día (Fatiga 1..35, F, V, IND) */
+.daily-day-badge {
+  min-width: 58px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.4rem;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  background-color: var(--bg-surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.daily-day-badge.day-badge-franco {
+  background-color: #b6d7a8;
+  color: #14532d;
+  border: 1px solid #86efac;
+}
+
+.daily-day-badge.day-badge-vacaciones {
+  background-color: #ffe599;
+  color: #78350f;
+  border: 1px solid #fde047;
+}
+
+.daily-day-badge.day-badge-licencia {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.daily-day-badge.day-badge-operativo {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 2px solid #3b82f6;
+  font-weight: 800;
+}
+
+.daily-day-badge.day-badge-operativo.fatiga-warn {
+  background-color: #fff7ed;
+  color: #c2410c;
+  border: 2.5px solid #f97316;
+  font-weight: 900;
+}
+
+.daily-day-badge.day-badge-operativo.fatiga-crit {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 2.5px solid #ef4444;
+  font-weight: 900;
+}
+
+html.dark .daily-day-badge.day-badge-franco {
+  background-color: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-vacaciones {
+  background-color: rgba(234, 179, 8, 0.18);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-licencia {
+  background-color: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+html.dark .daily-day-badge.day-badge-operativo {
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border: 2px solid rgba(59, 130, 246, 0.5);
+}
+
+html.dark .daily-day-badge.day-badge-operativo.fatiga-warn {
+  background-color: rgba(249, 115, 22, 0.2);
+  color: #fdba74;
+  border: 2.5px solid #f97316;
+}
+
+html.dark .daily-day-badge.day-badge-operativo.fatiga-crit {
+  background-color: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 2.5px solid #ef4444;
+}
+
+.daily-day-badge-val {
+  font-size: 1.15rem;
+  font-weight: 900;
+  font-family: var(--font-mono);
+}
+
+.daily-day-badge-date {
+  font-size: 0.62rem;
+  font-weight: 700;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+
+.btn-card-accordion-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.35rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-card-accordion-toggle:hover {
+  background-color: var(--border-subtle);
+  color: var(--text-main);
+}
+
+/* Panel Desplegable Acordeón */
+.daily-card-expanded-body {
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface-muted);
+  padding: 1rem 1.25rem;
+}
+
+.daily-expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.expanded-section-box {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+}
+
+.expanded-box-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin: 0 0 0.5rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.35rem;
+}
+
+.expanded-doc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.expanded-doc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.doc-row-label {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+/* ==============================================================
+   MATRIZ UNIFICADA DE CONTROL DE VENCIMIENTOS (MERGE DE TABLAS)
+   ============================================================== */
+.expanded-venc-unified-box {
+  grid-column: span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+  .expanded-venc-unified-box {
+    grid-column: span 1;
+  }
+}
+
+.unified-venc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.4rem;
+}
+
+.unified-venc-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .unified-venc-columns {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+}
+
+.unified-venc-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.unified-venc-subgroup-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.venc-no-unit {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-style: italic;
+  padding: 0.75rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* ==============================================================
+   SEMÁFORO CROMÁTICO COMPARTIDO: BADGE, PILL Y ACORDEÓN
+   (🔴 Rojo vencido, 🟡 Amarillo 1 mes, 🟢 Al día, ⚪ S/D)
+   ============================================================== */
+.doc-date-val {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: var(--radius-sm, 4px);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.venc-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+/* 🟢 Vigente (> 30 días) */
+.doc-date-val.vigente {
+  color: var(--text-main, #e2e8f0);
+}
+
+.venc-status-pill.vigente {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+html:not(.dark) .venc-status-pill.vigente {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+/* 🟡 Por vencer (<= 30 días / 1 mes) - Amarillo */
+.alert-mini-pill.alert-venc-por_vencer,
+.venc-status-pill.por_vencer,
+.doc-date-val.por_vencer {
+  background-color: rgba(245, 158, 11, 0.2);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+html:not(.dark) .alert-mini-pill.alert-venc-por_vencer,
+html:not(.dark) .venc-status-pill.por_vencer,
+html:not(.dark) .doc-date-val.por_vencer {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+/* 🔴 Vencido (< hoy) - Rojo */
+.alert-mini-pill.alert-venc-vencido,
+.venc-status-pill.vencido,
+.doc-date-val.vencido {
+  background-color: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  font-weight: 800;
+}
+html:not(.dark) .alert-mini-pill.alert-venc-vencido,
+html:not(.dark) .venc-status-pill.vencido,
+html:not(.dark) .doc-date-val.vencido {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  font-weight: 800;
+}
+
+/* ⚪ Sin datos (S/D) */
+.doc-date-val.s_d {
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.expanded-action-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100px;
+  padding: 1rem 0.5rem;
+}
+
+.expanded-action-box .btn-ver-ficha-individual {
+  width: 100%;
+  max-width: 220px;
+}
+
+.btn-ver-ficha-individual {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-md);
+  background-color: var(--primary-solid);
+  color: var(--on-primary-solid);
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-ver-ficha-individual:hover {
+  background-color: var(--primary-solid-hover);
+}
+
+/* Esqueleto de Carga */
+.daily-driver-skeleton {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.skeleton-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+.skeleton-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeleton-bar {
+  height: 12px;
+  border-radius: var(--radius-sm);
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+.skeleton-badge {
+  width: 58px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background-color: var(--border-subtle);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.btn-load-more-drivers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.5rem;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-main);
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-load-more-drivers:hover {
+  background-color: var(--bg-surface-muted);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.daily-empty-box {
+  background-color: var(--bg-surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 3rem 1.5rem;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .daily-card-main-row {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  .daily-card-chat-slot:empty {
+    display: none;
+  }
+  .daily-card-unit-box {
+    justify-self: start;
+  }
+  .daily-card-right-box {
+    margin-left: 0;
+    justify-content: space-between;
+    width: 100%;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.5rem;
+  }
+}
+
+/* ==============================================================
+   🔄 MODO RETORNO + FECHA WIPE (Directivas de Obsidian)
+   ============================================================== */
+.daily-retorno-feed {
+  display: flex;
+  flex-direction: column;
+}
+
+.retorno-group-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.retorno-group-title {
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: #F59E0B;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  margin: 0 0 15px 0; /* Spacing card - title: 15px */
+  padding: 0 0.25rem;
+}
+
+.retorno-group-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* En modo retorno, la tarjeta queda limpia en su bloque derecho (sin badges de fecha ni alertas) */
+.daily-card-right-box.retorno-clean {
+  justify-content: flex-end;
+  gap: 0;
+}
+
+
