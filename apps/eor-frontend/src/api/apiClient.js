@@ -7,7 +7,7 @@ const IS_RENDER_HOST =
 
 const BASE_API_URL = (
   import.meta.env.VITE_API_URL ||
-  (IS_RENDER_HOST ? 'https://eor-backend.onrender.com' : '')
+  (IS_RENDER_HOST ? 'https://diaria-operativas.onrender.com' : '')
 ).replace(/\/+$/, '');
 
 /**

@@ -76,12 +76,12 @@ services:
   # ------------------------------------------------------------
   # 2. FRONTEND DASH (Static Site — React 19 / Vite)
   # ------------------------------------------------------------
-  - type: web
+  - type: static
     name: dash
-    runtime: static
+    region: oregon
     rootDir: apps/dash-frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
     routes:
       - type: rewrite
         source: /*
@@ -95,12 +95,12 @@ services:
   # ------------------------------------------------------------
   # 3. FRONTEND EOR / DIAGRAMAS (Static Site — React / Vite)
   # ------------------------------------------------------------
-  - type: web
+  - type: static
     name: eor
-    runtime: static
+    region: oregon
     rootDir: apps/eor-frontend
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
     routes:
       - type: rewrite
         source: /*
@@ -108,6 +108,10 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://diaria-operativas.onrender.com
+      - key: VITE_SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: VITE_SUPABASE_KEY
+        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
 
   # ------------------------------------------------------------
   # 4. SERVICIO PAÑOL MONOLITH (Web Service en producción srv-d9adns3eo5us739q897g)
