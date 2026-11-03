@@ -1,0 +1,20 @@
+{
+  "name": "panol-logistics-microservice",
+  "version": "1.0.0",
+  "description": "Microservicio Node.js para normalización de patentes, gestión de OTs, Pañol Monitor y Devoluciones con WebSockets",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "gen-keys": "node scripts/generate_keys.js",
+    "test-db": "node scripts/test-pg.js"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "googleapis": "^134.0.0",
+    "pg": "^8.23.0",
+    "socket.io": "^4.7.5"
+  }
+}

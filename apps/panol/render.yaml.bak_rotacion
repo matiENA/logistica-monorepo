@@ -1,0 +1,63 @@
+services:
+  # ==============================================================
+  # 🚀 STATIC SERVICE EN RENDER (Frontend React / Vite)
+  # Publica el bundle compilado de ./frontend/dist en el CDN global
+  # ==============================================================
+  - type: static
+    name: panol-static-site
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_BACKEND_URL
+        value: https://panolnd.onrender.com
+      - key: VITE_SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
+
+  # ==============================================================
+  # 🔄 WEB SERVICE EN RENDER (Backend Node.js + Supabase + WebSockets)
+  # Ejecuta el microservicio en la raíz con node index.js
+  # ==============================================================
+  - type: web
+    name: panol-monolith-service
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.rsvajuxihvmpmrmlcbul:kMmGplQEcWDYUBAB@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
+      - key: SUPABASE_URL
+        value: https://rsvajuxihvmpmrmlcbul.supabase.co
+      - key: SUPABASE_KEY
+        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
+      - key: SPREADSHEET_ID
+        value: 1aKptNgy8a9Ca3rDW-HSlWEiriMRJMOIJuFsdViwEGFc
+      - key: SOURCE_SPREADSHEET_ID
+        value: 1HKXGsRC149Kw4aBXQwGcPVpAvObvTUFis6YV6R5cTXk
+      - key: MES_MOVIMIENTOS_ID
+        value: 1Bwj8WCykMn_FbZhQ_FqnDH3K_WCod52YTSvsaxIDNS8
+      - key: OT_SYNC_INTERVAL_MINUTES
+        value: "2"
+      - key: SYSTEM_USER
+        value: taller
+      - key: SYSTEM_PASSWORD
+        value: taller2026
+      - key: SYSTEM_AUTH_SECRET
+        value: panol-secret-auth-key-2026-xyz
+      - key: DIAGRAMAS_URL
+        value: https://diagramasnode-production.up.railway.app/api/datos
+      - key: PG_MAX_CONNECTIONS
+        value: "5"
+      - key: PG_IDLE_TIMEOUT
+        value: "10000"

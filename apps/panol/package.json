@@ -1,0 +1,32 @@
+{
+  "name": "panol-workspace",
+  "version": "1.0.0",
+  "description": "Monorepo Pañol Logistics - Frontend Estático & Backend Web Service desacoplados para Render y Localhost",
+  "scripts": {
+    "start": "node index.js",
+    "build": "npm run build --prefix frontend",
+    "dev": "node scripts/dev.js",
+    "dev:front": "npm run dev --prefix frontend",
+    "build:front": "npm run build --prefix frontend",
+    "dev:back": "node --watch backend/index.js",
+    "start:front": "npm run preview --prefix frontend",
+    "start:back": "node backend/index.js",
+    "test-db": "node backend/scripts/test-pg.js"
+  },
+  "keywords": [
+    "panol",
+    "logistics",
+    "render",
+    "supabase"
+  ],
+  "dependencies": {
+    "compression": "^1.8.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "googleapis": "^134.0.0",
+    "pg": "^8.23.0",
+    "socket.io": "^4.7.5"
+  },
+  "author": "",
+  "license": "ISC"
+}
