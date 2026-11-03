@@ -7,9 +7,20 @@ import { useDashStore } from '../store/useDashStore';
 const isLocal = typeof window !== 'undefined' && 
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-const SOCKET_URL = (import.meta as any).env?.VITE_SOCKET_URL ||
-  (import.meta as any).env?.VITE_API_URL ||
-  (isLocal ? 'http://localhost:3005' : 'https://diaria-operativas.onrender.com');
+function resolveBackendUrl(url?: string): string {
+  if (url && typeof url === 'string') {
+    const clean = url.trim().replace(/\/+$/, '');
+    // Interceptar y redirigir activamente cualquier referencia al backend anterior o deprecado
+    if (clean && !clean.includes('dash-backend') && !clean.includes('srv-dbfpnrl9fdbs739n5vvg')) {
+      return clean;
+    }
+  }
+  return isLocal ? 'http://localhost:3005' : 'https://diaria-operativas.onrender.com';
+}
+
+const SOCKET_URL = resolveBackendUrl(
+  (import.meta as any).env?.VITE_SOCKET_URL || (import.meta as any).env?.VITE_API_URL
+);
 
 export function useDash() {
   const { setTerminales, setServicios, setTiposNovedad } = useDashStore();

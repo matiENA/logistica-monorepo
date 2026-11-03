@@ -5,10 +5,17 @@ const IS_RENDER_HOST =
   window.location &&
   window.location.hostname.endsWith('.onrender.com');
 
-const BASE_API_URL = (
-  import.meta.env.VITE_API_URL ||
-  (IS_RENDER_HOST ? 'https://diaria-operativas.onrender.com' : '')
-).replace(/\/+$/, '');
+function resolveApiUrl(url) {
+  if (url && typeof url === 'string') {
+    const clean = url.trim().replace(/\/+$/, '');
+    if (clean && !clean.includes('sheet-render') && !clean.includes('srv-dbdork') && !clean.includes('dash-backend')) {
+      return clean;
+    }
+  }
+  return IS_RENDER_HOST ? 'https://diaria-operativas.onrender.com' : '';
+}
+
+const BASE_API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 
 /**
  * Cliente de transporte HTTP unificado.
