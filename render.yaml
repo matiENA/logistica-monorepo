@@ -25,7 +25,7 @@ services:
         value: "true"
       # Conexión Directa a PostgreSQL (Pooler puerto 6543)
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://postgres.rsvajuxihvmpmrmlcbul:kMmGplQEcWDYUBAB@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
       - key: PG_MAX_CONNECTIONS
         value: 5
       - key: PG_IDLE_TIMEOUT
