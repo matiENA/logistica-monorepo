@@ -19,13 +19,23 @@ const BASE_API_URL = resolveApiUrl(import.meta.env.VITE_API_URL);
 
 /**
  * Cliente de transporte HTTP unificado.
- * Prioriza los endpoints optimizados de Node.js (/api/views/* y /api/diagramas/*)
- * con compresión Gzip nativa y Connection Pooling, con fallback transparente
- * a Supabase client si el backend local no está disponible.
+ * Prioriza los endpoints optimizados de Node.js (/api/views/* y /api/movimientos/*)
+ * con compresión Gzip nativa y Connection Pooling a PostgreSQL directo.
+ * Si Supabase está excedido de cuota (HTTP 402), los fallbacks degradan limpiamente sin crashear la UI.
  */
 class ApiClient {
   constructor() {
     this.backendWarm = false;
+  }
+
+  _handleSupabaseError(err, context, defaultValue) {
+    const msg = err?.message || String(err || '');
+    if (msg.includes('quota') || msg.includes('restricted') || err?.status === 402) {
+      console.warn(`⚠️ [ApiClient] Supabase no disponible para ${context} (cuota excedida 402). Usando valor seguro.`);
+    } else {
+      console.warn(`⚠️ [ApiClient] Advertencia en fallback Supabase para ${context}:`, msg);
+    }
+    return defaultValue;
   }
 
   async fetchJson(endpoint, options = {}) {
@@ -89,34 +99,38 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_diaria_operativa:', err.message);
     }
 
-    // Fallback Supabase
-    let query = supabase.from('view_diaria_operativa').select('*', { count: 'exact' });
-    if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
-    if (alerta === 'DOCS_VENCIDOS') query = query.eq('alerta_docs_chofer', 'VENCIDO');
-    else if (alerta === 'DOCS_POR_VENCER') query = query.eq('alerta_docs_chofer', 'POR_VENCER');
-    else if (alerta === 'UNIDAD_VENCIDA') query = query.eq('alerta_docs_unidad', 'VENCIDO');
-    else if (alerta === 'UNIDAD_POR_VENCER') query = query.eq('alerta_docs_unidad', 'POR_VENCER');
-    else if (alerta === 'CUALQUIER_ALERTA') {
-      query = query.or('alerta_docs_chofer.eq.VENCIDO,alerta_docs_unidad.eq.VENCIDO,alerta_docs_chofer.eq.POR_VENCER,alerta_docs_unidad.eq.POR_VENCER');
-    }
-    if (search && search.trim()) {
-      const t = search.trim();
-      query = query.or(`nombre.ilike.%${t}%,dni.ilike.%${t}%,tractor.ilike.%${t}%,semi.ilike.%${t}%,n_ute.ilike.%${t}%`);
-    }
+    // Fallback Supabase protegido
+    try {
+      let query = supabase.from('view_diaria_operativa').select('*', { count: 'exact' });
+      if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
+      if (alerta === 'DOCS_VENCIDOS') query = query.eq('alerta_docs_chofer', 'VENCIDO');
+      else if (alerta === 'DOCS_POR_VENCER') query = query.eq('alerta_docs_chofer', 'POR_VENCER');
+      else if (alerta === 'UNIDAD_VENCIDA') query = query.eq('alerta_docs_unidad', 'VENCIDO');
+      else if (alerta === 'UNIDAD_POR_VENCER') query = query.eq('alerta_docs_unidad', 'POR_VENCER');
+      else if (alerta === 'CUALQUIER_ALERTA') {
+        query = query.or('alerta_docs_chofer.eq.VENCIDO,alerta_docs_unidad.eq.VENCIDO,alerta_docs_chofer.eq.POR_VENCER,alerta_docs_unidad.eq.POR_VENCER');
+      }
+      if (search && search.trim()) {
+        const t = search.trim();
+        query = query.or(`nombre.ilike.%${t}%,dni.ilike.%${t}%,tractor.ilike.%${t}%,semi.ilike.%${t}%,n_ute.ilike.%${t}%`);
+      }
 
-    const from = offset;
-    const to = offset + limit - 1;
-    const { data, count, error } = await query.order('nombre', { ascending: true }).range(from, to);
-    if (error) throw error;
+      const from = offset;
+      const to = offset + limit - 1;
+      const { data, count, error } = await query.order('nombre', { ascending: true }).range(from, to);
+      if (error) throw error;
 
-    return {
-      drivers: data || [],
-      totalCount: count || 0,
-      hayMas: (data && data.length === limit),
-    };
+      return {
+        drivers: data || [],
+        totalCount: count || 0,
+        hayMas: (data && data.length === limit),
+      };
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_diaria_operativa', { drivers: [], totalCount: 0, hayMas: false });
+    }
   }
 
-  // 1.5. Kilómetros diarios para Vista Diaria (Hot RAM O(1) < 1ms con fallback RPC fn_km_por_fecha)
+  // 1.5. Kilómetros diarios para Vista Diaria
   async getDiariaKm(fecha) {
     const fIso = (fecha || new Date().toISOString().split('T')[0]).split('T')[0];
     try {
@@ -128,14 +142,13 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a RPC fn_km_por_fecha en Supabase:', err.message);
     }
 
-    // Fallback Supabase O(1) indexado por (anio, mes_numero)
-    const { data, error } = await supabase.rpc('fn_km_por_fecha', { p_fecha: fIso });
-
-    if (error) {
-      console.warn('⚠️ [ApiClient] Error ejecutando fn_km_por_fecha en Supabase:', error.message);
-      return [];
+    try {
+      const { data, error } = await supabase.rpc('fn_km_por_fecha', { p_fecha: fIso });
+      if (error) throw error;
+      return data || [];
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'fn_km_por_fecha', []);
     }
-    return data || [];
   }
 
   // 2. Personal que Retorna
@@ -149,9 +162,13 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a RPC Supabase para fn_personal_retorno:', err.message);
     }
 
-    const { data, error } = await supabase.rpc('fn_personal_retorno', { p_fecha: fechaTarget });
-    if (error) throw error;
-    return data || [];
+    try {
+      const { data, error } = await supabase.rpc('fn_personal_retorno', { p_fecha: fechaTarget });
+      if (error) throw error;
+      return data || [];
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'fn_personal_retorno', []);
+    }
   }
 
   // 3. Catálogo de Flota Operativa y Vencimientos
@@ -166,10 +183,14 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_flota_operativa:', err.message);
     }
 
-    let query = supabase.from('view_flota_operativa').select('*');
-    const { data, error } = await query;
-    if (error) throw error;
-    return data || [];
+    try {
+      let query = supabase.from('view_flota_operativa').select('*');
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_flota_operativa', []);
+    }
   }
 
   // 4. Catálogo Ligero de Choferes (para selector lateral)
@@ -183,18 +204,22 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para catalogo-choferes:', err.message);
     }
 
-    const { data, error } = await supabase
-      .from('view_individual_chofer')
-      .select('chofer_id, nombre, dni, servicio, foto, telefono, estado_chofer')
-      .order('nombre');
+    try {
+      const { data, error } = await supabase
+        .from('view_individual_chofer')
+        .select('chofer_id, nombre, dni, servicio, foto, telefono, estado_chofer')
+        .order('nombre');
 
-    if (error) throw error;
-    return (data || []).map((c) => ({
-      ...c,
-      id: c.chofer_id,
-      c_servicio: c.servicio,
-      estado: c.estado_chofer,
-    }));
+      if (error) throw error;
+      return (data || []).map((c) => ({
+        ...c,
+        id: c.chofer_id,
+        c_servicio: c.servicio,
+        estado: c.estado_chofer,
+      }));
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'catalogo-choferes', []);
+    }
   }
 
   // 5. Ficha Individual de Chofer (unificada con Unidad + Vencimientos + Avalados)
@@ -209,14 +234,18 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_individual_chofer:', err.message);
     }
 
-    const { data, error } = await supabase
-      .from('view_individual_chofer')
-      .select('*')
-      .eq('chofer_id', choferId)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('view_individual_chofer')
+        .select('*')
+        .eq('chofer_id', choferId)
+        .maybeSingle();
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_individual_chofer', null);
+    }
   }
 
   // 6. Calendario Diagrama + KMs
@@ -234,26 +263,30 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_calendario_diagrama_km:', err.message);
     }
 
-    let query = supabase
-      .from('view_calendario_diagrama_km')
-      .select('diagrama_id, chofer_id, mes_tab, anio, mes_numero, tira_dias, contabilizador, km_mes_total, cant_viajes_mes, dias_km, icm, isp, cant_infracciones, tiempo_conduccion_horas')
-      .eq('chofer_id', choferId);
+    try {
+      let query = supabase
+        .from('view_calendario_diagrama_km')
+        .select('diagrama_id, chofer_id, mes_tab, anio, mes_numero, tira_dias, contabilizador, km_mes_total, cant_viajes_mes, dias_km, icm, isp, cant_infracciones, tiempo_conduccion_horas')
+        .eq('chofer_id', choferId);
 
-    if (targetTabs.length > 0) {
-      query = query.in('mes_tab', targetTabs);
-    } else if (anio) {
-      query = query.eq('anio', parseInt(anio, 10));
+      if (targetTabs.length > 0) {
+        query = query.in('mes_tab', targetTabs);
+      } else if (anio) {
+        query = query.eq('anio', parseInt(anio, 10));
+      }
+
+      const { data, error } = await query.order('anio', { ascending: true }).order('mes_numero', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(r => ({
+        ...r,
+        icm: r.icm !== null && r.icm !== undefined ? Number(r.icm) : null,
+        isp: r.isp !== null && r.isp !== undefined ? Number(r.isp) : null,
+        cant_infracciones: r.cant_infracciones ? Number(r.cant_infracciones) : 0,
+        tiempo_conduccion_horas: r.tiempo_conduccion_horas ? Number(r.tiempo_conduccion_horas) : 0
+      }));
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_calendario_diagrama_km', []);
     }
-
-    const { data, error } = await query.order('anio', { ascending: true }).order('mes_numero', { ascending: true });
-    if (error) throw error;
-    return (data || []).map(r => ({
-      ...r,
-      icm: r.icm !== null && r.icm !== undefined ? Number(r.icm) : null,
-      isp: r.isp !== null && r.isp !== undefined ? Number(r.isp) : null,
-      cant_infracciones: r.cant_infracciones ? Number(r.cant_infracciones) : 0,
-      tiempo_conduccion_horas: r.tiempo_conduccion_horas ? Number(r.tiempo_conduccion_horas) : 0
-    }));
   }
 
   async invalidateCalendario(choferId = null) {
@@ -303,29 +336,33 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_cards_diarias:', err.message);
     }
 
-    let query = supabase.from('view_cards_diarias').select('*', { count: 'exact' });
-    if (estado === 'pendientes') query = query.eq('resuelto', false);
-    else if (estado === 'resueltas') query = query.eq('resuelto', true);
-    if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
-    if (tipo && tipo !== 'TODOS') query = query.eq('tipo', tipo);
-    if (search && search.trim()) {
-      const term = search.trim();
-      query = query.or(`chofer_nombre.ilike.%${term}%,tractor.ilike.%${term}%,n_ute.ilike.%${term}%`);
+    try {
+      let query = supabase.from('view_cards_diarias').select('*', { count: 'exact' });
+      if (estado === 'pendientes') query = query.eq('resuelto', false);
+      else if (estado === 'resueltas') query = query.eq('resuelto', true);
+      if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
+      if (tipo && tipo !== 'TODOS') query = query.eq('tipo', tipo);
+      if (search && search.trim()) {
+        const term = search.trim();
+        query = query.or(`chofer_nombre.ilike.%${term}%,tractor.ilike.%${term}%,n_ute.ilike.%${term}%`);
+      }
+
+      const from = offset;
+      const to = offset + limit - 1;
+      const { data, error, count } = await query
+        .order('fecha', { ascending: false, nullsFirst: false })
+        .order('creado_el', { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+      return {
+        cards: data || [],
+        totalCount: count || 0,
+        hayMas: (data && data.length === limit),
+      };
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_cards_diarias', { cards: [], totalCount: 0, hayMas: false });
     }
-
-    const from = offset;
-    const to = offset + limit - 1;
-    const { data, error, count } = await query
-      .order('fecha', { ascending: false, nullsFirst: false })
-      .order('creado_el', { ascending: false })
-      .range(from, to);
-
-    if (error) throw error;
-    return {
-      cards: data || [],
-      totalCount: count || 0,
-      hayMas: (data && data.length === limit),
-    };
   }
 
   // 8. Grilla Operativa Mensual de Diagrama
@@ -344,11 +381,15 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_diagrama_mensual:', err.message);
     }
 
-    let query = supabase.from('view_diagrama_mensual').select('*').eq('mes_tab', mesTab);
-    if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
-    const { data, error } = await query.order('chofer_nombre');
-    if (error) throw error;
-    return data || [];
+    try {
+      let query = supabase.from('view_diagrama_mensual').select('*').eq('mes_tab', mesTab);
+      if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
+      const { data, error } = await query.order('chofer_nombre');
+      if (error) throw error;
+      return data || [];
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_diagrama_mensual', []);
+    }
   }
 
   // 9. Movimientos Activos (Unidad + Chofer Actual)
@@ -373,35 +414,38 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_movimientos:', err.message);
     }
 
-    // Fallback Supabase
-    let query = supabase.from('view_movimientos').select('*', { count: 'exact' });
-    if (servicio && servicio !== 'TODOS') {
-      query = query.or(`servicio_unidad.eq.${servicio},chofer_servicio.eq.${servicio}`);
-    }
-    if (estado && estado !== 'TODOS') {
-      query = query.or(`unidad_estado.eq.${estado},chofer_estado.eq.${estado}`);
-    }
-    if (search && search.trim()) {
-      const t = search.trim();
-      query = query.or(`chofer_nombre.ilike.%${t}%,chofer_dni.ilike.%${t}%,tractor.ilike.%${t}%,semi.ilike.%${t}%,n_ute.ilike.%${t}%`);
-    }
+    try {
+      let query = supabase.from('view_movimientos').select('*', { count: 'exact' });
+      if (servicio && servicio !== 'TODOS') {
+        query = query.or(`servicio_unidad.eq.${servicio},chofer_servicio.eq.${servicio}`);
+      }
+      if (estado && estado !== 'TODOS') {
+        query = query.or(`unidad_estado.eq.${estado},chofer_estado.eq.${estado}`);
+      }
+      if (search && search.trim()) {
+        const t = search.trim();
+        query = query.or(`chofer_nombre.ilike.%${t}%,chofer_dni.ilike.%${t}%,tractor.ilike.%${t}%,semi.ilike.%${t}%,n_ute.ilike.%${t}%`);
+      }
 
-    const from = offset;
-    const to = offset + limit - 1;
-    const { data, count, error } = await query
-      .order('n_ute', { ascending: true, nullsFirst: false })
-      .order('tractor', { ascending: true, nullsFirst: false })
-      .range(from, to);
+      const from = offset;
+      const to = offset + limit - 1;
+      const { data, count, error } = await query
+        .order('n_ute', { ascending: true, nullsFirst: false })
+        .order('tractor', { ascending: true, nullsFirst: false })
+        .range(from, to);
 
-    if (error) throw error;
-    return {
-      datos: data || [],
-      total: count || 0,
-      hayMas: data && data.length === limit,
-    };
+      if (error) throw error;
+      return {
+        datos: data || [],
+        total: count || 0,
+        hayMas: data && data.length === limit,
+      };
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'view_movimientos', { datos: [], total: 0, hayMas: false });
+    }
   }
 
-  // 10. Badge de Novedades Pendientes (Hot RAM TTL 30s)
+  // 10. Badge de Novedades Pendientes
   async getBadgePendientes() {
     try {
       const res = await this.fetchJson('/api/views/badge');
@@ -412,15 +456,19 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para badge novedades:', err.message);
     }
 
-    const { count, error } = await supabase
-      .from('novedades')
-      .select('id', { count: 'exact', head: true })
-      .eq('resuelto', false);
-    if (error) return { novedades_pendientes: 0 };
-    return { novedades_pendientes: count || 0 };
+    try {
+      const { count, error } = await supabase
+        .from('novedades')
+        .select('id', { count: 'exact', head: true })
+        .eq('resuelto', false);
+      if (error) return { novedades_pendientes: 0 };
+      return { novedades_pendientes: count || 0 };
+    } catch (_) {
+      return { novedades_pendientes: 0 };
+    }
   }
 
-  // 11. Documentación de Chofer (Hot RAM C1 + refresco canónico post-mutación)
+  // 11. Documentación de Chofer
   async getChoferDocs(choferId, fresh = false) {
     if (!choferId) return null;
     try {
@@ -433,20 +481,29 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para chofer_documentacion:', err.message);
     }
 
-    const { data, error } = await supabase
-      .from('chofer_documentacion')
-      .select('*')
-      .eq('chofer_id', choferId)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('chofer_documentacion')
+        .select('*')
+        .eq('chofer_id', choferId)
+        .maybeSingle();
 
-    if (error) {
-      console.warn('⚠️ [ApiClient] Error consultando chofer_documentacion:', error.message);
-      return null;
+      if (error) throw error;
+      return data;
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'chofer_documentacion', null);
     }
-    return data;
   }
 
-  // 12. Observaciones de Chofer (LRU C2 TTL 5 min)
+  // 11.5 Guardar Documentación de Chofer (vía backend PostgreSQL directo)
+  async updateChoferDocs({ choferId, docId, fields }) {
+    return await this.fetchJson('/api/views/chofer-docs', {
+      method: 'POST',
+      body: JSON.stringify({ choferId, docId, fields }),
+    });
+  }
+
+  // 12. Observaciones de Chofer
   async getChoferObservaciones(choferId, fresh = false) {
     if (!choferId) return [];
     try {
@@ -459,17 +516,26 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para chofer_observaciones:', err.message);
     }
 
-    const { data, error } = await supabase
-      .from('chofer_observaciones')
-      .select('*')
-      .eq('chofer_id', choferId)
-      .order('fecha', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('chofer_observaciones')
+        .select('*')
+        .eq('chofer_id', choferId)
+        .order('fecha', { ascending: false });
 
-    if (error) {
-      console.warn('⚠️ [ApiClient] Error consultando chofer_observaciones:', error.message);
-      return [];
+      if (error) throw error;
+      return data || [];
+    } catch (sbErr) {
+      return this._handleSupabaseError(sbErr, 'chofer_observaciones', []);
     }
-    return data || [];
+  }
+
+  // 12.5 Agregar Observación de Chofer (vía backend PostgreSQL directo)
+  async addChoferObservacion(payload) {
+    return await this.fetchJson('/api/views/chofer-observaciones', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   // 13. Asignación Atómica de Unidad (Node Backend Hot RAM + ACID Supabase RPC fallback)
@@ -495,13 +561,17 @@ class ApiClient {
     }
 
     // Fallback RPC directo a Supabase
-    const { data, error } = await supabase.rpc('fn_asignar_unidad_chofer', {
-      p_chofer_id: choferId,
-      p_unidad_id: unidadId,
-      p_usuario: usuario,
-    });
-    if (error) throw error;
-    return { success: true, message: 'Unidad asignada exitosamente', data };
+    try {
+      const { data, error } = await supabase.rpc('fn_asignar_unidad_chofer', {
+        p_chofer_id: choferId,
+        p_unidad_id: unidadId,
+        p_usuario: usuario,
+      });
+      if (error) throw error;
+      return { success: true, message: 'Unidad asignada exitosamente', data };
+    } catch (sbErr) {
+      throw new Error(this._handleSupabaseError(sbErr, 'fn_asignar_unidad_chofer', 'Error al asignar unidad'));
+    }
   }
 
   // 14. Desunión Atómica de Unidad (Node Backend Hot RAM + ACID Supabase RPC fallback)
@@ -522,12 +592,16 @@ class ApiClient {
     }
 
     // Fallback RPC directo a Supabase
-    const { data, error } = await supabase.rpc('fn_desunir_unidad_chofer', {
-      p_chofer_id: choferId,
-      p_usuario: usuario,
-    });
-    if (error) throw error;
-    return { success: true, message: 'Unidad desasignada exitosamente', data };
+    try {
+      const { data, error } = await supabase.rpc('fn_desunir_unidad_chofer', {
+        p_chofer_id: choferId,
+        p_usuario: usuario,
+      });
+      if (error) throw error;
+      return { success: true, message: 'Unidad desasignada exitosamente', data };
+    } catch (sbErr) {
+      throw new Error(this._handleSupabaseError(sbErr, 'fn_desunir_unidad_chofer', 'Error al desunir unidad'));
+    }
   }
 }
 

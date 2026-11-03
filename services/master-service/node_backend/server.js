@@ -94,7 +94,12 @@ let cacheDatosGlobales = {
 // ==============================================================
 // ⏱️ INICIAR CACHE + POLLING
 // ==============================================================
-iniciarCachePolling(cacheDatosGlobales, io, ioDash);
+const ENABLE_RAM_CACHE_POLLING = process.env.ENABLE_RAM_CACHE_POLLING === 'true';
+if (ENABLE_RAM_CACHE_POLLING) {
+    iniciarCachePolling(cacheDatosGlobales, io, ioDash);
+} else {
+    console.log('⚡ [Backend] Polling de Google Sheets en RAM deshabilitado para optimizar consumo de memoria (ENABLE_RAM_CACHE_POLLING=false). Todo servido vía PostgreSQL views.');
+}
 
 // ==============================================================
 // 🛣️ RUTAS
@@ -125,7 +130,14 @@ app.use(['/sync', '/status'], (req, res) => {
 
 // Datos principales (lectura)
 app.get('/api/datos', (req, res) => {
-    if (!cacheDatosGlobales.diagramas) return res.status(503).json({ error: "Cargando DB..." });
+    if (!cacheDatosGlobales.diagramas) {
+        return res.json({
+            success: true,
+            fuente: "POSTGRES_VIEWS",
+            message: "Datos servidos bajo demanda mediante vistas relacionales PostgreSQL (/api/views/*)",
+            timestamp: new Date().toISOString()
+        });
+    }
 
     // Enviar el objeto completo incluyendo la ventana de 60 días de KM en RAM (nuevaSeccionViajes)
     const payload = {

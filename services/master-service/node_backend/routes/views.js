@@ -831,6 +831,94 @@ module.exports = function createViewsRouter() {
         }
     });
 
+    // 14. POST /api/views/chofer-docs — Mutación de documentación vía PostgreSQL directo
+    router.post('/chofer-docs', async (req, res) => {
+        try {
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: "PostgreSQL no configurado" });
+            }
+            const { choferId, docId, fields } = req.body || {};
+            if (!choferId && !docId) {
+                return res.status(400).json({ success: false, error: "choferId o docId requerido" });
+            }
+
+            const allowedCols = [
+                'drv_codigo', 'cuil', 'dni', 'telefono', 'email', 'empresa', 'area',
+                'domicilio', 'localidad', 'telefono_emergencia', 'fecha_alta', 'estudios_nivel',
+                'experiencia_anios', 'fecha_nacimiento', 'edad', 'venc_licencia_nacional',
+                'venc_psicofisico', 'venc_cargas_peligrosas', 'venc_periodico', 'venc_curso_shell',
+                'venc_manejo_def', 'curso_pae', 'apto_medico_venc', 'apto_medico_estado'
+            ];
+
+            const entries = Object.entries(fields || {}).filter(([k]) => allowedCols.includes(k));
+            if (entries.length === 0) {
+                return res.status(400).json({ success: false, error: "No se proporcionaron campos válidos" });
+            }
+
+            if (docId) {
+                const setClauses = entries.map(([k], i) => `"${k}" = $${i + 1}`);
+                const values = entries.map(([, v]) => v || null);
+                values.push(new Date().toISOString());
+                setClauses.push(`actualizado_el = $${values.length}`);
+                values.push(docId);
+                const sql = `UPDATE public.chofer_documentacion SET ${setClauses.join(', ')} WHERE id = $${values.length} RETURNING *`;
+                const r = await db.query(sql, values);
+                return res.json({ success: true, dato: r.rows[0] });
+            } else {
+                const cols = ['chofer_id', ...entries.map(([k]) => `"${k}"`), 'actualizado_el'];
+                const valPlaceholders = cols.map((_, i) => `$${i + 1}`);
+                const values = [choferId, ...entries.map(([, v]) => v || null), new Date().toISOString()];
+                const updateSets = entries.map(([k]) => `"${k}" = EXCLUDED."${k}"`);
+                updateSets.push('actualizado_el = EXCLUDED.actualizado_el');
+                const sql = `
+                    INSERT INTO public.chofer_documentacion (${cols.join(', ')})
+                    VALUES (${valPlaceholders.join(', ')})
+                    ON CONFLICT (chofer_id) DO UPDATE SET ${updateSets.join(', ')}
+                    RETURNING *
+                `;
+                const r = await db.query(sql, values);
+                return res.json({ success: true, dato: r.rows[0] });
+            }
+        } catch (err) {
+            console.error("❌ Error en POST /api/views/chofer-docs:", err.message);
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 15. POST /api/views/chofer-observaciones — Inserción de observación vía PostgreSQL directo
+    router.post('/chofer-observaciones', async (req, res) => {
+        try {
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: "PostgreSQL no configurado" });
+            }
+            const { choferId, unidadId, fecha, evento, obsEvento, estado, obsEstado, adminCarga } = req.body || {};
+            if (!choferId) {
+                return res.status(400).json({ success: false, error: "choferId requerido" });
+            }
+
+            const sql = `
+                INSERT INTO public.chofer_observaciones (chofer_id, unidad_id, fecha, evento, obs_evento, estado, obs_estado, admin_carga)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING *
+            `;
+            const values = [
+                choferId,
+                unidadId || null,
+                fecha || new Date().toISOString().split('T')[0],
+                evento || null,
+                obsEvento || null,
+                estado || null,
+                obsEstado || null,
+                adminCarga || 'OPERADOR'
+            ];
+            const r = await db.query(sql, values);
+            return res.json({ success: true, dato: r.rows[0] });
+        } catch (err) {
+            console.error("❌ Error en POST /api/views/chofer-observaciones:", err.message);
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
     // 13. POST /api/views/invalidate-calendario — Purgar caché de calendario y métricas
     router.post(['/invalidate-calendario', '/refresh-seguridad-vial'], async (req, res) => {
         res.json({ success: true, message: "Caché invalidado exitosamente" });

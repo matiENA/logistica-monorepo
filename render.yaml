@@ -34,6 +34,8 @@ services:
         value: 10000
       - key: KM_RAM_DIAS
         value: 60
+      - key: ENABLE_RAM_CACHE_POLLING
+        value: "false"
       # Supabase Fallback API
       - key: SUPABASE_URL
         value: https://rsvajuxihvmpmrmlcbul.supabase.co
@@ -112,6 +114,8 @@ services:
         value: https://rsvajuxihvmpmrmlcbul.supabase.co
       - key: VITE_SUPABASE_KEY
         value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
+      - key: VITE_ENABLE_REALTIME
+        value: "false"
 
   # ------------------------------------------------------------
   # 4. SERVICIO PAÑOL MONOLITH (Web Service en producción srv-d9adns3eo5us739q897g)

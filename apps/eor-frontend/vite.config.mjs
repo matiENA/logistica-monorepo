@@ -9,8 +9,8 @@ import path from 'path';
 export default defineConfig(({ mode }) => {
   const rootDir = path.resolve(import.meta.dirname, '../..');
   const env = loadEnv(mode, rootDir, '');
-  const port = parseInt(env.FRONT_PORT || '3000', 10);
-  const backend = env.BACKEND_URL || 'http://localhost:3005';
+  const port = parseInt(env.FRONT_PORT || '4000', 10);
+  const backend = env.BACKEND_URL || 'http://localhost:4005';
 
   return {
     plugins: [react()],

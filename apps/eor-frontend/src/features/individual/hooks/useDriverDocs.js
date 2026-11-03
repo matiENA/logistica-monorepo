@@ -44,21 +44,30 @@ export const useUpdateDocField = (choferParam) => {
         actualizado_por: usuarioActivo,
       };
 
-      // 1. Persistencia en Supabase
-      if (docId) {
-        const { error } = await supabase
-          .from('chofer_documentacion')
-          .update(updatePayload)
-          .eq('id', docId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('chofer_documentacion')
-          .insert([{
-            chofer_id: choferId,
-            ...updatePayload,
-          }]);
-        if (error) throw error;
+      // 1. Persistencia a través de backend unificado (PostgreSQL directo)
+      try {
+        await apiClient.updateChoferDocs({
+          choferId,
+          docId,
+          fields: { [field]: value }
+        });
+      } catch (err) {
+        console.warn('⚠️ [useUpdateDocField] Fallback directo a Supabase:', err.message);
+        if (docId) {
+          const { error } = await supabase
+            .from('chofer_documentacion')
+            .update(updatePayload)
+            .eq('id', docId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('chofer_documentacion')
+            .insert([{
+              chofer_id: choferId,
+              ...updatePayload,
+            }]);
+          if (error) throw error;
+        }
       }
 
       return { field, value };
@@ -160,21 +169,30 @@ export const useSaveAllDocs = (choferParam) => {
         actualizado_por: usuarioActivo,
       };
 
-      // 1. Persistencia en Supabase
-      if (docId) {
-        const { error } = await supabase
-          .from('chofer_documentacion')
-          .update(updatePayload)
-          .eq('id', docId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('chofer_documentacion')
-          .insert([{
-            chofer_id: choferId,
-            ...updatePayload,
-          }]);
-        if (error) throw error;
+      // 1. Persistencia a través de backend unificado (PostgreSQL directo)
+      try {
+        await apiClient.updateChoferDocs({
+          choferId,
+          docId,
+          fields: { [field]: value }
+        });
+      } catch (err) {
+        console.warn('⚠️ [useUpdateDocField] Fallback directo a Supabase:', err.message);
+        if (docId) {
+          const { error } = await supabase
+            .from('chofer_documentacion')
+            .update(updatePayload)
+            .eq('id', docId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('chofer_documentacion')
+            .insert([{
+              chofer_id: choferId,
+              ...updatePayload,
+            }]);
+          if (error) throw error;
+        }
       }
     },
 
