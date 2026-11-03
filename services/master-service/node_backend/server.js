@@ -33,6 +33,8 @@ const createActivosRouter = require('./routes/activos');
 const createMovimientosRouter = require('./routes/movimientos');
 const createDiagramasSyncRouter = require('./routes/diagramasSync');
 const createKmSyncRouter = require('./routes/kmSync');
+const createViewsRouter = require('./routes/views');
+const createSyncQueueRouter = require('./routes/syncQueue');
 
 // ==============================================================
 // 🚀 EXPRESS + SOCKET.IO
@@ -405,6 +407,21 @@ app.all(['/sync', '/api/sync', '/api/sync/all'], async (req, res) => {
         res.status(500).json({ success: false, error: e.message });
     }
 });
+
+// Vistas relacionales (Supabase/PostgreSQL)
+app.use('/api/views', createViewsRouter());
+
+// EOR Sync Queue (Consumo de cola transaccional hacia Google Sheets)
+try {
+    const syncQueueRouter = createSyncQueueRouter();
+    app.use('/api/sync/queue', syncQueueRouter);
+    app.use('/uptimerobot', (req, res, next) => {
+        req.url = '/uptimerobot' + (req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '');
+        syncQueueRouter(req, res, next);
+    });
+} catch (e) {
+    console.warn("⚠️ No se pudo inicializar routes/syncQueue:", e.message);
+}
 
 // DASH — API ligera (solo flota + usuarios, sin días) + Legajo bajo demanda
 const dashRouter = createDashRouter(cacheDatosGlobales, io, ioDash);
