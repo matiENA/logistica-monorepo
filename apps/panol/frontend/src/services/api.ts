@@ -9,7 +9,7 @@ const IS_LOCAL = typeof window !== 'undefined' && (
 
 export const BACKEND_URL = IS_LOCAL
   ? 'http://localhost:5000'
-  : (import.meta.env.VITE_BACKEND_URL || 'https://panolnd.onrender.com');
+  : 'https://panol-monolith-service.onrender.com';
 
 export async function panolFetch<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = endpoint.startsWith('http')

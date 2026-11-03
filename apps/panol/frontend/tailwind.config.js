@@ -50,11 +50,9 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['"Roboto Mono"', '"JetBrains Mono"', 'monospace'],
-        robotoMono: ['"Roboto Mono"', 'monospace'],
-        plate: ['"FE-Font"', '"FE-FONT"', 'monospace'],
+        mono: ['"JetBrains Mono"', '"Roboto Mono"', 'monospace'],
+        plate: ['"FE-Font"', '"FE-FONT"', 'sans-serif'],
         tech: ['"Share Tech Mono"', 'monospace'],
-        zilla: ['"Zilla Slab"', 'serif'],
       }
     },
   },

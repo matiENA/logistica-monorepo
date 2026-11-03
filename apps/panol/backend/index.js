@@ -45,10 +45,7 @@ const {
   getStaffAndLocations,
   getCoordinacionBoard,
   saveOtCoordinacionJson,
-  saveAllCoordinacionBatch,
-  updateTaskExecutionInSupabase,
-  exportAndPurgeColdOrdersOlderThan180Days,
-  ingestOtsFromSheetsToSupabase
+  saveAllCoordinacionBatch
 } = require('./taskSyncService');
 
 const compression = require('compression');
@@ -64,31 +61,29 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 
-// Directorio del frontend compilado (Vite React dist)
-const FRONTEND_DIST = path.join(__dirname, '..', 'frontend', 'dist');
-const FRONTEND_DIR = fs.existsSync(FRONTEND_DIST) ? FRONTEND_DIST : null;
+// Directorio del frontend (prioriza public raíz de Render, o public de backend, o ../frontend)
+const FRONTEND_DIR = fs.existsSync(path.join(__dirname, '..', 'public'))
+  ? path.join(__dirname, '..', 'public')
+  : (fs.existsSync(path.join(__dirname, 'public'))
+      ? path.join(__dirname, 'public')
+      : (fs.existsSync(path.join(__dirname, '..', 'frontend')) ? path.join(__dirname, '..', 'frontend') : null));
 
 function serveStaticOrJson(res, filename, extra = {}, forceRaw = false) {
-  const distDir = FRONTEND_DIR || (fs.existsSync(FRONTEND_DIST) ? FRONTEND_DIST : null);
-  if (distDir) {
-    const filePath = filename === 'index.html'
-      ? path.join(distDir, 'index.html')
-      : path.join(distDir, filename);
+  if (FRONTEND_DIR) {
+    let filePath = path.join(FRONTEND_DIR, filename);
+    // Priorizar versión clásica funcional de index.html si está en legacy y no se fuerza raw
+    if (filename === 'index.html' && !forceRaw && fs.existsSync(path.join(FRONTEND_DIR, 'legacy', 'index.html'))) {
+      filePath = path.join(FRONTEND_DIR, 'legacy', 'index.html');
+    }
     if (fs.existsSync(filePath)) {
       return res.sendFile(filePath);
-    }
-    if (filename.endsWith('.html')) {
-      const spaIndex = path.join(distDir, 'index.html');
-      if (fs.existsSync(spaIndex)) {
-        return res.sendFile(spaIndex);
-      }
     }
   }
   return res.json({
     service: 'Pañol Logistics Microservice (Backend Web Service)',
     status: 'online',
     route: filename,
-    notice: 'El Frontend React se publica de forma independiente en Render Static Site (o en http://localhost:5173 en desarrollo)',
+    notice: 'El Frontend se publica de forma independiente en su propio servicio estático',
     timestamp: new Date().toISOString(),
     ...extra
   });
@@ -145,19 +140,6 @@ function getAllowedPasswords() {
   });
 
   return Array.from(allowed);
-}
-
-// Obtener contraseña maestra del sistema (prioridad: Supabase panol.system_config -> env SYSTEM_PASSWORD -> fallback taller2026)
-async function getSystemPassword() {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const q = await db.query("SELECT value FROM panol.system_config WHERE key = 'SYSTEM_PASSWORD' LIMIT 1;");
-      if (q.rows.length > 0 && q.rows[0].value) {
-        return q.rows[0].value.trim();
-      }
-    } catch (e) {}
-  }
-  return (process.env.SYSTEM_PASSWORD || 'taller2026').trim();
 }
 
 // Almacén multi-acceso: Mapea usuario -> lista de contraseñas autorizadas
@@ -390,155 +372,14 @@ const sheets = getSheetsClient();
 
 // === 2. MEMORIA Y CACHÉ TIEMPO REAL ===
 let ordersCache = [];
-let ordersCacheFetchedAt = 0;
-let devolucionesCache = new Map(); // key ('__ALL__' | 'NUEVO' | 'CANJE') -> { ts, payload }
-let devolucionesNuevasCache = { ts: 0, payload: null };
-const MONITOR_CACHE_TTL_MS = 30 * 1000;
-
-function invalidateMonitorPanolCaches() {
-  ordersCacheFetchedAt = 0;
-  devolucionesCache.clear();
-  devolucionesNuevasCache = { ts: 0, payload: null };
-}
-
 let itemsCatalogCache = [];
-let sqlItemsCatalogCache = null;
-let sqlInventoryListCache = null;
-let sqlItemsMap = new Map(); // item uuid -> canonical item record
-let sqlItemsMaxUpdatedAt = null;
-let sqlItemsCatalogLastFetch = 0;
-let sqlItemsNeedsDelta = false;
-const SQL_ITEMS_CACHE_TTL = 60 * 1000; // Delta check liviano cada 60s (0 filas si no hubo cambios)
-
-function rebuildSqlItemsDerivedCaches() {
-  const activeRows = Array.from(sqlItemsMap.values())
-    .filter(it => it.is_active)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  sqlItemsCatalogCache = activeRows.map(i => ({
-    id: i.item_code,
-    category: i.category,
-    name: i.name,
-    brand: i.brand,
-    stock: i.stock,
-    loc: i.loc,
-    requiereCanje: i.requiereCanje,
-    requires_exchange: i.requires_exchange
-  }));
-
-  sqlInventoryListCache = activeRows.map(i => ({
-    id: i.uuid,
-    item_code: i.item_code,
-    code: i.item_code,
-    name: i.name,
-    brand: i.brand,
-    stock: i.stock,
-    loc: i.loc,
-    requiereCanje: i.requiereCanje,
-    requires_exchange: i.requires_exchange,
-    _searchName: i.nameLower,
-    _searchBrand: i.brandLower,
-    _searchCode: i.codeLower
-  }));
-}
-
-async function ensureSqlItemsCatalog() {
-  if (!(db && db.isConfigured && db.isConfigured())) return false;
-  const now = Date.now();
-
-  if (sqlItemsCatalogCache && !sqlItemsNeedsDelta && (now - sqlItemsCatalogLastFetch < SQL_ITEMS_CACHE_TTL)) {
-    return true;
-  }
-
-  try {
-    if (!sqlItemsCatalogCache || sqlItemsMap.size === 0 || !sqlItemsMaxUpdatedAt) {
-      // Carga inicial completa una sola vez por ciclo de vida del proceso
-      const itRes = await db.query(
-        "SELECT id, item_code, name, brand, category, requires_exchange, stock, location, is_active, updated_at FROM panol.items WHERE is_active = true;"
-      );
-      sqlItemsMap.clear();
-      let maxTs = null;
-      for (const r of itRes.rows) {
-        const tsIso = r.updated_at ? new Date(r.updated_at).toISOString() : null;
-        if (tsIso && (!maxTs || tsIso > maxTs)) maxTs = tsIso;
-        const nameStr = r.name || '';
-        const brandStr = r.brand || '';
-        const codeStr = r.item_code || '';
-        sqlItemsMap.set(String(r.id), {
-          uuid: r.id,
-          item_code: codeStr,
-          category: r.category || 'GENERAL',
-          name: nameStr,
-          nameLower: nameStr.toLowerCase(),
-          brand: brandStr,
-          brandLower: brandStr.toLowerCase(),
-          codeLower: codeStr.toLowerCase(),
-          stock: parseFloat(r.stock) || 0,
-          loc: r.location || 'S/D',
-          requiereCanje: !!r.requires_exchange,
-          requires_exchange: !!r.requires_exchange,
-          is_active: r.is_active !== false
-        });
-      }
-      sqlItemsMaxUpdatedAt = maxTs || new Date().toISOString();
-      rebuildSqlItemsDerivedCaches();
-    } else {
-      // Sincronización incremental por delta: 0 filas transferidas cuando el catálogo no cambió
-      const deltaRes = await db.query(
-        "SELECT id, item_code, name, brand, category, requires_exchange, stock, location, is_active, updated_at FROM panol.items WHERE updated_at > $1;",
-        [sqlItemsMaxUpdatedAt]
-      );
-      if (deltaRes.rows.length > 0) {
-        let maxTs = sqlItemsMaxUpdatedAt;
-        for (const r of deltaRes.rows) {
-          const tsIso = r.updated_at ? new Date(r.updated_at).toISOString() : null;
-          if (tsIso && tsIso > maxTs) maxTs = tsIso;
-          const key = String(r.id);
-          if (r.is_active === false) {
-            sqlItemsMap.delete(key);
-          } else {
-            const nameStr = r.name || '';
-            const brandStr = r.brand || '';
-            const codeStr = r.item_code || '';
-            sqlItemsMap.set(key, {
-              uuid: r.id,
-              item_code: codeStr,
-              category: r.category || 'GENERAL',
-              name: nameStr,
-              nameLower: nameStr.toLowerCase(),
-              brand: brandStr,
-              brandLower: brandStr.toLowerCase(),
-              codeLower: codeStr.toLowerCase(),
-              stock: parseFloat(r.stock) || 0,
-              loc: r.location || 'S/D',
-              requiereCanje: !!r.requires_exchange,
-              requires_exchange: !!r.requires_exchange,
-              is_active: true
-            });
-          }
-        }
-        sqlItemsMaxUpdatedAt = maxTs;
-        rebuildSqlItemsDerivedCaches();
-      }
-    }
-
-    sqlItemsCatalogLastFetch = now;
-    sqlItemsNeedsDelta = false;
-    return true;
-  } catch (sqlErr) {
-    console.warn('⚠️ [SQL] Error ensureSqlItemsCatalog:', sqlErr.message);
-    return Boolean(sqlItemsCatalogCache);
-  }
-}
 let uiPropertiesCache = {};
 let readyTimestamps = {}; // reqId -> timestamp when transitioned to LISTO
 let lastSyncTime = 0;
 const MIN_SYNC_INTERVAL_MS = 8000; // Evitar Quota Exceeded (max 1 lectura cada 8s)
 
-// === 2.1 CACHÉ EN RAM DE FLOTA Y OTs (Supabase panol.v_flota_busqueda y public.unidades) ===
-let ramFleetCache = new Map(); // normalizedPlate -> { unidadId, nUte, tractorPlate, tractorBrand, semiPlate, semiBrand, service, activeOt, tractorOt, semiOt }
-let otListByTractor = new Map();
-let otListBySemi = new Map();
+// === 2.1 CACHÉ EN RAM DE UNIDADES (Supabase EOR public.unidades) ===
+let ramFleetCache = new Map(); // normalizedPlate -> { unidadId, nUte, tractorPlate, tractorBrand, semiPlate, semiBrand, service }
 let lastDiagramasSync = 0;
 
 async function syncFleetFromSupabase() {
@@ -546,73 +387,46 @@ async function syncFleetFromSupabase() {
     try {
       const res = await db.query(`
         SELECT 
-          unidad_id,
-          COALESCE(n_ute, '') as n_ute,
-          COALESCE(tractor, '') as tractor,
-          COALESCE(marca_tr, '') as marca_tr,
-          COALESCE(semi, '') as semi,
-          COALESCE(marca_semi, '') as marca_semi,
-          COALESCE(servicio, 'GENERAL') as servicio,
-          COALESCE(estado_unidad, 'disponible') as estado_unidad,
-          COALESCE(active_ot_number, '') as active_ot_number,
-          COALESCE(tractor_ot, '') as tractor_ot,
-          COALESCE(semi_ot, '') as semi_ot
-        FROM panol.v_flota_busqueda
-        WHERE COALESCE(tractor, '') <> '' OR COALESCE(semi, '') <> '';
+          u.id as unidad_id,
+          u.n_ute,
+          COALESCE(t.patente, '') as tractor,
+          COALESCE(t.marca, '') as marca_tr,
+          COALESCE(s.patente, '') as semi,
+          COALESCE(s.marca, '') as marca_semi,
+          COALESCE(su.denominacion, 'GENERAL') as servicio
+        FROM public.unidades u
+        LEFT JOIN public.tractores t ON u.tractor_id = t.id
+        LEFT JOIN public.semis s ON u.semi_id = s.id
+        LEFT JOIN public.servicios_unidades su ON u.servicio_id = su.id;
       `);
 
       const units = res.rows || [];
       if (units.length > 0) {
-        const newFleetMap = new Map();
-        const newByTractor = new Map();
-        const newBySemi = new Map();
-
+        const newMap = new Map();
         units.forEach(u => {
-          const t = u.tractor ? String(u.tractor).trim() : '';
-          const s = u.semi ? String(u.semi).trim() : '';
-          const tractorP = t.toUpperCase().replace(/[\s\-_.]/g, '');
-          const semiP = s.toUpperCase().replace(/[\s\-_.]/g, '');
+          const tractorP = u.tractor ? String(u.tractor).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
           const tractorBrand = u.marca_tr ? String(u.marca_tr).trim().toUpperCase() : '';
+          const semiP = u.semi ? String(u.semi).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
           const semiBrand = u.marca_semi ? String(u.marca_semi).trim().toUpperCase() : '';
           const srv = u.servicio || '';
-          const tot = u.tractor_ot || u.active_ot_number || '';
-          const sot = u.semi_ot || u.active_ot_number || '';
 
           const entry = {
             unidadId: u.unidad_id,
             nUte: u.n_ute || '',
-            tractorPlate: t,
+            tractorPlate: u.tractor || '',
             tractorBrand,
-            semiPlate: s,
+            semiPlate: u.semi || '',
             semiBrand,
-            service: srv,
-            activeOt: u.active_ot_number || '',
-            tractorOt: tot,
-            semiOt: sot
+            service: srv
           };
 
-          if (tractorP) newFleetMap.set(tractorP, entry);
-          if (semiP) newFleetMap.set(semiP, entry);
-
-          const item = {
-            tractor: t,
-            ot: tot,
-            semi: s,
-            semiOt: sot,
-            producto: srv,
-            marcaTractor: tractorBrand,
-            marcaSemi: semiBrand
-          };
-
-          if (tractorP) newByTractor.set(tractorP, item);
-          if (semiP) newBySemi.set(semiP, item);
+          if (tractorP) newMap.set(tractorP, entry);
+          if (semiP) newMap.set(semiP, entry);
         });
 
-        ramFleetCache = newFleetMap;
-        otListByTractor = newByTractor;
-        otListBySemi = newBySemi;
+        ramFleetCache = newMap;
         lastDiagramasSync = Date.now();
-        console.log(`🐘 [SQL] Sincronizadas ${units.length} unidades desde Supabase panol.v_flota_busqueda (${ramFleetCache.size} patentes indexadas).`);
+        console.log(`🐘 [SQL] Sincronizadas ${units.length} unidades desde Supabase EOR (${ramFleetCache.size} patentes indexadas).`);
         return;
       }
     } catch (sqlErr) {
@@ -624,6 +438,30 @@ async function syncFleetFromSupabase() {
 // Alias para compatibilidad hacia atrás
 const syncFleetFromDiagramasNode = syncFleetFromSupabase;
 
+
+// === 2.2 CACHÉ DB_OT_LIST (Cols A:G) ===
+let dbOtListRowsCache = [];
+let lastDbOtListSync = 0;
+
+async function getDbOtListRows() {
+  const now = Date.now();
+  if (dbOtListRowsCache.length > 0 && (now - lastDbOtListSync < 60000)) {
+    return dbOtListRowsCache;
+  }
+  if (!sheets) return dbOtListRowsCache;
+  try {
+    const otRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: "'DB_OT_LIST'!A2:G"
+    });
+    dbOtListRowsCache = otRes.data.values || [];
+    lastDbOtListSync = now;
+  } catch (e) {
+    console.warn('⚠️ Advertencia al leer DB_OT_LIST para órdenes:', e.message);
+  }
+  return dbOtListRowsCache;
+}
+
 async function syncDataFromSheets(force = false) {
   if (!sheets) return ordersCache;
 
@@ -634,15 +472,19 @@ async function syncDataFromSheets(force = false) {
   lastSyncTime = now;
 
   try {
-    // A, B. Leer DB_ITEMS y DB_TRANSACTIONS (DB_OT_LIST eliminada de Sheets)
+    // A, B, C. Leer DB_ITEMS, DB_OT_LIST y DB_TRANSACTIONS en 1 sola llamada HTTP batchGet
     const batchRes = await sheets.spreadsheets.values.batchGet({
       spreadsheetId: SPREADSHEET_ID,
-      ranges: ['DB_ITEMS!A:H', 'DB_TRANSACTIONS!A:R']
+      ranges: ['DB_ITEMS!A:H', "'DB_OT_LIST'!A2:G", 'DB_TRANSACTIONS!A:R']
     });
 
     const valRanges = batchRes.data.valueRanges || [];
     const itemRows = (valRanges[0] && valRanges[0].values) || [];
-    const rows = (valRanges[1] && valRanges[1].values) || [];
+    const dbOtListRows = (valRanges[1] && valRanges[1].values) || [];
+    const rows = (valRanges[2] && valRanges[2].values) || [];
+
+    dbOtListRowsCache = dbOtListRows;
+    lastDbOtListSync = now;
 
     const itemMap = {};
     itemsCatalogCache = [];
@@ -662,10 +504,44 @@ async function syncDataFromSheets(force = false) {
       }
     }
 
-    // Asegurar índice maestro de flota y OTs desde v_flota_busqueda y public.unidades
-    if (otListByTractor.size === 0) {
-      await syncFleetFromSupabase();
-    }
+    const otsData = await otsManager.getCurrentOtsMap(sheets, SPREADSHEET_ID);
+    const otListByTractor = new Map();
+    const otListBySemi = new Map();
+
+    dbOtListRows.forEach(r => {
+      const t = String(r[0] || '').trim();
+      const otDb = otsManager.normalizeOt(r[1]);
+      const s = String(r[2] || '').trim();
+      const semiOtDb = otsManager.normalizeOt(r[3]);
+      const prod = String(r[4] || '').trim();
+      const marcaT = String(r[5] || '').trim();
+      const marcaS = String(r[6] || '').trim();
+
+      const normT = otsManager.normalizePlate(t);
+      const normS = otsManager.normalizePlate(s);
+
+      // DB_OT_LIST como principal, ots como fallback vigente
+      const tOtObj = otsData.byPlate.get(normT);
+      const sOtObj = otsData.byPlate.get(normS);
+
+      const activeTractorOt = otDb || (tOtObj && tOtObj.ot) || '';
+      const activeSemiOt = semiOtDb || (sOtObj && sOtObj.ot) || '';
+
+      const item = {
+        tractor: t,
+        ot: activeTractorOt,
+        semi: s,
+        semiOt: activeSemiOt,
+        producto: prod,
+        marcaTractor: marcaT,
+        marcaSemi: marcaS
+      };
+
+      const keyT = t.toUpperCase().replace(/[\s\-_.]/g, '');
+      const keyS = s.toUpperCase().replace(/[\s\-_.]/g, '');
+      if (keyT) otListByTractor.set(keyT, item);
+      if (keyS) otListBySemi.set(keyS, item);
+    });
 
     if (rows.length < 2) {
       ordersCache = [];
@@ -752,15 +628,12 @@ async function syncDataFromSheets(force = false) {
         const itemDetails = itemMap[itemName.toUpperCase()] || { id: '---', loc: 'S/D', requiereCanje: false, stock: 0 };
         const itemNote = String(row[11] || '').trim();
         const devolucionNote = String(row[14] || '').trim();
-        const rawNote = itemNote || devolucionNote;
-        const finalItemNote = rawNote.replace(/Despacho listo:[^|]*(\|)?\s*/gi, '').trim();
+        const finalItemNote = itemNote || devolucionNote;
 
         ordersMap[reqId].items.push({
           name: itemName,
           qty: row[7],
           id: itemDetails.id,
-          code: itemDetails.id,
-          item_code: itemDetails.id,
           loc: itemDetails.loc,
           note: finalItemNote,
           requiereCanje: itemDetails.requiereCanje,
@@ -822,83 +695,6 @@ async function updateStockByName(itemName, deltaQty) {
   }
 }
 
-async function getMonitorOrdersFromDb(forceRefresh = false) {
-  if (db && db.isConfigured && db.isConfigured()) {
-    const now = Date.now();
-    if (!forceRefresh && ordersCacheFetchedAt > 0 && (now - ordersCacheFetchedAt) < MONITOR_CACHE_TTL_MS) {
-      return ordersCache;
-    }
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_monitor_pedidos ORDER BY created_at DESC LIMIT 50;');
-      const mapped = qRes.rows.map(r => ({
-        reqId: r.req_code,
-        orderId: r.order_id,
-        mechanic_id: r.mechanic_id,
-        opId: r.mechanic_op_code,
-        opInfo: r.mechanic_name,
-        box: r.box_number || '01',
-        otNumber: r.ot_number,
-        tractorPlate: r.tractor,
-        tractorBrand: r.marca_tr,
-        semiPlate: r.semi,
-        semiBrand: r.marca_semi,
-        status: r.order_status,
-        orderType: r.order_type || 'PEDIDO',
-        parentOrderId: r.parent_order_id,
-        notes: r.order_notes,
-        timestamp: r.created_at,
-        readyTimestamp: readyTimestamps[r.req_code] || (r.ready_at ? new Date(r.ready_at).getTime() : null),
-        items: (r.items || []).map(it => {
-          const rawNote = String(it.return_notes || it.notes || '')
-            .replace(/Despacho listo:[^|]*(\|)?\s*/gi, '')
-            .trim();
-          return {
-            id: it.id || it.order_item_id,
-            order_item_id: it.order_item_id || it.id,
-            item_id: it.item_id,
-            name: it.name,
-            code: it.code || it.item_code || '',
-            item_code: it.code || it.item_code || '',
-            brand: it.brand || '',
-            qty: it.qty,
-            delivered_qty: it.delivered_qty || 0,
-            returned_qty: it.returned_qty || 0,
-            loc: it.location || 'S/D',
-            status: it.status,
-            requiereCanje: !!it.requires_exchange,
-            exchange_status: it.exchange_status,
-            estadoCanje: it.exchange_status || (it.requires_exchange ? 'PENDIENTE' : ''),
-            panol_confirmation: it.panol_confirmation || '',
-            panolConfirmacion: it.panol_confirmation || '',
-            panolConfirmation: it.panol_confirmation || '',
-            note: rawNote,
-            return_notes: it.return_notes
-          };
-        })
-      }));
-      ordersCache = mapped;
-      ordersCacheFetchedAt = Date.now();
-      return mapped;
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_monitor_pedidos:', sqlErr.message);
-      return ordersCache || [];
-    }
-  }
-  return [];
-}
-
-async function broadcastOrdersSync() {
-  invalidateMonitorPanolCaches();
-  if (db && db.isConfigured && db.isConfigured()) {
-    const orders = await getMonitorOrdersFromDb(true);
-    if (io) io.emit('orders_sync', orders);
-    return orders;
-  }
-  await syncDataFromSheets(true);
-  if (io) io.emit('orders_sync', ordersCache);
-  return ordersCache;
-}
-
 // 829.txt Punto 4: Resolución temporal a 1 minuto (LISTO -> ENTREGADO Y CERRADO)
 async function checkAutoDeliveredOrders() {
   if (!sheets || !ordersCache || ordersCache.length === 0) return;
@@ -940,24 +736,18 @@ async function checkAutoDeliveredOrders() {
               });
             }
           }
+          delete readyTimestamps[order.reqId];
+          hasUpdates = true;
         } catch(e) {
           console.error('Error en auto-entrega a 1 minuto:', e.message);
         }
-
-        if (db && db.isConfigured && db.isConfigured()) {
-          try {
-            await db.query(`UPDATE panol.orders SET status = 'ENTREGADO', updated_at = NOW() WHERE req_code = $1;`, [order.reqId]);
-            await db.query(`UPDATE panol.stock_movements SET status = 'ENTREGADO', updated_at = NOW() WHERE order_id = (SELECT id FROM panol.orders WHERE req_code = $1);`, [order.reqId]);
-          } catch(sqlE) {}
-        }
-        delete readyTimestamps[order.reqId];
-        hasUpdates = true;
       }
     }
   }
 
   if (hasUpdates) {
-    await broadcastOrdersSync();
+    await syncDataFromSheets();
+    io.emit('orders_sync', ordersCache);
   }
 }
 
@@ -989,21 +779,27 @@ function isLocalRequest(req) {
 
 // Middleware de verificación de autenticación de dispositivo (Con bypass automático para localhost / desarrollo)
 function requireAuth(req, res, next) {
+  const isLocal = isLocalRequest(req);
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies.sys_auth || req.headers['x-auth-token'];
-  const verifiedUser = verifyAuthToken(token);
 
-  if (verifiedUser) {
-    req.authUser = verifiedUser;
+  if (isLocal || verifyAuthToken(token)) {
+    // Si es local y no tiene token de sesión, generamos uno automáticamente
+    if (isLocal && !verifyAuthToken(token)) {
+      const devToken = createAuthToken('local-dev');
+      res.setHeader(
+        'Set-Cookie',
+        `sys_auth=${encodeURIComponent(devToken)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=Lax`
+      );
+    }
     return next();
   }
 
   // Si es llamada API, devolver 401 JSON
-  const fullPath = (req.originalUrl || req.url || req.path || '').split('?')[0];
-  if (fullPath.startsWith('/api/') || req.path.startsWith('/api/')) {
+  if (req.path.startsWith('/api/')) {
     return res.status(401).json({ 
       error: 'UNAUTHORIZED', 
-      message: 'Dispositivo o usuario no autorizado. Se requiere inicio de sesión con personal registrado en staff.' 
+      message: 'Dispositivo no autorizado. Se requiere inicio de sesión en el sistema.' 
     });
   }
 
@@ -1012,263 +808,45 @@ function requireAuth(req, res, next) {
   return res.redirect(`/login?next=${encodeURIComponent(originalUrl)}`);
 }
 
-// --- ENDPOINTS PÚBLICOS DE AUTH (ARQUITECTURA DE DOS PANTALLAS: DISPOSITIVO 90D + OPERARIO) ---
+// --- ENDPOINTS PÚBLICOS DE AUTH ---
 app.get('/login', (req, res) => {
+  const isLocal = isLocalRequest(req);
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies.sys_auth;
-  // Con sesión válida redirigir directo salvo que pase ?force=1
-  if (verifyAuthToken(token) && !req.query.force) {
+  // En localhost o con sesión válida redirigir directo salvo que pase ?force=1
+  if ((isLocal || verifyAuthToken(token)) && !req.query.force) {
     const nextUrl = req.query.next || '/';
     return res.redirect(nextUrl);
   }
   serveStaticOrJson(res, 'login.html');
 });
 
-// PANTALLA 1: Autorización de Dispositivo (Válido por 90 días con clave del sistema taller2026 / SYSTEM_PASSWORD)
-app.post('/api/auth/system', async (req, res) => {
-  const { password, next = '/' } = req.body || {};
-  const cleanPass = String(password || '').trim();
-
-  if (!cleanPass) {
-    return res.status(400).json({ success: false, error: 'Por favor ingresá la contraseña del sistema.' });
-  }
-
-  const sysPass = await getSystemPassword();
-  const allowedPasswords = getAllowedPasswords();
-  const isGlobalPassValid =
-    cleanPass === sysPass ||
-    allowedPasswords.includes(cleanPass) ||
-    cleanPass === 'taller2026' ||
-    cleanPass === RENDER_BASE_PASSWORD;
-
-  if (!isGlobalPassValid) {
-    return res.status(401).json({ success: false, error: 'Contraseña del sistema incorrecta.' });
-  }
-
-  // Generar token de autorización del dispositivo por 90 días
-  const token = createAuthToken('system-device');
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.setHeader(
-    'Set-Cookie', 
-    `sys_auth=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure' : ''}`
-  );
-
-  return res.json({
-    success: true,
-    token,
-    deviceAuthorized: true,
-    message: 'Dispositivo autorizado por 90 días',
-    redirect: next || '/'
-  });
-});
-
-// PANTALLA 2: Ingreso de Operario (Identificación de personal en panol.staff)
-app.post('/api/auth/user-login', async (req, res) => {
-  const { pin, op_code, username, next = '/' } = req.body || {};
-  const cleanPin = String(pin || op_code || username || '').trim();
-
-  if (!cleanPin) {
-    return res.status(400).json({ success: false, error: 'Por favor ingresá tu legajo o PIN de operario.' });
-  }
-
-  let staffObj = null;
-  if (db && db.isConfigured && db.isConfigured()) {
-    staffObj = await getStaffMemberByOpCode(cleanPin);
-  }
-
-  if (!staffObj) {
-    return res.status(404).json({
-      success: false,
-      error: `Operario no encontrado: El PIN o legajo '${cleanPin}' no figura en el personal de taller (panol.staff).`
-    });
-  }
-
-  const userData = {
-    id: staffObj.id,
-    op_code: staffObj.op_code,
-    name: staffObj.name,
-    role: staffObj.role || 'OPERARIO',
-    default_boxes: (Array.isArray(staffObj.default_boxes) && staffObj.default_boxes.length > 0)
-      ? staffObj.default_boxes
-      : ['01', '02', '03'],
-    auth_user_id: staffObj.auth_user_id,
-    active: true
-  };
-
-  return res.json({
-    success: true,
-    user: userData,
-    redirect: next || '/'
-  });
-});
-
-// Verificación de estado de autorización del dispositivo
-app.get('/api/auth/verify-device', (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies.sys_auth || req.headers['x-auth-token'];
-  const verifiedUser = verifyAuthToken(token);
-
-  return res.json({
-    success: true,
-    authorized: Boolean(verifiedUser),
-    user: verifiedUser || null
-  });
-});
-
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', (req, res) => {
   const { username, password, next = '/' } = req.body || {};
-  const cleanUser = String(username || '').trim();
-  const cleanPass = String(password || '').trim();
+  const isLocal = isLocalRequest(req);
 
-  // Validar que al menos se haya enviado la clave/PIN o el usuario
-  if (!cleanPass && !cleanUser) {
-    return res.status(400).json({
-      success: false,
-      error: 'Por favor ingresá tu contraseña o PIN de acceso.'
-    });
-  }
+  const authResult = authenticateUser(username, password);
 
-  const allowedPasswords = getAllowedPasswords();
-  let staffObj = null;
-
-  // CASO 1: Login de un solo campo (solo contraseña / PIN enviado desde App Taller)
-  if (!cleanUser) {
-    // A. Buscar si el PIN/código corresponde a un operario registrado en panol.staff
-    if (db && db.isConfigured && db.isConfigured()) {
-      staffObj = await getStaffMemberByOpCode(cleanPass);
-    }
-
-    // Si se encontró el operario por su PIN/legajo en staff
-    if (staffObj) {
-      const token = createAuthToken(staffObj.op_code);
-      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-      res.setHeader(
-        'Set-Cookie', 
-        `sys_auth=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure' : ''}`
-      );
-
-      const userData = {
-        id: staffObj.id,
-        op_code: staffObj.op_code,
-        name: staffObj.name,
-        role: staffObj.role || 'OPERARIO',
-        default_boxes: (Array.isArray(staffObj.default_boxes) && staffObj.default_boxes.length > 0)
-          ? staffObj.default_boxes
-          : ['01', '02', '03'],
-        auth_user_id: staffObj.auth_user_id,
-        active: true
-      };
-
-      return res.json({ success: true, token, user: userData, redirect: next || '/' });
-    }
-
-    // B. Si no es un op_code directo, verificar si es la contraseña global de taller o permitida
-    const isGlobalPassValid =
-      allowedPasswords.includes(cleanPass) ||
-      cleanPass === 'taller2026' ||
-      cleanPass === RENDER_BASE_PASSWORD;
-
-    if (isGlobalPassValid) {
-      const token = createAuthToken('taller');
-      const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-      res.setHeader(
-        'Set-Cookie', 
-        `sys_auth=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure' : ''}`
-      );
-
-      const userData = {
-        id: 'usr-taller',
-        op_code: 'taller',
-        name: 'OPERARIO DE TALLER',
-        role: 'TALLER',
-        default_boxes: ['01', '02', '03'],
-        active: true
-      };
-
-      return res.json({ success: true, token, user: userData, redirect: next || '/' });
-    }
-
-    // Si no coincide con ningún operario ni clave global
-    return res.status(401).json({
-      success: false,
-      error: 'Contraseña o PIN incorrecto.'
-    });
-  }
-
-  // CASO 2: Compatibilidad de doble campo (usuario + contraseña)
-  if (db && db.isConfigured && db.isConfigured()) {
-    staffObj = await getStaffMemberByOpCode(cleanUser);
-  }
-
-  if (staffObj) {
-    const isPasswordValid =
-      allowedPasswords.includes(cleanPass) ||
-      cleanPass === staffObj.op_code ||
-      cleanPass === 'taller2026' ||
-      cleanPass === RENDER_BASE_PASSWORD ||
-      (staffObj.auth_user_id && cleanPass === String(staffObj.auth_user_id));
-
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        error: 'Contraseña o PIN incorrecto para este operario.'
-      });
-    }
-
-    const token = createAuthToken(staffObj.op_code);
+  // En entorno local permite cualquier contraseña para pruebas ágiles
+  if (isLocal || authResult.success) {
+    const activeUser = authResult.user || String(username || '').trim().toLowerCase() || SYSTEM_USER || 'local-dev';
+    const token = createAuthToken(activeUser);
     const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
     res.setHeader(
       'Set-Cookie', 
       `sys_auth=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure' : ''}`
     );
-
-    const userData = {
-      id: staffObj.id,
-      op_code: staffObj.op_code,
-      name: staffObj.name,
-      role: staffObj.role || 'OPERARIO',
-      default_boxes: (Array.isArray(staffObj.default_boxes) && staffObj.default_boxes.length > 0)
-        ? staffObj.default_boxes
-        : ['01', '02', '03'],
-      auth_user_id: staffObj.auth_user_id,
-      active: true
-    };
-
-    return res.json({ success: true, token, user: userData, redirect: next || '/' });
+    return res.json({ success: true, token, user: activeUser, redirect: next || '/' });
   }
 
-  // Si no está en staff, verificar credenciales generales
-  const authRes = authenticateUser(cleanUser, cleanPass);
-  if (authRes.success) {
-    const token = createAuthToken(authRes.user || cleanUser);
-    const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-    res.setHeader(
-      'Set-Cookie', 
-      `sys_auth=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_MAX_AGE_MS / 1000}; SameSite=${isHttps ? 'None' : 'Lax'}${isHttps ? '; Secure' : ''}`
-    );
-    const userData = {
-      id: 'usr-' + (authRes.user || cleanUser),
-      op_code: authRes.user || cleanUser,
-      name: (authRes.user || cleanUser).toUpperCase(),
-      role: 'TALLER',
-      default_boxes: ['01', '02', '03'],
-      active: true
-    };
-    return res.json({ success: true, token, user: userData, redirect: next || '/' });
-  }
-
-  return res.status(403).json({
-    success: false,
-    error: `Acceso denegado: El usuario o legajo '${cleanUser}' no figura en el registro de personal ni cuenta con autorización.`
+  return res.status(401).json({ 
+    success: false, 
+    error: 'Usuario o contraseña incorrectos.' 
   });
 });
 
 app.all(['/api/auth/logout', '/logout'], (req, res) => {
-  const scope = req.body?.scope || req.query?.scope;
-  // Solo borrar la cookie de autorización de 90 días si se pide desvincular el dispositivo (scope=device)
-  if (scope === 'device' || req.query?.force === '1') {
-    res.setHeader('Set-Cookie', `sys_auth=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly`);
-  }
+  res.setHeader('Set-Cookie', `sys_auth=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly`);
   if (req.method === 'POST' || (req.headers.accept && req.headers.accept.includes('application/json'))) {
     return res.json({ success: true, redirect: '/login' });
   }
@@ -1356,24 +934,6 @@ app.get('/coordinacion.html', (req, res) => res.redirect(301, '/coordinacion'));
 app.get('/wireframe', (req, res) => res.redirect(301, '/coordinacion'));
 app.get('/wireframe.html', (req, res) => res.redirect(301, '/coordinacion'));
 app.get('/react', (req, res) => serveStaticOrJson(res, 'index.html', {}, true));
-
-// Proteger todos los endpoints de datos de /api/* que no sean de autenticación o monitoreo público
-const PUBLIC_API_PREFIXES = [
-  '/api/auth',
-  '/api/health',
-  '/api/db/health',
-  '/api/db/metrics',
-  '/api/env-info'
-];
-
-app.use('/api', (req, res, next) => {
-  const fullPath = (req.originalUrl || req.url || '').split('?')[0];
-  const isPublic = PUBLIC_API_PREFIXES.some(p => fullPath === p || fullPath.startsWith(p + '/'));
-  if (isPublic) {
-    return next();
-  }
-  return requireAuth(req, res, next);
-});
 
 // Proteger cualquier acceso directo a archivos .html estáticos
 app.use((req, res, next) => {
@@ -1473,7 +1033,7 @@ async function getStaffMemberByOpCode(opId) {
   }
   try {
     const res = await db.query(
-      `SELECT id, op_code, name, role, default_boxes, auth_user_id FROM panol.staff 
+      `SELECT id, op_code, name, role FROM panol.staff 
        WHERE op_code = $1 
           OR id::text = $1 
           OR op_code = $2 
@@ -1486,60 +1046,6 @@ async function getStaffMemberByOpCode(opId) {
     console.warn('⚠️ [SQL] Error buscando operario en panol.staff:', err.message);
     return null;
   }
-}
-
-// Función para resolver jerárquicamente las OTs (tractor_work_order_id y semi_work_order_id)
-async function resolveHoldWorkOrders({ trId, tot, smId, sot }) {
-  let trWoId = null;
-  let smWoId = null;
-
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      // 1. Tractor OT
-      if (trId) {
-        const uwoTr = await db.query(`
-          SELECT uwo.work_order_id 
-          FROM panol.unit_work_orders uwo
-          JOIN panol.work_orders wo ON uwo.work_order_id = wo.id
-          WHERE uwo.tractor_id = $1 AND wo.status = 'ACTIVA'
-          ORDER BY wo.created_at DESC
-          LIMIT 1;
-        `, [trId]);
-        if (uwoTr.rows.length > 0) trWoId = uwoTr.rows[0].work_order_id;
-      }
-      if (tot && (!trWoId || !tot.startsWith('---'))) {
-        const woByNum = await db.query(
-          "SELECT id FROM panol.work_orders WHERE ot_number = $1 LIMIT 1;",
-          [tot]
-        );
-        if (woByNum.rows.length > 0) trWoId = woByNum.rows[0].id;
-      }
-
-      // 2. Semi OT
-      if (smId) {
-        const uwoSm = await db.query(`
-          SELECT uwo.work_order_id 
-          FROM panol.unit_work_orders uwo
-          JOIN panol.work_orders wo ON uwo.work_order_id = wo.id
-          WHERE uwo.semi_id = $1 AND wo.status = 'ACTIVA'
-          ORDER BY wo.created_at DESC
-          LIMIT 1;
-        `, [smId]);
-        if (uwoSm.rows.length > 0) smWoId = uwoSm.rows[0].work_order_id;
-      }
-      if (sot && (!smWoId || !sot.startsWith('---'))) {
-        const woByNum = await db.query(
-          "SELECT id FROM panol.work_orders WHERE ot_number = $1 LIMIT 1;",
-          [sot]
-        );
-        if (woByNum.rows.length > 0) smWoId = woByNum.rows[0].id;
-      }
-    } catch (err) {
-      console.warn('⚠️ [SQL] Error resolviendo work orders para hold:', err.message);
-    }
-  }
-
-  return { trWoId, smWoId };
 }
 
 // === 4. RPC UNIVERSAL DISPATCHER (google.script.run Polyfill - Protegido por requireAuth) ===
@@ -1556,20 +1062,20 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
       // 🐘 1. Prioridad SQL: Supabase panol.staff
       if (db && db.isConfigured && db.isConfigured()) {
         try {
-          const member = await getStaffMemberByOpCode(opId);
-          if (member) {
-            const boxes = (Array.isArray(member.default_boxes) && member.default_boxes.length > 0)
-              ? member.default_boxes
-              : ['01', '02', '03'];
-            result = {
-              success: true,
-              id: member.id,
-              op_code: member.op_code,
-              name: member.name,
-              role: member.role || 'MECANICO',
-              boxes,
-              auth_user_id: member.auth_user_id
-            };
+          const sRes = await db.query(
+            'SELECT op_code, name, role, default_boxes, app_access FROM panol.staff WHERE op_code = $1 AND is_active = true;',
+            [opId]
+          );
+          if (sRes.rows.length > 0) {
+            const member = sRes.rows[0];
+            if (!member.app_access && !isLocal) {
+              result = { success: false, error: "Usuario no encontrado o sin acceso activo" };
+            } else {
+              const boxes = (Array.isArray(member.default_boxes) && member.default_boxes.length > 0)
+                ? member.default_boxes
+                : ['01', '02', '03'];
+              result = { success: true, name: member.name, role: member.role || 'MECANICO', boxes };
+            }
           }
         } catch (sqlErr) {
           console.warn('⚠️ [SQL] Error getMechanicConfig:', sqlErr.message);
@@ -1592,17 +1098,16 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
       if (!result) {
         if (staffRow) {
           const hasAppAccess = staffRow[11] === true || String(staffRow[11] || '').toUpperCase() === 'TRUE';
-          if (!hasAppAccess && staffRow[11] !== undefined) {
-            result = { success: false, error: "Usuario sin acceso activo a la aplicación de taller." };
+          if (!hasAppAccess && staffRow[11] !== undefined && !isLocal) {
+            result = { success: false, error: "Usuario no encontrado o sin acceso activo" };
           } else {
             const boxes = staffRow.slice(6, 11).map(c => String(c || '').trim()).filter(c => c !== '');
             result = { success: true, name: staffRow[1] || ('Operario ' + opId), role: staffRow[2] || 'MECANICO', boxes: boxes.length > 0 ? boxes : ['01', '02', '03'] };
           }
+        } else if (isLocal) {
+          result = { success: true, name: 'Operario ' + (opId || 'Test'), role: 'MECANICO', boxes: ['01', '02', '03'] };
         } else {
-          result = { 
-            success: false, 
-            error: `Acceso denegado: El operario '${opId}' no figura en el registro de personal de taller (panol.staff).` 
-          };
+          result = { success: false, error: "Usuario no encontrado o sin acceso activo" };
         }
       }
     } 
@@ -1613,10 +1118,10 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
       if (db && db.isConfigured && db.isConfigured()) {
         try {
           const pRes = await db.query(
-            "SELECT id, op_code, name, role FROM panol.staff WHERE role IN ('PANOL', 'PAÑOL', 'LOGISTICA') ORDER BY name;"
+            "SELECT op_code, name FROM panol.staff WHERE role IN ('PANOL', 'PAÑOL', 'LOGISTICA') AND is_active = true ORDER BY name;"
           );
           if (pRes.rows.length > 0) {
-            panoleros = pRes.rows.map(r => ({ id: r.op_code, staff_id: r.id, name: r.name, role: r.role }));
+            panoleros = pRes.rows.map(r => ({ id: r.op_code, name: r.name }));
             result = panoleros;
           }
         } catch (sqlErr) {
@@ -1650,11 +1155,29 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
       }
     }
     else if (action === 'getItemCatalog') {
-      // 🐘 1. Prioridad SQL: Supabase panol.items (Hot RAM + sincronización incremental por delta)
+      // 🐘 1. Prioridad SQL: Supabase panol.items
       if (db && db.isConfigured && db.isConfigured()) {
-        await ensureSqlItemsCatalog();
-        result = sqlItemsCatalogCache || [];
-      } else {
+        try {
+          const itRes = await db.query(
+            "SELECT item_code, name, brand, category, requires_exchange, stock, location FROM panol.items WHERE is_active = true ORDER BY name;"
+          );
+          if (itRes.rows.length > 0) {
+            result = itRes.rows.map(i => ({
+              id: i.item_code,
+              category: i.category || 'GENERAL',
+              name: i.name,
+              brand: i.brand || '',
+              stock: parseFloat(i.stock) || 0,
+              loc: i.location || 'S/D',
+              requiereCanje: !!i.requires_exchange
+            }));
+          }
+        } catch (sqlErr) {
+          console.warn('⚠️ [SQL] Error getItemCatalog:', sqlErr.message);
+        }
+      }
+
+      if (!result) {
         await syncDataFromSheets();
         result = itemsCatalogCache.map(i => ({ category: i.category || 'GENERAL', name: i.name, requiereCanje: !!i.requiereCanje }));
       }
@@ -1728,26 +1251,20 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
 
       (items || []).forEach(itemObj => {
         const itemName = itemObj.item || itemObj.name || '';
-        const canjeStr = (itemObj.canjeStatus && typeof itemObj.canjeStatus === 'object')
-          ? JSON.stringify(itemObj.canjeStatus)
-          : (itemObj.canjeStatus || '');
         rowsToAppend.push([
           timestamp, reqId, opId, mechanicName, otNumber, unitId,
-          itemName, itemObj.qty, 'PENDIENTE', '', '', itemObj.notes || '', '', '', '', '', canjeStr, ''
+          itemName, itemObj.qty, 'PENDIENTE', '', '', itemObj.notes || '', '', '', '', '', itemObj.canjeStatus || '', ''
         ]);
       });
 
       // 🐘 Persistencia SQL en Supabase: panol.orders y panol.order_items
       if (db && db.isConfigured && db.isConfigured()) {
         try {
-          let mechUuid = payload.mechanicId || null;
-          if (!mechUuid) {
-            let staffQ = await db.query('SELECT id FROM panol.staff WHERE op_code = $1 LIMIT 1;', [opId]);
-            mechUuid = staffQ.rows[0]?.id || null;
-          }
+          let staffQ = await db.query('SELECT id FROM panol.staff WHERE op_code = $1 LIMIT 1;', [opId]);
+          let mechUuid = staffQ.rows[0]?.id || null;
           if (!mechUuid) {
             const fallbackStaff = await db.query(
-              "SELECT id FROM panol.staff WHERE upper(name) LIKE upper($1) OR role = 'MECANICO' LIMIT 1;",
+              "SELECT id FROM panol.staff WHERE upper(name) LIKE upper($1) OR role = 'MECANICO' ORDER BY is_active DESC LIMIT 1;",
               [`%${mechanicName}%`]
             );
             mechUuid = fallbackStaff.rows[0]?.id || null;
@@ -1762,7 +1279,7 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
 
           let woUuid = null;
           if (otNumber) {
-            const woQ = await db.query('SELECT id FROM panol.work_orders WHERE ot_number = $1 LIMIT 1;', [String(otNumber).trim()]);
+            const woQ = await db.query('SELECT id, tractor_id, semi_id FROM panol.work_orders WHERE ot_number = $1 LIMIT 1;', [String(otNumber).trim()]);
             if (woQ.rows.length > 0) {
               woUuid = woQ.rows[0].id;
             }
@@ -1788,11 +1305,12 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
             semiUuid = sQ.rows[0]?.id || null;
           }
 
-          if (unidadUuid && (!tractorUuid || !semiUuid)) {
-            const uQ = await db.query('SELECT tractor_id, semi_id FROM public.unidades WHERE id = $1 LIMIT 1;', [unidadUuid]);
-            if (uQ.rows.length > 0) {
-              if (!tractorUuid) tractorUuid = uQ.rows[0].tractor_id;
-              if (!semiUuid) semiUuid = uQ.rows[0].semi_id;
+          if (woUuid) {
+            const woVehicleQ = await db.query('SELECT tractor_id, semi_id, unidad_id FROM panol.work_orders WHERE id = $1;', [woUuid]);
+            if (woVehicleQ.rows.length > 0) {
+              if (!tractorUuid) tractorUuid = woVehicleQ.rows[0].tractor_id;
+              if (!semiUuid) semiUuid = woVehicleQ.rows[0].semi_id;
+              if (!unidadUuid) unidadUuid = woVehicleQ.rows[0].unidad_id;
             }
           }
 
@@ -1837,34 +1355,13 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
                   itemUuid = insIt.rows[0]?.id;
                 }
                 if (itemUuid) {
-                  let exchStr = '';
-                  let returnedQty = null;
-                  if (it.canjeStatus) {
-                    if (typeof it.canjeStatus === 'object') {
-                      exchStr = JSON.stringify(it.canjeStatus);
-                      if (it.canjeStatus.cant_entregada !== undefined) {
-                        returnedQty = Number(it.canjeStatus.cant_entregada);
-                      }
-                    } else {
-                      exchStr = String(it.canjeStatus);
-                      try {
-                        const parsed = JSON.parse(exchStr);
-                        if (parsed && parsed.cant_entregada !== undefined) {
-                          returnedQty = Number(parsed.cant_entregada);
-                        }
-                      } catch (_) {}
-                    }
-                  }
                   await db.query(`
-                    INSERT INTO panol.stock_movements (
-                      order_id, item_id, mechanic_id, quantity, quantity_delta,
-                      status, movement_type, exchange_status, returned_qty, notes
-                    )
-                    VALUES ($1, $2, $3, $4, 0, 'PENDIENTE', 'SOLICITUD', $5, $6, $7);
-                  `, [orderUuid, itemUuid, mechUuid, iQty, exchStr, returnedQty, it.notes || '']);
+                    INSERT INTO panol.order_items (order_id, item_id, quantity, status, exchange_status, notes)
+                    VALUES ($1, $2, $3, 'PENDIENTE', $4, $5);
+                  `, [orderUuid, itemUuid, iQty, it.canjeStatus || '', it.notes || '']);
                 }
               }
-              console.log(`🐘 [SQL] Pedido ${reqId} insertado en panol.orders con ${items.length} items en stock_movements.`);
+              console.log(`🐘 [SQL] Pedido ${reqId} insertado en panol.orders con ${items.length} items.`);
             }
           }
         } catch (sqlErr) {
@@ -1904,7 +1401,8 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           updateStockByName(itemObj.item, -Math.abs(Number(itemObj.qty) || 0));
         });
       }
-      await broadcastOrdersSync();
+      await syncDataFromSheets();
+      io.emit('orders_sync', ordersCache);
       result = { success: true, reqId: reqId, environment: isProdEnvironment ? 'production' : 'development' };
     }
     else if (action === 'updatePendingItemQty') {
@@ -1943,36 +1441,8 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           }
         }
       }
-
-      if (db && db.isConfigured && db.isConfigured() && reqId && itemName) {
-        try {
-          if (newQty <= 0) {
-            await db.query(`
-              DELETE FROM panol.stock_movements sm
-              USING panol.orders o, panol.items i
-              WHERE sm.order_id = o.id AND sm.item_id = i.id
-                AND (o.req_code = $1 OR o.order_number::text = $1)
-                AND lower(i.name) = lower($2)
-                AND sm.status = 'PENDIENTE';
-            `, [reqId, itemName]);
-          } else {
-            await db.query(`
-              UPDATE panol.stock_movements sm
-              SET quantity = $3, updated_at = NOW()
-              FROM panol.orders o, panol.items i
-              WHERE sm.order_id = o.id AND sm.item_id = i.id
-                AND (o.req_code = $1 OR o.order_number::text = $1)
-                AND lower(i.name) = lower($2)
-                AND sm.status = 'PENDIENTE';
-            `, [reqId, itemName, newQty]);
-          }
-          updated = true;
-        } catch (sqlErr) {
-          console.warn('⚠️ [SQL] Error updatePendingItemQty en Supabase:', sqlErr.message);
-        }
-      }
-
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: updated };
     }
     else if (action === 'removePendingItem') {
@@ -1998,24 +1468,8 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           }
         }
       }
-
-      if (db && db.isConfigured && db.isConfigured() && reqId && itemName) {
-        try {
-          await db.query(`
-            DELETE FROM panol.stock_movements sm
-            USING panol.orders o, panol.items i
-            WHERE sm.order_id = o.id AND sm.item_id = i.id
-              AND (o.req_code = $1 OR o.order_number::text = $1)
-              AND lower(i.name) = lower($2)
-              AND sm.status = 'PENDIENTE';
-          `, [reqId, itemName]);
-          updated = true;
-        } catch (sqlErr) {
-          console.warn('⚠️ [SQL] Error removePendingItem en Supabase:', sqlErr.message);
-        }
-      }
-
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: updated };
     }
     else if (action === 'addItemToPendingOrder') {
@@ -2070,24 +1524,8 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           updated = true;
         }
       }
-
-      if (db && db.isConfigured && db.isConfigured() && reqId && itemName && qty > 0) {
-        try {
-          const ordQ = await db.query('SELECT id, mechanic_id FROM panol.orders WHERE req_code = $1 OR order_number::text = $1 LIMIT 1;', [reqId]);
-          const itmQ = await db.query('SELECT id, requires_exchange FROM panol.items WHERE lower(name) = lower($1) LIMIT 1;', [itemName]);
-          if (ordQ.rows[0] && itmQ.rows[0]) {
-            await db.query(`
-              INSERT INTO panol.stock_movements (order_id, item_id, mechanic_id, quantity, quantity_delta, status, movement_type, exchange_status)
-              VALUES ($1, $2, $3, $4, 0, 'PENDIENTE', 'SOLICITUD', $5);
-            `, [ordQ.rows[0].id, itmQ.rows[0].id, ordQ.rows[0].mechanic_id, qty, itmQ.rows[0].requires_exchange ? 'PENDIENTE' : null]);
-            updated = true;
-          }
-        } catch (sqlErr) {
-          console.warn('⚠️ [SQL] Error addItemToPendingOrder en Supabase:', sqlErr.message);
-        }
-      }
-
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: updated };
     }
     else if (action === 'confirmReturnItem' || action === 'confirmReturnBatch') {
@@ -2145,56 +1583,32 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
         }
       }
 
-      // 🐘 Persistencia SQL en Supabase: panol.stock_movements (Alternativa B)
+      // 🐘 Persistencia SQL en Supabase: panol.order_items y stock_movements
       if (db && db.isConfigured && db.isConfigured()) {
         try {
-          const predeterminedId = args[5] || (reqId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reqId) ? reqId : null);
           const auditStatus = status === 'INCOMPLETO' ? `[OP: ${opId}] - INCOMPLETO (${declaredQty || 0})` : `[OP: ${opId}] - OK`;
           const retQty = status === 'INCOMPLETO' ? Number(declaredQty || 0) : null;
-          const finalItemStatus = status === 'OK' ? 'DEVUELTO' : 'EN_CAMBIO';
-
-          const staffQ = opId ? await db.query('SELECT id FROM panol.staff WHERE op_code = $1 LIMIT 1;', [opId]) : { rows: [] };
-          const panolStaffUuid = staffQ.rows[0]?.id || null;
-
-          if (predeterminedId) {
-            await db.query(`
-              UPDATE panol.stock_movements sm
-              SET 
-                panol_confirmation = $1,
-                returned_qty = COALESCE($2, sm.quantity),
-                status = $3,
-                movement_type = 'DEVOLUCION_CANJE',
-                performed_by = COALESCE($4, sm.performed_by),
-                notes = CASE WHEN sm.notes IS NOT NULL AND sm.notes <> '' THEN sm.notes || ' | ' || $1 ELSE $1 END,
-                updated_at = NOW()
-              WHERE sm.id = $5;
-            `, [auditStatus, retQty, finalItemStatus, panolStaffUuid, predeterminedId]);
-          } else {
-            await db.query(`
-              UPDATE panol.stock_movements sm
-              SET 
-                panol_confirmation = $1,
-                returned_qty = COALESCE($2, sm.quantity),
-                status = $3,
-                movement_type = 'DEVOLUCION_CANJE',
-                performed_by = COALESCE($4, sm.performed_by),
-                notes = CASE WHEN sm.notes IS NOT NULL AND sm.notes <> '' THEN sm.notes || ' | ' || $1 ELSE $1 END,
-                updated_at = NOW()
-              FROM panol.orders o, panol.items i
-              WHERE sm.order_id = o.id AND sm.item_id = i.id
-                AND (o.req_code = $5 OR o.order_number::text = $5 OR o.id::text = $5)
-                AND ($6::text IS NULL OR lower(i.name) = lower($6));
-            `, [auditStatus, retQty, finalItemStatus, panolStaffUuid, reqId, itemName]);
-          }
-
+          await db.query(`
+            UPDATE panol.order_items oi
+            SET 
+              panol_confirmation = $1,
+              returned_qty = COALESCE($2, oi.quantity),
+              status = CASE WHEN $3 = 'OK' THEN 'DEVUELTO' ELSE 'EN_CAMBIO' END,
+              updated_at = now()
+            FROM panol.orders o, panol.items i
+            WHERE oi.order_id = o.id AND oi.item_id = i.id
+              AND (o.req_code = $4 OR o.order_number::text = $4)
+              AND ($5::text IS NULL OR lower(i.name) = lower($5));
+          `, [auditStatus, retQty, status, reqId, itemName]);
           updated = true;
-          console.log(`🐘 [SQL] Devolución auditada para pedido ${reqId || predeterminedId} (${itemName || 'TODOS'}): ${status} (Alternativa B)`);
+          console.log(`🐘 [SQL] Devolución auditada para pedido ${reqId} (${itemName || 'TODOS'}): ${status}`);
         } catch (sqlErr) {
           console.warn('⚠️ [SQL] Error confirmReturnItem en Supabase:', sqlErr.message);
         }
       }
 
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: updated };
     }
     else if (action === 'confirmNewReturn' || action === 'processNewItemReturn' || action === 'confirmNewReturnRow') {
@@ -2297,92 +1711,8 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           }
         }
       }
-
-      if (db && db.isConfigured && db.isConfigured() && (reqId || args[4])) {
-        try {
-          const predeterminedId = (args[4] && typeof args[4] === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args[4]))
-            ? args[4]
-            : null;
-          const isAll = !itemName || itemName.toUpperCase() === 'ALL' || itemName === '__ALL__';
-          const panolNote = `DEVOLUCIÓN ACEPTADA: OK [OP: ${panolOpId || 'PAÑOL'}]`;
-
-          await db.transaction(async (tx) => {
-            const panolStaffQ = panolOpId ? await tx.query('SELECT id FROM panol.staff WHERE op_code = $1 OR id::text = $1 LIMIT 1;', [panolOpId]) : { rows: [] };
-            const panolStaffUuid = panolStaffQ.rows[0]?.id || null;
-
-            let itemsToReturnQ;
-            if (predeterminedId) {
-              itemsToReturnQ = await tx.query(`
-                SELECT sm.id as order_item_id, sm.order_id, sm.item_id, sm.quantity, sm.returned_qty, sm.quantity_delta, sm.mechanic_id, i.stock, i.name as item_name
-                FROM panol.stock_movements sm
-                JOIN panol.items i ON sm.item_id = i.id
-                WHERE sm.id = $1 AND sm.status <> 'DEVOLUCION'
-                FOR UPDATE OF i, sm;
-              `, [predeterminedId]);
-            } else {
-              itemsToReturnQ = await tx.query(`
-                SELECT sm.id as order_item_id, sm.order_id, sm.item_id, sm.quantity, sm.returned_qty, sm.quantity_delta, sm.mechanic_id, i.stock, i.name as item_name
-                FROM panol.stock_movements sm
-                JOIN panol.orders o ON sm.order_id = o.id
-                JOIN panol.items i ON sm.item_id = i.id
-                WHERE (o.req_code = $1 OR o.order_number::text = $1 OR o.id::text = $1)
-                  AND ($2::boolean = true OR lower(i.name) = lower($3))
-                  AND sm.status <> 'DEVOLUCION'
-                FOR UPDATE OF i, sm;
-              `, [reqId, isAll, itemName]);
-            }
-
-            for (const row of itemsToReturnQ.rows) {
-              const qtyToRestore = (!isAll && returnQty) ? returnQty : (Number(row.returned_qty) || Number(row.quantity) || 1);
-              const prevStock = parseFloat(row.stock) || 0;
-              const newStock = prevStock + qtyToRestore;
-
-              await tx.query(`
-                UPDATE panol.items
-                SET stock = $1, updated_at = NOW()
-                WHERE id = $2;
-              `, [newStock, row.item_id]);
-              sqlItemsNeedsDelta = true;
-
-              await tx.query(`
-                UPDATE panol.stock_movements
-                SET
-                  status = 'DEVOLUCION',
-                  movement_type = 'DEVOLUCION_NUEVO',
-                  quantity_delta = quantity_delta + $1,
-                  returned_qty = $1,
-                  previous_stock = $2,
-                  new_stock = $3,
-                  performed_by = COALESCE($4, performed_by),
-                  return_notes = CASE
-                    WHEN return_notes IS NOT NULL AND return_notes <> '' THEN return_notes || ' | ' || $5
-                    ELSE $5
-                  END,
-                  updated_at = NOW()
-                WHERE id = $6;
-              `, [qtyToRestore, prevStock, newStock, panolStaffUuid, panolNote, row.order_item_id]);
-            }
-
-            if (itemsToReturnQ.rows.length > 0) {
-              const ordUuid = itemsToReturnQ.rows[0].order_id;
-              await tx.query(`
-                UPDATE panol.orders
-                SET status = 'DEVOLUCION', updated_at = NOW()
-                WHERE id = $1 AND NOT EXISTS (
-                  SELECT 1 FROM panol.stock_movements WHERE order_id = $1 AND status NOT IN ('DEVOLUCION', 'DEVUELTO', 'CANCELADO')
-                );
-              `, [ordUuid]);
-            }
-          });
-
-          updated = true;
-          console.log(`🐘 [SQL-ACID] Devolución de nuevo confirmada para ${reqId || predeterminedId} (${itemName || 'ALL'}). Stock reintegrado bajo transacción.`);
-        } catch (sqlErr) {
-          console.warn('⚠️ [SQL-ACID] Error confirmNewReturn en Supabase:', sqlErr.message);
-        }
-      }
-
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: updated };
     }
     else if (action === 'requestRefund' || action === 'requestReturn') {
@@ -2403,7 +1733,7 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
             const rItem = String(rows[i][6] || '').trim().toLowerCase();
             const rStatus = String(rows[i][8] || '').trim();
 
-            if (rReq === reqId && rItem === itemName.toLowerCase() && (rStatus === 'ENTREGADO' || rStatus === 'LISTO')) {
+            if (rReq === reqId && rItem === itemName.toLowerCase() && rStatus === 'ENTREGADO') {
               const originalQty = Number(rows[i][7]) || 1;
               const actualReturnQty = Math.min(returnQty, originalQty);
               const rowNum = i + 1;
@@ -2467,90 +1797,19 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           console.error('Error en requestRefund:', e.message);
         }
       }
-
-      if (db && db.isConfigured && db.isConfigured() && (reqId || args[4])) {
-        try {
-          const predeterminedId = args[4] || null;
-          const retNote = reason ? `SOLICITUD DEVOLUCIÓN NUEVA: ${reason}` : 'SOLICITUD DEVOLUCIÓN NUEVA';
-          let updateRes;
-          if (predeterminedId) {
-            updateRes = await db.query(`
-              UPDATE panol.stock_movements sm
-              SET status = 'DEVOLUCION PENDIENTE', returned_qty = $1, return_notes = $2, movement_type = 'DEVOLUCION_NUEVO', updated_at = NOW()
-              WHERE sm.id = $3
-              RETURNING sm.order_id;
-            `, [returnQty, retNote, predeterminedId]);
-          } else {
-            updateRes = await db.query(`
-              UPDATE panol.stock_movements sm
-              SET status = 'DEVOLUCION PENDIENTE', returned_qty = $1, return_notes = $2, movement_type = 'DEVOLUCION_NUEVO', updated_at = NOW()
-              FROM panol.orders o, panol.items i
-              WHERE sm.order_id = o.id AND sm.item_id = i.id
-                AND (o.req_code = $3 OR o.order_number::text = $3 OR o.id::text = $3)
-                AND lower(i.name) = lower($4)
-                AND sm.status IN ('LISTO', 'ENTREGADO')
-              RETURNING sm.order_id;
-            `, [returnQty, retNote, reqId, itemName]);
-          }
-
-          if (updateRes.rowCount > 0) {
-            const ordId = updateRes.rows[0].order_id;
-            await db.query(`UPDATE panol.orders SET status = 'DEVOLUCION PENDIENTE', updated_at = NOW() WHERE id = $1;`, [ordId]);
-            updated = true;
-          }
-        } catch (sqlErr) {
-          console.warn('⚠️ [SQL] Error requestRefund en Supabase:', sqlErr.message);
-        }
-      }
-      await broadcastOrdersSync();
+      await syncDataFromSheets();
+      io.emit('orders_sync', ordersCache);
       result = { success: updated, error: updated ? null : "El repuesto exacto no fue encontrado o ya fue devuelto." };
     }
     else if (action === 'getPendingOrdersEnriched' || action === 'getPendingOrders' || action === 'getMechanicOrders') {
-      if (db && db.isConfigured && db.isConfigured()) {
-        result = await getMonitorOrdersFromDb();
-      } else {
-        result = await syncDataFromSheets();
-      }
+      result = await syncDataFromSheets();
     }
     else if (action === 'getInventoryItems') {
       const q = String(args[0] || '').trim().toLowerCase();
-      if (db && db.isConfigured && db.isConfigured()) {
-        const ready = await ensureSqlItemsCatalog();
-        if (ready && Array.isArray(sqlInventoryListCache)) {
-          const matched = q
-            ? sqlInventoryListCache.filter(
-                i => i._searchName.includes(q) || i._searchBrand.includes(q) || i._searchCode.includes(q)
-              )
-            : sqlInventoryListCache;
-          result = matched.slice(0, 50).map(({ _searchName, _searchBrand, _searchCode, ...pub }) => pub);
-        } else {
-          try {
-            const sqlRes = q
-              ? await db.query(
-                  `SELECT id, item_code, item_code AS code, name, COALESCE(brand, '') AS brand, COALESCE(stock, 0) AS stock, COALESCE(location, 'S/D') AS loc, COALESCE(requires_exchange, false) AS "requiereCanje", COALESCE(requires_exchange, false) AS "requires_exchange"
-                   FROM panol.items
-                   WHERE is_active = true AND (lower(name) LIKE $1 OR lower(COALESCE(brand, '')) LIKE $1 OR lower(COALESCE(item_code, '')) LIKE $1)
-                   ORDER BY name ASC LIMIT 50;`,
-                  [`%${q}%`]
-                )
-              : await db.query(
-                  `SELECT id, item_code, item_code AS code, name, COALESCE(brand, '') AS brand, COALESCE(stock, 0) AS stock, COALESCE(location, 'S/D') AS loc, COALESCE(requires_exchange, false) AS "requiereCanje", COALESCE(requires_exchange, false) AS "requires_exchange"
-                   FROM panol.items
-                   WHERE is_active = true
-                   ORDER BY name ASC LIMIT 50;`
-                );
-            result = sqlRes.rows || [];
-          } catch (sqlErr) {
-            console.warn('⚠️ [SQL] Error getInventoryItems en Supabase:', sqlErr.message);
-            result = [];
-          }
-        }
-      } else {
-        await syncDataFromSheets();
-        let resList = itemsCatalogCache;
-        if (q) resList = resList.filter(i => i.name.toLowerCase().includes(q) || i.brand.toLowerCase().includes(q));
-        result = resList.slice(0, 50);
-      }
+      await syncDataFromSheets();
+      let resList = itemsCatalogCache;
+      if (q) resList = resList.filter(i => i.name.toLowerCase().includes(q) || i.brand.toLowerCase().includes(q));
+      result = resList.slice(0, 50);
     }
     else if (action === 'markAsReady' || action === 'markAsDelivered') {
       const reqId = args[0];
@@ -2629,99 +1888,59 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
         }
       }
 
-      // 🐘 Actualización SQL transaccional ACID en Supabase: panol.orders, panol.order_items y panol.stock_movements
+      // 🐘 Actualización SQL en Supabase: panol.orders, panol.order_items y panol.stock_movements
       if (db && db.isConfigured && db.isConfigured() && reqId) {
         try {
-          const finalStatus = 'LISTO';
-          readyTimestamps[reqId] = Date.now();
+          const isDelivered = (action === 'markAsDelivered');
+          const finalStatus = isDelivered ? 'ENTREGADO' : 'LISTO';
+          const updateField = isDelivered ? 'delivered_at = NOW()' : 'ready_at = NOW()';
 
-          await db.transaction(async (tx) => {
-            const panolStaffQ = panolOpId ? await tx.query('SELECT id FROM panol.staff WHERE op_code = $1 LIMIT 1;', [panolOpId]) : { rows: [] };
-            const panolStaffUuid = panolStaffQ.rows[0]?.id || null;
+          const panolStaffQ = panolOpId ? await db.query('SELECT id FROM panol.staff WHERE op_code = $1 LIMIT 1;', [panolOpId]) : { rows: [] };
+          const panolStaffUuid = panolStaffQ.rows[0]?.id || null;
 
-            const ordQ = await tx.query(
-              `SELECT id, status, mechanic_id, req_code 
-               FROM panol.orders 
-               WHERE req_code = $1 OR order_number::text = $1 OR id::text = $1 
-               LIMIT 1 
-               FOR UPDATE;`,
-              [reqId]
-            );
-            const orderRow = ordQ.rows[0];
+          await db.query(`
+            UPDATE panol.orders 
+            SET status = $1, panol_staff_id = COALESCE($2, panol_staff_id), ${updateField}, updated_at = NOW()
+            WHERE req_code = $3;
+          `, [finalStatus, panolStaffUuid, reqId]);
 
-            if (orderRow) {
-              const orderUuid = orderRow.id;
-              const alreadyDispensed = (orderRow.status === 'LISTO' || orderRow.status === 'ENTREGADO');
+          await db.query(`
+            UPDATE panol.order_items 
+            SET status = $1, updated_at = NOW()
+            WHERE order_id IN (SELECT id FROM panol.orders WHERE req_code = $2);
+          `, [finalStatus, reqId]);
 
-              if (Array.isArray(itemsPayload) && itemsPayload.length > 0) {
-                for (const p of itemsPayload) {
-                  if (p && p.name && p.qty !== undefined) {
-                    await tx.query(`
-                      UPDATE panol.stock_movements sm
-                      SET quantity = $2, updated_at = NOW()
-                      FROM panol.items i
-                      WHERE sm.order_id = $1 AND sm.item_id = i.id
-                        AND lower(i.name) = lower($3);
-                    `, [orderUuid, Number(p.qty), String(p.name).trim()]);
-                  }
-                }
-              }
+          if (isDelivered) {
+            const ordItems = await db.query(`
+              SELECT oi.id as order_item_id, oi.item_id, oi.quantity, i.stock
+              FROM panol.order_items oi
+              JOIN panol.items i ON oi.item_id = i.id
+              JOIN panol.orders o ON oi.order_id = o.id
+              WHERE o.req_code = $1;
+            `, [reqId]);
 
-              await tx.query(`
-                UPDATE panol.orders 
-                SET status = $1, panol_staff_id = COALESCE($2, panol_staff_id), ready_at = COALESCE(ready_at, NOW()), updated_at = NOW()
-                WHERE id = $3;
-              `, [finalStatus, panolStaffUuid, orderUuid]);
-
-              if (!alreadyDispensed) {
-                const ordItems = await tx.query(`
-                  SELECT sm.id, sm.item_id, sm.quantity, i.stock, i.name as item_name
-                  FROM panol.stock_movements sm
-                  JOIN panol.items i ON sm.item_id = i.id
-                  WHERE sm.order_id = $1
-                  FOR UPDATE OF i, sm;
-                `, [orderUuid]);
-
-                for (const row of ordItems.rows) {
-                  const prev = parseFloat(row.stock) || 0;
-                  const qty = parseFloat(row.quantity) || 1;
-                  const delta = -qty;
-                  const next = Math.max(0, prev + delta);
-                  await tx.query(`
-                    UPDATE panol.items SET stock = $1, updated_at = NOW() WHERE id = $2;
-                  `, [next, row.item_id]);
-                  sqlItemsNeedsDelta = true;
-                  await tx.query(`
-                    UPDATE panol.stock_movements
-                    SET
-                      status = $1,
-                      movement_type = 'PEDIDO_LISTO',
-                      quantity_delta = $2,
-                      previous_stock = $3,
-                      new_stock = $4,
-                      delivered_qty = COALESCE(delivered_qty, quantity),
-                      ready_at = NOW(),
-                      performed_by = COALESCE($5, performed_by),
-                      updated_at = NOW()
-                    WHERE id = $6;
-                  `, [finalStatus, delta, prev, next, panolStaffUuid, row.id]);
-                }
-              } else {
-                await tx.query(`
-                  UPDATE panol.stock_movements 
-                  SET status = $1, delivered_qty = COALESCE(delivered_qty, quantity), updated_at = NOW()
-                  WHERE order_id = $2 AND status NOT IN ('DEVOLUCION', 'DEVUELTO');
-                `, [finalStatus, orderUuid]);
-              }
-              console.log(`🐘 [SQL-ACID] Pedido ${reqId} (${orderUuid}) despachado como ${finalStatus} bajo transacción atómica.`);
+            for (const row of ordItems.rows) {
+              const prev = parseFloat(row.stock) || 0;
+              const delta = -parseFloat(row.quantity);
+              const next = Math.max(0, prev + delta);
+              await db.query(`
+                UPDATE panol.items SET stock = $1, updated_at = NOW() WHERE id = $2;
+              `, [next, row.item_id]);
+              await db.query(`
+                INSERT INTO panol.stock_movements (
+                  item_id, order_item_id, quantity_delta, previous_stock, new_stock, movement_type, performed_by, notes
+                ) VALUES ($1, $2, $3, $4, $5, 'PEDIDO_ENTREGADO', $6, $7);
+              `, [row.item_id, row.order_item_id, delta, prev, next, panolStaffUuid, `Retiro entregado ${reqId}`]);
             }
-          });
+          }
+          console.log(`🐘 [SQL] Pedido ${reqId} actualizado a ${finalStatus} en Supabase.`);
         } catch (sqlErr) {
-          console.warn('⚠️ [SQL-ACID] Error en transacción de despacho de pedido:', sqlErr.message);
+          console.warn('⚠️ [SQL] Error actualizando pedido en Supabase:', sqlErr.message);
         }
       }
 
-      await broadcastOrdersSync();
+      await syncDataFromSheets(true);
+      io.emit('orders_sync', ordersCache);
       result = { success: true };
 
     }
@@ -2745,36 +1964,18 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
     }
     else if (action === 'updateTaskExecution') {
       const payload = args[0] || {};
-      if (db && db.isConfigured && db.isConfigured()) {
-        result = await updateTaskExecutionInSupabase({
-          taskId: payload.taskId,
-          ubicacion: payload.ubicacion || payload.box,
-          operario: payload.operario,
-          assignedStaffId: payload.assignedStaffId,
-          empezo: payload.empezo,
-          termino: payload.termino,
-          estado: payload.estado || payload.status,
-          otNumber: payload.otNumber,
-          isCompleted: payload.isCompleted,
-          io
-        });
-      }
-      if (sheets && SPREADSHEET_ID && payload.taskId) {
-        updateTaskExecution({
-          sheetsClient: sheets,
-          spreadsheetId: SPREADSHEET_ID,
-          taskId: payload.taskId,
-          ubicacion: payload.ubicacion,
-          operario: payload.operario,
-          asignado: payload.asignado,
-          empezo: payload.empezo,
-          termino: payload.termino,
-          estado: payload.estado,
-          skipSupabaseSync: true,
-          io
-        }).catch(e => console.warn('⚠️ [Sheets Sync Task RPC] Fallback error:', e.message));
-      }
-      if (!result) result = { success: true };
+      result = await updateTaskExecution({
+        sheetsClient: sheets,
+        spreadsheetId: SPREADSHEET_ID,
+        taskId: payload.taskId,
+        ubicacion: payload.ubicacion,
+        operario: payload.operario,
+        asignado: payload.asignado,
+        empezo: payload.empezo,
+        termino: payload.termino,
+        estado: payload.estado,
+        io
+      });
     }
     else if (action === 'syncOtsToTasks') {
       result = await syncOtsToTasksDatabase({ sheetsClient: sheets, spreadsheetId: SPREADSHEET_ID, io });
@@ -2819,22 +2020,13 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
           );
           let holds = qRes.rows.map(r => ({
             id: r.hold_id,
-            tractorWorkOrderId: r.tractor_work_order_id,
-            semiWorkOrderId: r.semi_work_order_id,
-            tractorOtStatus: r.tractor_ot_status,
-            semiOtStatus: r.semi_ot_status,
-            tractorId: r.tractor_id,
-            semiId: r.semi_id,
             tractorPlate: r.tractor_plate,
             tractorOt: r.tractor_ot,
             semiPlate: r.semi_plate,
             semiOt: r.semi_ot,
             brand: r.tractor_brand,
             brandSemi: r.semi_brand,
-            addedAt: r.created_at,
-            source: r.source || 'MANUAL',
-            reviewedAt: r.reviewed_at || null,
-            isCoordAssigned: Boolean(r.is_coord_assigned)
+            addedAt: r.created_at
           }));
 
           // Si en Postgres no hay holds para este operario, consultar e importar desde Sheets DB_STAFF Col M
@@ -2850,6 +2042,7 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
 
                 let trId = null;
                 let smId = null;
+                const woId = null; // Desacoplado: OTs canónicas vienen de DB_OT_LIST hasta normalizar extractor
 
                 if (tp) {
                   const trRes = await db.query("SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [tp]);
@@ -2860,13 +2053,11 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
                   if (smRes.rows.length > 0) smId = smRes.rows[0].id;
                 }
 
-                const { trWoId, smWoId } = await resolveHoldWorkOrders({ trId, tot, smId, sot });
-
                 await db.query(`
-                  INSERT INTO panol.staff_holds (staff_id, tractor_work_order_id, semi_work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                  INSERT INTO panol.staff_holds (staff_id, work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                   ON CONFLICT DO NOTHING;
-                `, [staffMember.id, trWoId, smWoId, trId, smId, tot, sot, tp, sp]);
+                `, [staffMember.id, woId, trId, smId, tot, sot, tp, sp]);
               }
 
               const reQ = await db.query(
@@ -2875,12 +2066,6 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
               );
               holds = reQ.rows.map(r => ({
                 id: r.hold_id,
-                tractorWorkOrderId: r.tractor_work_order_id,
-                semiWorkOrderId: r.semi_work_order_id,
-                tractorOtStatus: r.tractor_ot_status,
-                semiOtStatus: r.semi_ot_status,
-                tractorId: r.tractor_id,
-                semiId: r.semi_id,
                 tractorPlate: r.tractor_plate,
                 tractorOt: r.tractor_ot,
                 semiPlate: r.semi_plate,
@@ -2892,7 +2077,7 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
             }
           }
 
-          result = { success: true, units: holds, holds };
+          result = holds;
         } catch (sqlErr) {
           console.warn('⚠️ [SQL] Error obteniendo staff_holds:', sqlErr.message);
           result = await getOperarioHoldOts({ sheetsClient: sheets, spreadsheetId: SPREADSHEET_ID, opId: targetOpCode });
@@ -2910,38 +2095,35 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
       if (db && db.isConfigured && db.isConfigured() && staffMember) {
         try {
           const staffId = staffMember.id;
-          await db.transaction(async (tx) => {
-            await tx.query('DELETE FROM panol.staff_holds WHERE staff_id = $1;', [staffId]);
-            for (const u of units) {
-              const tp = String(u.tractorPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-              const sp = String(u.semiPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-              const tot = String(u.tractorOt || '').trim();
-              const sot = String(u.semiOt || '').trim();
+          await db.query('DELETE FROM panol.staff_holds WHERE staff_id = $1;', [staffId]);
+          for (const u of units) {
+            const tp = String(u.tractorPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+            const sp = String(u.semiPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+            const tot = String(u.tractorOt || '').trim();
+            const sot = String(u.semiOt || '').trim();
 
-              let trId = null;
-              let smId = null;
+            let trId = null;
+            let smId = null;
+            const woId = null; // Desacoplado: OTs canónicas vienen de DB_OT_LIST hasta normalizar extractor
 
-              if (tp) {
-                const trRes = await tx.query("SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [tp]);
-                if (trRes.rows.length > 0) trId = trRes.rows[0].id;
-              }
-              if (sp) {
-                const smRes = await tx.query("SELECT id FROM public.semis WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [sp]);
-                if (smRes.rows.length > 0) smId = smRes.rows[0].id;
-              }
-
-              const { trWoId, smWoId } = await resolveHoldWorkOrders({ trId, tot, smId, sot });
-
-              await tx.query(`
-                INSERT INTO panol.staff_holds (staff_id, tractor_work_order_id, semi_work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                ON CONFLICT DO NOTHING;
-              `, [staffId, trWoId, smWoId, trId, smId, tot, sot, tp, sp]);
+            if (tp) {
+              const trRes = await db.query("SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [tp]);
+              if (trRes.rows.length > 0) trId = trRes.rows[0].id;
             }
-          });
+            if (sp) {
+              const smRes = await db.query("SELECT id FROM public.semis WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [sp]);
+              if (smRes.rows.length > 0) smId = smRes.rows[0].id;
+            }
+
+            await db.query(`
+              INSERT INTO panol.staff_holds (staff_id, work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              ON CONFLICT DO NOTHING;
+            `, [staffId, woId, trId, smId, tot, sot, tp, sp]);
+          }
           result = { success: true };
         } catch (sqlErr) {
-          console.warn('⚠️ [SQL-ACID] Error guardando staff_holds en transacción:', sqlErr.message);
+          console.warn('⚠️ [SQL] Error guardando staff_holds:', sqlErr.message);
         }
       }
       try {
@@ -2950,33 +2132,74 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
     }
     else if (action === 'getUnitTimelineTasks') {
       const params = args[0] || {};
-      result = await getUnitTimelineTasks({
-        sheetsClient: sheets,
-        spreadsheetId: SPREADSHEET_ID,
-        tractorOt: params.tractorOt,
-        semiOt: params.semiOt,
-        tractorPlate: params.tractorPlate,
-        semiPlate: params.semiPlate
-      });
+
+      // 🐘 1. Prioridad SQL: Supabase panol.work_order_tasks
+      if (db && db.isConfigured && db.isConfigured()) {
+        try {
+          const otNum = params.tractorOt || params.semiOt || '';
+          if (otNum) {
+            const sqlTasks = await db.query(`
+              SELECT 
+                wot.id, wot.task_index, wot.sector, wot.description, wot.status,
+                wot.assigned_box, s.name as operario, wot.started_at, wot.finished_at,
+                wo.ot_number, wo.progress_percentage
+              FROM panol.work_order_tasks wot
+              JOIN panol.work_orders wo ON wot.work_order_id = wo.id
+              LEFT JOIN panol.staff s ON wot.assigned_staff_id = s.id
+              WHERE wo.ot_number = $1
+              ORDER BY wot.task_index ASC;
+            `, [String(otNum).trim()]);
+
+            if (sqlTasks.rows.length > 0) {
+              result = {
+                success: true,
+                tasks: sqlTasks.rows.map(t => ({
+                  id: t.id,
+                  taskIndex: t.task_index,
+                  rubro: t.sector,
+                  desc: t.description,
+                  estado: t.status,
+                  operario: t.operario || '',
+                  box: t.assigned_box || '',
+                  empezo: t.started_at,
+                  termino: t.finished_at
+                })),
+                progress: parseFloat(sqlTasks.rows[0].progress_percentage) || 0
+              };
+            }
+          }
+        } catch (sqlErr) {
+          console.warn('⚠️ [SQL] Error getUnitTimelineTasks:', sqlErr.message);
+        }
+      }
+
+      if (!result) {
+        result = await getUnitTimelineTasks({
+          sheetsClient: sheets,
+          spreadsheetId: SPREADSHEET_ID,
+          tractorOt: params.tractorOt,
+          semiOt: params.semiOt,
+          tractorPlate: params.tractorPlate,
+          semiPlate: params.semiPlate
+        });
+      }
     }
     else if (action === 'toggleTaskTerminado') {
       const params = args[0] || {};
 
-      // 🐘 Actualización atómica en Supabase panol.work_order_tasks y consolidación al 100%
+      // 🐘 Actualización SQL: Supabase panol.work_order_tasks
       if (db && db.isConfigured && db.isConfigured()) {
         try {
-          await updateTaskExecutionInSupabase({
-            taskId: params.taskId,
-            desc: params.desc,
-            rubro: params.rubro,
-            otNumber: params.otNumber,
-            operario: params.opId,
-            isCompleted: params.isCompleted,
-            estado: params.isCompleted ? 'TERMINADO' : 'PENDIENTE',
-            io
-          });
+          const newStatus = params.isCompleted ? 'TERMINADO' : 'PENDIENTE';
+          const finTime = params.isCompleted ? 'finished_at = NOW()' : 'finished_at = NULL';
+          await db.query(`
+            UPDATE panol.work_order_tasks
+            SET status = $1, ${finTime}, updated_at = NOW()
+            WHERE id::text = $2 OR (description = $3 AND work_order_id IN (SELECT id FROM panol.work_orders WHERE ot_number = $4));
+          `, [newStatus, params.taskId ? String(params.taskId) : null, params.desc || '', String(params.otNumber || '')]);
+          console.log(`🐘 [SQL] Tarea ${params.desc} actualizada a ${newStatus} en Supabase.`);
         } catch (sqlErr) {
-          console.warn('⚠️ [SQL] Error toggleTaskTerminado en Supabase:', sqlErr.message);
+          console.warn('⚠️ [SQL] Error toggleTaskTerminado:', sqlErr.message);
         }
       }
 
@@ -2991,9 +2214,6 @@ app.post('/api/rpc', requireAuth, async (req, res) => {
         isCompleted: params.isCompleted,
         io
       });
-    }
-    else if (action === 'exportColdOrders' || action === 'exportAndPurgeColdOrders') {
-      result = await exportAndPurgeColdOrdersOlderThan180Days();
     }
 
     else if (action === 'getFleetSearchCatalog') {
@@ -3146,49 +2366,13 @@ app.get('/api/tasks', async (req, res) => {
 
 app.post('/api/tasks/update', async (req, res) => {
   try {
-    const { taskId, estado, status, empezo, termino, operario, ubicacion, box, otNumber, plate, assignedStaffId, isCompleted } = req.body;
-    let result = null;
-
-    if (db && db.isConfigured && db.isConfigured()) {
-      result = await updateTaskExecutionInSupabase({
-        taskId,
-        estado: estado || status,
-        empezo,
-        termino,
-        operario,
-        assignedStaffId,
-        ubicacion: ubicacion || box,
-        otNumber,
-        isCompleted,
-        io
-      });
-    }
-
-    // Sincronización en segundo plano con Sheets si está configurado
-    if (sheets && SPREADSHEET_ID && taskId) {
-      updateTaskExecution({
-        sheetsClient: sheets,
-        spreadsheetId: SPREADSHEET_ID,
-        ...req.body,
-        skipSupabaseSync: true,
-        io
-      }).catch(e => console.warn('⚠️ [Sheets Sync Task] Fallback error:', e.message));
-    }
-
-    res.json(result || { success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Endpoint analítico de Recursos y Operarios (Balance de Carga y Disponibilidad)
-app.get('/api/tasks/recursos-operarios', async (req, res) => {
-  try {
-    if (db && db.isConfigured && db.isConfigured()) {
-      const qRes = await db.query('SELECT * FROM panol.v_recursos_operarios ORDER BY staff_name ASC;');
-      return res.json({ success: true, recursos: qRes.rows });
-    }
-    res.json({ success: true, recursos: [] });
+    const result = await updateTaskExecution({
+      sheetsClient: sheets,
+      spreadsheetId: SPREADSHEET_ID,
+      ...req.body,
+      io
+    });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -3241,32 +2425,59 @@ app.get('/api/tasks/history', async (req, res) => {
   }
 });
 
-app.post('/api/tasks/cold-purge', async (req, res) => {
-  try {
-    const result = await exportAndPurgeColdOrdersOlderThan180Days();
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // REST GET /api/orders
 app.get('/api/orders', async (req, res) => {
   // 🐘 Prioridad 1: SQL Supabase (panol.v_monitor_pedidos)
   if (db && db.isConfigured && db.isConfigured()) {
-    const orders = await getMonitorOrdersFromDb();
-    return res.json(orders);
+    try {
+      const qRes = await db.query('SELECT * FROM panol.v_monitor_pedidos ORDER BY created_at DESC LIMIT 50;');
+      if (qRes.rows.length > 0) {
+        const mapped = qRes.rows.map(r => ({
+          reqId: r.req_code,
+          orderId: r.order_id,
+          opId: r.mechanic_op_code,
+          opInfo: r.mechanic_name,
+          box: r.box_number || '01',
+          otNumber: r.ot_number,
+          tractorPlate: r.tractor,
+          tractorBrand: r.marca_tr,
+          semiPlate: r.semi,
+          semiBrand: r.marca_semi,
+          status: r.order_status,
+          orderType: r.order_type || 'PEDIDO',
+          parentOrderId: r.parent_order_id,
+          notes: r.order_notes,
+          timestamp: r.created_at,
+          items: (r.items || []).map(it => ({
+            name: it.name,
+            code: it.code,
+            qty: it.qty,
+            delivered_qty: it.delivered_qty || 0,
+            returned_qty: it.returned_qty || 0,
+            loc: it.location || 'S/D',
+            status: it.status,
+            requiereCanje: !!it.requires_exchange,
+            exchange_status: it.exchange_status,
+            note: it.notes,
+            return_notes: it.return_notes
+          }))
+        }));
+        return res.json(mapped);
+      }
+    } catch (sqlErr) {
+      console.warn('⚠️ [SQL] Error obteniendo v_monitor_pedidos:', sqlErr.message);
+    }
   }
 
-  // Fallback a Sheets solo si no está configurada la base de datos SQL
+  // Fallback a Sheets
   const orders = await syncDataFromSheets();
   res.json(orders);
 });
 
-// REST GET /api/fleet/search-catalog (Canonical Supabase PostgreSQL)
+// REST GET /api/fleet/search-catalog
 app.get('/api/fleet/search-catalog', async (req, res) => {
   try {
-    const data = await otsManager.getFleetSearchCatalog();
+    const data = await otsManager.getFleetSearchCatalog(sheets, SPREADSHEET_ID);
     res.json({ success: true, ...data });
   } catch (err) {
     console.error('❌ Error en /api/fleet/search-catalog:', err.message);
@@ -3274,118 +2485,21 @@ app.get('/api/fleet/search-catalog', async (req, res) => {
   }
 });
 
-// REST GET /api/devoluciones (Alimenta el panel de Devoluciones y Canjes de Pañol con Hot RAM C1 30s)
+// REST GET /api/devoluciones (Alimenta el panel de Devoluciones y Canjes de Pañol)
 app.get('/api/devoluciones', async (req, res) => {
   if (db && db.isConfigured && db.isConfigured()) {
     try {
-      const { tipo } = req.query || {};
-      const tipoUpper = tipo ? String(tipo).toUpperCase() : '';
-      const cacheKey = (tipoUpper === 'NUEVO' || tipoUpper === 'CANJE') ? tipoUpper : '__ALL__';
-      const now = Date.now();
-      const cached = devolucionesCache.get(cacheKey);
-      if (cached && (now - cached.ts) < MONITOR_CACHE_TTL_MS) {
-        return res.json(cached.payload);
-      }
-
-      let q = 'SELECT * FROM panol.v_devoluciones_pendientes';
-      const params = [];
-      if (cacheKey !== '__ALL__') {
-        q += ' WHERE tipo_devolucion = $1';
-        params.push(cacheKey);
-      }
-      q += ' ORDER BY movement_created_at DESC NULLS LAST, order_created_at DESC;';
-      const qRes = await db.query(q, params);
-      const payload = { success: true, count: qRes.rows.length, devoluciones: qRes.rows };
-      devolucionesCache.set(cacheKey, { ts: now, payload });
-      return res.json(payload);
+      const qRes = await db.query('SELECT * FROM panol.v_devoluciones_pendientes ORDER BY order_created_at DESC;');
+      return res.json({ success: true, devoluciones: qRes.rows });
     } catch (sqlErr) {
       console.warn('⚠️ [SQL] Error obteniendo v_devoluciones_pendientes:', sqlErr.message);
     }
   }
-  res.json({ success: true, count: 0, devoluciones: [] });
-});
-
-// REST GET /api/devoluciones/nuevas (Historial y pendientes de devoluciones nuevas con Hot RAM C1 30s)
-app.get('/api/devoluciones/nuevas', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const now = Date.now();
-      if (devolucionesNuevasCache.payload && (now - devolucionesNuevasCache.ts) < MONITOR_CACHE_TTL_MS) {
-        return res.json(devolucionesNuevasCache.payload);
-      }
-      const qRes = await db.query('SELECT * FROM panol.v_devoluciones_nuevas ORDER BY updated_at DESC, order_created_at DESC LIMIT 100;');
-      const payload = { success: true, count: qRes.rows.length, devoluciones: qRes.rows };
-      devolucionesNuevasCache = { ts: now, payload };
-      return res.json(payload);
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_devoluciones_nuevas:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, count: 0, devoluciones: [] });
-});
-
-// REST GET /api/boxes/en-vivo (Monitor de boxes/bahías en tiempo real)
-app.get('/api/boxes/en-vivo', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_boxes_en_vivo ORDER BY box_number ASC;');
-      return res.json({ success: true, count: qRes.rows.length, boxes: qRes.rows });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_boxes_en_vivo:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, count: 0, boxes: [] });
-});
-
-// REST GET /api/pedidos/canjes (Canjes y devoluciones consolidados de pañol)
-app.get('/api/pedidos/canjes', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_pedidos_canjes_consolidada ORDER BY fecha_pedido DESC LIMIT 100;');
-      return res.json({ success: true, count: qRes.rows.length, items: qRes.rows });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_pedidos_canjes_consolidada:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, count: 0, items: [] });
-});
-
-// REST GET /api/metrics/taller (Métricas y KPIs operativos en vivo)
-app.get('/api/metrics/taller', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_kpis_taller_diario LIMIT 1;');
-      return res.json({ success: true, metrics: qRes.rows[0] || null });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_kpis_taller_diario:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, metrics: null });
-});
-
-// REST GET /api/recursos/operarios (Carga y disponibilidad de mecánicos/operarios)
-app.get('/api/recursos/operarios', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_recursos_operarios ORDER BY staff_name ASC;');
-      return res.json({ success: true, count: qRes.rows.length, recursos: qRes.rows });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_recursos_operarios:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, count: 0, recursos: [] });
+  res.json({ success: true, devoluciones: [] });
 });
 
 // REST GET /api/holds/:opCode (Unidades en puesto desde panol.v_staff_holds)
 app.get('/api/holds/:opCode', async (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
   const opCode = String(req.params.opCode || '').trim();
   const staffMember = await getStaffMemberByOpCode(opCode);
   const targetOpCode = staffMember ? staffMember.op_code : opCode;
@@ -3401,72 +2515,16 @@ app.get('/api/holds/:opCode', async (req, res) => {
         'SELECT * FROM panol.v_staff_holds WHERE op_code = ANY($1::text[]) OR staff_id::text = ANY($1::text[]) ORDER BY created_at DESC;',
         [searchCodes]
       );
-
-      // Reconocimiento dinámico en backend de tareas asignadas por Coordinación
-      const activeWoMap = new Map();
-      if (staffMember && staffMember.id) {
-        try {
-          const tasksRes = await db.query(`
-            SELECT work_order_id, 
-                   COUNT(*) as total_assigned,
-                   COUNT(*) FILTER (WHERE empezo IS NULL) as pending_start,
-                   COUNT(*) FILTER (WHERE empezo IS NOT NULL AND termino IS NULL) as in_progress
-            FROM panol.work_order_tasks
-            WHERE worker_id = $1
-              AND COALESCE(estado, 'PENDIENTE') != 'COMPLETADA'
-              AND termino IS NULL
-            GROUP BY work_order_id;
-          `, [staffMember.id]);
-
-          tasksRes.rows.forEach(t => {
-            activeWoMap.set(String(t.work_order_id), {
-              total: parseInt(t.total_assigned || '0', 10),
-              pending: parseInt(t.pending_start || '0', 10),
-              inProgress: parseInt(t.in_progress || '0', 10)
-            });
-          });
-        } catch (tErr) {
-          console.warn('⚠️ [SQL] Error obteniendo tareas activas para holds:', tErr.message);
-        }
-      }
-
-      let holds = qRes.rows.map(r => {
-        const trWoId = r.tractor_work_order_id ? String(r.tractor_work_order_id) : null;
-        const smWoId = r.semi_work_order_id ? String(r.semi_work_order_id) : null;
-
-        const trTaskInfo = trWoId ? activeWoMap.get(trWoId) : null;
-        const smTaskInfo = smWoId ? activeWoMap.get(smWoId) : null;
-
-        const tractorHasCoordTasks = Boolean(trTaskInfo && (trTaskInfo.pending > 0 || trTaskInfo.inProgress > 0));
-        const semiHasCoordTasks = Boolean(smTaskInfo && (smTaskInfo.pending > 0 || smTaskInfo.inProgress > 0));
-        const hasCoordTasks = tractorHasCoordTasks || semiHasCoordTasks;
-
-        const isCoordAssigned = hasCoordTasks || Boolean(r.is_coord_assigned) || (r.source === 'COORDINACION' && !r.reviewed_at);
-
-        return {
-          id: r.hold_id,
-          tractorWorkOrderId: r.tractor_work_order_id,
-          semiWorkOrderId: r.semi_work_order_id,
-          tractorOtStatus: r.tractor_ot_status,
-          semiOtStatus: r.semi_ot_status,
-          tractorId: r.tractor_id,
-          semiId: r.semi_id,
-          tractorPlate: r.tractor_plate,
-          tractorOt: r.tractor_ot,
-          semiPlate: r.semi_plate,
-          semiOt: r.semi_ot,
-          brand: r.tractor_brand,
-          brandSemi: r.semi_brand,
-          addedAt: r.created_at,
-          source: r.source || (hasCoordTasks ? 'COORDINACION' : 'MANUAL'),
-          reviewedAt: r.reviewed_at || null,
-          isCoordAssigned,
-          tractorHasCoordTasks,
-          semiHasCoordTasks,
-          hasCoordTasks,
-          assignedTasksCount: (trTaskInfo?.total || 0) + (smTaskInfo?.total || 0)
-        };
-      });
+      let holds = qRes.rows.map(r => ({
+        id: r.hold_id,
+        tractorPlate: r.tractor_plate,
+        tractorOt: r.tractor_ot,
+        semiPlate: r.semi_plate,
+        semiOt: r.semi_ot,
+        brand: r.tractor_brand,
+        brandSemi: r.semi_brand,
+        addedAt: r.created_at
+      }));
 
       // Si no hay holds en Postgres pero existen en Sheets DB_STAFF Col M, sincronizarlos
       if (holds.length === 0 && sheets && SPREADSHEET_ID && staffMember) {
@@ -3481,6 +2539,7 @@ app.get('/api/holds/:opCode', async (req, res) => {
 
             let trId = null;
             let smId = null;
+            const woId = null; // Desacoplado: OTs canónicas vienen de DB_OT_LIST hasta normalizar extractor
 
             if (tp) {
               const trRes = await db.query("SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [tp]);
@@ -3491,13 +2550,11 @@ app.get('/api/holds/:opCode', async (req, res) => {
               if (smRes.rows.length > 0) smId = smRes.rows[0].id;
             }
 
-            const { trWoId, smWoId } = await resolveHoldWorkOrders({ trId, tot, smId, sot });
-
             await db.query(`
-              INSERT INTO panol.staff_holds (staff_id, tractor_work_order_id, semi_work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              INSERT INTO panol.staff_holds (staff_id, work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
               ON CONFLICT DO NOTHING;
-            `, [staffMember.id, trWoId, smWoId, trId, smId, tot, sot, tp, sp]);
+            `, [staffMember.id, woId, trId, smId, tot, sot, tp, sp]);
           }
 
           const reQ = await db.query(
@@ -3506,12 +2563,6 @@ app.get('/api/holds/:opCode', async (req, res) => {
           );
           holds = reQ.rows.map(r => ({
             id: r.hold_id,
-            tractorWorkOrderId: r.tractor_work_order_id,
-            semiWorkOrderId: r.semi_work_order_id,
-            tractorOtStatus: r.tractor_ot_status,
-            semiOtStatus: r.semi_ot_status,
-            tractorId: r.tractor_id,
-            semiId: r.semi_id,
             tractorPlate: r.tractor_plate,
             tractorOt: r.tractor_ot,
             semiPlate: r.semi_plate,
@@ -3523,7 +2574,7 @@ app.get('/api/holds/:opCode', async (req, res) => {
         }
       }
 
-      return res.json({ success: true, holds, units: holds });
+      return res.json({ success: true, holds });
     } catch (sqlErr) {
       console.warn('⚠️ [SQL] Error obteniendo /api/holds:', sqlErr.message);
     }
@@ -3532,16 +2583,14 @@ app.get('/api/holds/:opCode', async (req, res) => {
   // Fallback si Postgres no está disponible: leer de Sheets directamente
   if (sheets && SPREADSHEET_ID && opCode) {
     const legacyRes = await getOperarioHoldOts({ sheetsClient: sheets, spreadsheetId: SPREADSHEET_ID, opId: targetOpCode });
-    const legacyUnits = legacyRes.units || [];
-    return res.json({ success: true, holds: legacyUnits, units: legacyUnits });
+    return res.json({ success: true, holds: legacyRes.units || [] });
   }
 
-  res.json({ success: true, holds: [], units: [] });
+  res.json({ success: true, holds: [] });
 });
 
 // REST POST /api/holds (Agregar unidad al puesto en panol.staff_holds y replicar en Sheets DB_STAFF Col M)
 app.post('/api/holds', async (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   const { opCode, tractorPlate, tractorOt, semiPlate, semiOt, brand, brandSemi } = req.body || {};
   const cleanOp = String(opCode || '').trim();
   if (!cleanOp) return res.status(400).json({ success: false, error: 'Falta opCode' });
@@ -3559,6 +2608,7 @@ app.post('/api/holds', async (req, res) => {
 
       let trId = null;
       let smId = null;
+      const woId = null; // Desacoplado: OTs canónicas vienen de DB_OT_LIST hasta normalizar extractor
 
       if (tp) {
         const trRes = await db.query("SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = $1 LIMIT 1;", [tp]);
@@ -3569,42 +2619,36 @@ app.post('/api/holds', async (req, res) => {
         if (smRes.rows.length > 0) smId = smRes.rows[0].id;
       }
 
-      const { trWoId, smWoId } = await resolveHoldWorkOrders({ trId, tot, smId, sot });
-
       // Evitar duplicados para el mismo operario si ya tiene esta unidad en hold
       const existingHold = await db.query(`
         SELECT id FROM panol.staff_holds 
         WHERE staff_id = $1 
           AND (
             ($2 <> '' AND tractor_plate = $2) OR 
-            ($3 <> '' AND semi_plate = $3) OR
-            ($4::uuid IS NOT NULL AND tractor_id = $4) OR
-            ($5::uuid IS NOT NULL AND semi_id = $5)
+            ($3 <> '' AND semi_plate = $3)
           )
         LIMIT 1;
-      `, [staffId, tp, sp, trId, smId]);
+      `, [staffId, tp, sp]);
 
       let newId;
       if (existingHold.rows.length > 0) {
         newId = existingHold.rows[0].id;
         await db.query(`
           UPDATE panol.staff_holds 
-          SET tractor_work_order_id = COALESCE($1, tractor_work_order_id),
-              semi_work_order_id = COALESCE($2, semi_work_order_id),
-              ot_number = COALESCE(NULLIF($3, ''), ot_number),
-              semi_ot = COALESCE(NULLIF($4, ''), semi_ot),
-              tractor_id = COALESCE($5, tractor_id),
-              semi_id = COALESCE($6, semi_id),
-              tractor_plate = COALESCE(NULLIF($7, ''), tractor_plate),
-              semi_plate = COALESCE(NULLIF($8, ''), semi_plate)
-          WHERE id = $9;
-        `, [trWoId, smWoId, tot, sot, trId, smId, tp, sp, newId]);
+          SET ot_number = COALESCE(NULLIF($1, ''), ot_number),
+              semi_ot = COALESCE(NULLIF($2, ''), semi_ot),
+              tractor_id = COALESCE($3, tractor_id),
+              semi_id = COALESCE($4, semi_id),
+              tractor_plate = COALESCE(NULLIF($5, ''), tractor_plate),
+              semi_plate = COALESCE(NULLIF($6, ''), semi_plate)
+          WHERE id = $7;
+        `, [tot, sot, trId, smId, tp, sp, newId]);
       } else {
         const insRes = await db.query(`
-          INSERT INTO panol.staff_holds (staff_id, tractor_work_order_id, semi_work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          INSERT INTO panol.staff_holds (staff_id, work_order_id, tractor_id, semi_id, ot_number, semi_ot, tractor_plate, semi_plate)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           RETURNING id, created_at;
-        `, [staffId, trWoId, smWoId, trId, smId, tot, sot, tp, sp]);
+        `, [staffId, woId, trId, smId, tot, sot, tp, sp]);
         newId = insRes.rows[0]?.id;
       }
 
@@ -3644,8 +2688,6 @@ app.post('/api/holds', async (req, res) => {
         success: true,
         hold: {
           id: newId,
-          tractorWorkOrderId: trWoId,
-          semiWorkOrderId: smWoId,
           tractorPlate: tp,
           tractorOt: tot,
           semiPlate: sp,
@@ -3680,24 +2722,7 @@ app.post('/api/holds', async (req, res) => {
 });
 
 // REST DELETE /api/holds/:id (Remover unidad del puesto y replicar en Sheets DB_STAFF Col M)
-// REST POST /api/holds/:id/review (Marcar unidad en puesto como revisada por el operario)
-app.post('/api/holds/:id/review', async (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  const { id } = req.params;
-  if (db && db.isConfigured && db.isConfigured() && id) {
-    try {
-      await db.query('UPDATE panol.staff_holds SET reviewed_at = NOW() WHERE id::text = $1;', [id]);
-      return res.json({ success: true });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error marcando hold como revisado:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true });
-});
-
 app.delete('/api/holds/:id', async (req, res) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   const { id } = req.params;
   if (db && db.isConfigured && db.isConfigured() && id) {
     try {
@@ -3750,109 +2775,37 @@ app.delete('/api/holds/:id', async (req, res) => {
 
 // REST POST /api/pedidos/return (Solicitud de devolución desde terminal de taller)
 app.post('/api/pedidos/return', async (req, res) => {
-  const { id, reqId, itemName, returnQty, reason, opId } = req.body || {};
-  if (!reqId && !id) return res.status(400).json({ success: false, error: 'Falta reqId o id' });
+  const { reqId, itemName, returnQty, reason, opId } = req.body || {};
+  if (!reqId) return res.status(400).json({ success: false, error: 'Falta reqId' });
 
   const qty = parseInt(returnQty || '1', 10);
   const note = reason ? `DEVOLUCIÓN SOLICITADA POR TALLER: ${reason}` : 'DEVOLUCIÓN SOLICITADA POR TALLER';
 
   if (db && db.isConfigured && db.isConfigured()) {
     try {
-      if (id) {
-        // Devolución determinística por ID predeterminada (UUID en panol.stock_movements)
-        const updateSm = await db.query(`
-          UPDATE panol.stock_movements
-          SET status = 'DEVOLUCION PENDIENTE', returned_qty = $1, return_notes = $2, movement_type = 'DEVOLUCION_NUEVO', updated_at = NOW()
-          WHERE id = $3
-          RETURNING order_id;
-        `, [qty, note, id]);
+      await db.query(`
+        UPDATE panol.order_items oi
+        SET status = 'DEVOLUCION PENDIENTE', returned_qty = $1, return_notes = $2
+        FROM panol.orders o, panol.items i
+        WHERE oi.order_id = o.id AND oi.item_id = i.id
+          AND o.req_code = $3
+          AND (i.name ILIKE $4 OR $4 = '__ALL__');
+      `, [qty, note, reqId, itemName || '__ALL__']);
 
-        if (updateSm.rows.length > 0) {
-          await db.query(`
-            UPDATE panol.orders 
-            SET status = 'DEVOLUCION PENDIENTE', updated_at = NOW()
-            WHERE id = $1;
-          `, [updateSm.rows[0].order_id]);
-        }
-      } else {
-        // Fallback por req_code / order_number y nombre del repuesto
-        const updateSm = await db.query(`
-          UPDATE panol.stock_movements sm
-          SET status = 'DEVOLUCION PENDIENTE', returned_qty = $1, return_notes = $2, movement_type = 'DEVOLUCION_NUEVO', updated_at = NOW()
-          FROM panol.orders o, panol.items i
-          WHERE sm.order_id = o.id AND sm.item_id = i.id
-            AND (o.req_code = $3 OR o.id::text = $3 OR o.order_number::text = $3)
-            AND (i.name ILIKE $4 OR $4 = '__ALL__' OR $4 = 'ALL')
-          RETURNING sm.order_id;
-        `, [qty, note, reqId, itemName || '__ALL__']);
-
-        await db.query(`
-          UPDATE panol.orders 
-          SET status = 'DEVOLUCION PENDIENTE', updated_at = NOW()
-          WHERE (req_code = $1 OR id::text = $1 OR order_number::text = $1);
-        `, [reqId]);
-      }
+      await db.query(`
+        UPDATE panol.orders SET status = 'DEVOLUCION PENDIENTE' WHERE req_code = $1;
+      `, [reqId]);
     } catch (sqlErr) {
       console.warn('⚠️ [SQL] Error registrando devolución de taller:', sqlErr.message);
     }
   }
 
-  // Invalidar cachés C1 de Monitor y notificar por websockets con estado canónico
-  await broadcastOrdersSync();
+  // Notificar por websockets
+  if (io) {
+    io.emit('orders_sync', [{ reqId, status: 'DEVOLUCION PENDIENTE' }]);
+  }
 
   res.json({ success: true });
-});
-
-// REST GET /api/stock-movements (Movimientos transaccionales de stock)
-app.get('/api/stock-movements', async (req, res) => {
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query('SELECT * FROM panol.v_stock_movements LIMIT 200;');
-      return res.json({ success: true, count: qRes.rows.length, movements: qRes.rows });
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error obteniendo v_stock_movements:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.json({ success: true, count: 0, movements: [] });
-});
-
-// REST POST /api/items/refresh-catalog (Fuerza la recarga completa de Supabase panol.items en RAM)
-app.post(['/api/items/refresh-catalog', '/api/items/cache/clear'], (req, res) => {
-  sqlItemsCatalogCache = null;
-  sqlInventoryListCache = null;
-  sqlItemsMap.clear();
-  sqlItemsMaxUpdatedAt = null;
-  sqlItemsCatalogLastFetch = 0;
-  sqlItemsNeedsDelta = false;
-  console.log('🔄 [Catalog Cache] Caché de repuestos panol.items invalidada.');
-  return res.json({ success: true, message: 'Caché de repuestos invalidada. Próxima consulta leerá directo de Supabase.' });
-});
-
-// REST POST /api/items/:id/toggle-exchange (Toggle indicador canje en panol.items)
-app.post('/api/items/:id/toggle-exchange', async (req, res) => {
-  const { id } = req.params;
-  if (!id) return res.status(400).json({ success: false, error: 'Falta ID de repuesto' });
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query(`
-        UPDATE panol.items
-        SET requires_exchange = NOT COALESCE(requires_exchange, false), updated_at = NOW()
-        WHERE id::text = $1 OR item_code = $1
-        RETURNING id, item_code, name, requires_exchange;
-      `, [id]);
-      if (qRes.rows.length > 0) {
-        sqlItemsNeedsDelta = true; // Próxima lectura sincronizará únicamente el delta modificado
-        return res.json({ success: true, item: qRes.rows[0] });
-      } else {
-        return res.status(404).json({ success: false, error: 'Repuesto no encontrado' });
-      }
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error toggle-exchange:', sqlErr.message);
-      return res.status(500).json({ success: false, error: sqlErr.message });
-    }
-  }
-  res.status(503).json({ success: false, error: 'Base de datos no configurada' });
 });
 
 // REST GET /api/ots-anteriores/:plate
@@ -3943,11 +2896,6 @@ app.post('/webhook/nueva-ot', async (req, res) => {
     const effectivePlate = (otsManagerResult && otsManagerResult.dominio) || (result && result.matchedPlate) || dirtyPlate;
     const effectiveOt = otNumber;
 
-    // Invalidar caché del catálogo de flota ante nueva OT
-    if (otsManager.invalidateFleetCatalogCache) {
-      otsManager.invalidateFleetCatalogCache();
-    }
-
     // Notificar a todos los navegadores/dashboards conectados en tiempo real vía WebSocket
     io.emit('ot_updated', {
       action: (otsManagerResult && otsManagerResult.action) || (result && result.action) || 'UPDATED',
@@ -3956,7 +2904,6 @@ app.post('/webhook/nueva-ot', async (req, res) => {
       otsDetails: otsManagerResult,
       timestamp: new Date().toISOString()
     });
-    io.emit('fleet_catalog_updated');
 
     console.log(`✅ Webhook /webhook/nueva-ot procesado: ${effectivePlate} (OT ${effectiveOt})`);
 
@@ -3999,35 +2946,6 @@ app.all('/api/sync-ots', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('❌ Error en /api/sync-ots:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// === 4.2 ENDPOINT INTEGRACIÓN N8N & TRIGGER DE SYNC SUPABASE ===
-app.all('/api/taller/sync-ots', async (req, res) => {
-  try {
-    const spreadsheetId = req.body?.spreadsheetId || req.query?.spreadsheetId || PROD_SPREADSHEET_ID;
-    const daysCutoff = parseInt(req.body?.days || req.body?.daysCutoff || req.query?.days || req.query?.daysCutoff || '7', 10);
-    const onlyLastWeek = (req.body?.onlyLastWeek !== false) && (req.query?.onlyLastWeek !== 'false');
-    const mode = req.body?.mode || req.query?.mode || 'latest';
-
-    console.log(`📡 [n8n Trigger] Invocando sincronización de OTs a Supabase (mode=${mode}, onlyLastWeek=${onlyLastWeek}, days=${daysCutoff})`);
-
-    const result = await ingestOtsFromSheetsToSupabase({
-      sheetsClient: sheets,
-      spreadsheetId,
-      daysCutoff,
-      onlyLastWeek,
-      mode
-    });
-
-    if (io) {
-      io.emit('taller_ots_synced', result);
-    }
-
-    res.status(result.success ? 200 : 500).json(result);
-  } catch (err) {
-    console.error('❌ Error en /api/taller/sync-ots:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -4114,13 +3032,8 @@ function startServer(port) {
     // Pequeña pausa de 1 segundo para escalonar peticiones y proteger la cuota de Google Sheets
     await new Promise(r => setTimeout(r, 1000));
 
-    // 3. Sincronizar transacciones y pedidos iniciales
-    if (db && db.isConfigured && db.isConfigured()) {
-      console.log('🐘 [SSOT] Cargando pedidos iniciales desde Supabase SQL (panol.v_monitor_pedidos)...');
-      await getMonitorOrdersFromDb();
-    } else {
-      await syncDataFromSheets();
-    }
+    // 3. Sincronizar catálogo y transacciones en 1 sola petición HTTP batchGet
+    await syncDataFromSheets();
 
     // Pequeña pausa de 1 segundo
     await new Promise(r => setTimeout(r, 1000));
@@ -4137,15 +3050,6 @@ function startServer(port) {
       console.log('✅ Sincronización inicial de OTs finalizada:', otSyncRes);
     } catch (e) {
       console.error('⚠️ Advertencia: No se pudo completar sincronización inicial de OTs:', e.message);
-    }
-
-    // 5. Catálogo Canónico de Taller y OTs (Supabase PostgreSQL SSOT)
-    try {
-      console.log('⚡ [Taller] Precalentando catálogo de flota desde Supabase (panol.v_taller_flota_ot)...');
-      const catRes = await otsManager.getFleetSearchCatalog(null, null, true);
-      console.log(`✅ [Taller] Catálogo inicializado: ${catRes.count} pares y ${catRes.allOts ? catRes.allOts.length : 0} OTs activas cargadas desde Supabase.`);
-    } catch (eInitCat) {
-      console.warn('⚠️ Error inicializando catálogo de flota desde Supabase:', eInitCat.message);
     }
 
     try {

@@ -2,7 +2,7 @@ import React from 'react';
 import { SectorType } from '../../types';
 
 interface SectorBadgeProps {
-  sector?: SectorType | string;
+  sector: SectorType | string;
   className?: string;
 }
 

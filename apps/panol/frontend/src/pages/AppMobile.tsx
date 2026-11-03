@@ -191,13 +191,10 @@ export const AppMobile: React.FC = () => {
     try {
       await submitBatchOrder({
         opId: user?.op_code || '190',
-        mechanicId: user?.id,
         mechanicName: user?.name || 'Mecánico',
         box: activeBox,
         tractorPlate: tractorPlate.toUpperCase().trim(),
         semiPlate: semiPlate ? semiPlate.toUpperCase().trim() : undefined,
-        otNumber: tractorOt ? tractorOt.trim() : undefined,
-        semiOt: semiOt ? semiOt.trim() : undefined,
         targetType,
         items: cartItems.map((ci) => ({
           code: ci.item.code,
@@ -233,12 +230,8 @@ export const AppMobile: React.FC = () => {
         await updateTaskExecution({
           taskId: task.id,
           status: 'EN_CURSO',
-          estado: 'EN_CURSO',
           operario: user?.name,
-          workerId: user?.id,
-          assignedStaffId: user?.id,
           box: activeBox,
-          plate: tractorPlate,
         });
       } catch (e) {}
       setTasks((prev) =>
@@ -256,13 +249,8 @@ export const AppMobile: React.FC = () => {
       await updateTaskExecution({
         taskId: task.id,
         status: 'TERMINADO',
-        estado: 'COMPLETADA',
-        isCompleted: true,
         operario: user?.name,
-        workerId: user?.id,
-        assignedStaffId: user?.id,
         box: activeBox,
-        plate: tractorPlate,
       });
     } catch (e) {}
     setTasks((prev) =>
@@ -519,14 +507,7 @@ export const AppMobile: React.FC = () => {
                       className="p-2.5 bg-panol-panel-bg border border-panol-border hover:border-panol-blue/50 rounded-xl flex items-center justify-between cursor-pointer transition-colors active:scale-98"
                     >
                       <div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-bold text-white">{item.description}</span>
-                          {item.requires_exchange && (
-                            <span className="text-[9px] font-black text-amber-400 bg-amber-950/60 px-1 py-0.5 rounded border border-amber-800/60">
-                              ♻️ CANJE
-                            </span>
-                          )}
-                        </div>
+                        <div className="text-xs font-bold text-white">{item.description}</div>
                         <div className="text-[10px] font-mono text-panol-text-dim">
                           COD: {item.code} • Stock: {item.stock}
                         </div>

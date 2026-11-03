@@ -5,7 +5,18 @@ import path from 'path';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
-    react()
+    react(),
+    {
+      name: 'rewrite-coordinacion',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/coordinacion' || req.url === '/coord') {
+            req.url = '/coordinacion.html';
+          }
+          next();
+        });
+      }
+    }
   ],
   resolve: {
     alias: {

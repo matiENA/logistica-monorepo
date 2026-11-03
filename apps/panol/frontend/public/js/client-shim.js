@@ -1,0 +1,140 @@
+/**
+ * SHIM DE COMPATIBILIDAD TRANSPARENTE CON PROXY DINÁMICO PARA ENTORNO NODE.JS EN RENDER
+ * Reemplaza google.script.run por peticiones RPC universales + WebSockets en tiempo real (< 20ms)
+ */
+(function() {
+  if (typeof window === 'undefined') return;
+
+  // Si se ejecuta dentro del iframe de Google Apps Script nativo, no interfiere
+  if (window.google && window.google.script && window.google.script.run && typeof window.google.script.run.getPendingOrdersEnriched === 'function') {
+    console.log("ℹ️ Ejecutando en entorno Google Apps Script nativo.");
+    return;
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+
+  // Determinar base URL (usar window.BACKEND_URL configurado por config.js, o localhost/relativo)
+  const API_BASE = (typeof window !== 'undefined' && (window.BACKEND_URL || window.PANOL_CONFIG?.BACKEND_URL))
+    ? (window.BACKEND_URL || window.PANOL_CONFIG?.BACKEND_URL)
+    : ((typeof window !== 'undefined' && window.location && window.location.protocol === 'file:') 
+      ? 'http://localhost:5000' 
+      : '');
+
+  let authToken = '';
+  try { authToken = localStorage.getItem('sys_auth_token') || ''; } catch(e) {}
+
+  // Conexión WebSockets para actualización instantánea
+  if (typeof io !== 'undefined') {
+    try {
+      const socket = API_BASE 
+        ? io(API_BASE, { auth: { token: authToken }, withCredentials: true }) 
+        : io({ auth: { token: authToken }, withCredentials: true });
+      socket.on('orders_sync', function(orders) {
+        if (typeof window.onDataReceived === 'function') {
+          window.onDataReceived(orders);
+        }
+      });
+      socket.on('env_info', function(info) {
+        window.__ENV_INFO__ = info;
+        console.log(`🌍 [Pañol] Conectado a: ${info.environment === 'production' ? '🔴 PRODUCCIÓN' : '🟢 LOCAL / DESARROLLO'} (${info.spreadsheetTitle})`);
+        if (typeof window.onEnvInfoReceived === 'function') {
+          window.onEnvInfoReceived(info);
+        }
+      });
+    } catch(e) {}
+  }
+
+  // Auto-cargar info de entorno al arrancar para UI
+  try {
+    fetch((API_BASE || '') + '/api/env-info', {
+      headers: authToken ? { 'x-auth-token': authToken } : {},
+      credentials: 'include'
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(info => {
+        if (!info) return;
+        window.__ENV_INFO__ = info;
+        console.log(`🌍 [Pañol] Entorno actual: ${info.environment === 'production' ? '🔴 PRODUCCIÓN' : '🟢 LOCAL'} (${info.spreadsheetTitle})`);
+        if (typeof window.onEnvInfoReceived === 'function') {
+          window.onEnvInfoReceived(info);
+        }
+      })
+      .catch(() => {});
+  } catch(e) {}
+
+  function createRunner() {
+    let successCb = null;
+    let failureCb = null;
+
+    const runnerTarget = {
+      withSuccessHandler: function(cb) { successCb = cb; return runnerProxy; },
+      withFailureHandler: function(cb) { failureCb = cb; return runnerProxy; }
+    };
+
+    const runnerProxy = new Proxy(runnerTarget, {
+      get: function(target, prop) {
+        if (prop in target) return target[prop];
+
+        return function(...args) {
+          const makeRequest = (attempt = 1) => {
+            const reqHeaders = { 'Content-Type': 'application/json' };
+            if (authToken) reqHeaders['x-auth-token'] = authToken;
+
+            fetch(API_BASE + '/api/rpc', {
+              method: 'POST',
+              headers: reqHeaders,
+              credentials: 'include',
+              body: JSON.stringify({ action: prop, args: args })
+            })
+            .then(async res => {
+              if (res.status === 401) {
+                window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                return;
+              }
+              // Si el servidor de Render está reiniciando (502, 503, 504, 520), reintentar automáticamente
+              if ((res.status >= 500 && res.status <= 599) && attempt <= 2) {
+                setTimeout(() => makeRequest(attempt + 1), 1200 * attempt);
+                return;
+              }
+              if (!res.ok) {
+                const errBody = await res.text().catch(() => '');
+                throw new Error(`HTTP ${res.status}: ${res.statusText || 'Error del Servidor'}`);
+              }
+              return res.json();
+            })
+            .then(data => {
+              if (!data) return;
+              if (data.error) {
+                if (failureCb) failureCb(new Error(data.error));
+                else console.warn('RPC Notice [' + prop + ']:', data.error);
+              } else {
+                if (successCb) successCb(data.result);
+              }
+            })
+            .catch(err => {
+              if (attempt <= 2) {
+                setTimeout(() => makeRequest(attempt + 1), 1200 * attempt);
+                return;
+              }
+              if (failureCb) failureCb(err);
+              else console.error('RPC Network Error [' + prop + ']:', err);
+            });
+          };
+
+          makeRequest();
+        };
+      }
+    });
+
+    return runnerProxy;
+  }
+
+  Object.defineProperty(window.google.script, 'run', {
+    get: function() {
+      return createRunner();
+    }
+  });
+
+  console.log("🚀 Shim Proxy de Node.js inicializado correctamente.");
+})();

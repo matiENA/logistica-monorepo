@@ -32,7 +32,7 @@ export const LicensePlate: React.FC<LicensePlateProps> = ({
   const defaultBrandColor = useMemoBrandColor(brand || (type === 'TRACTOR' ? 'IVECO' : 'DANES'), brandColor);
 
   const containerWidth = {
-    sm: 'w-full max-w-[98px]',
+    sm: 'w-[100px]',
     md: 'w-[115px]',
     lg: 'w-[130px]',
   }[size];
@@ -44,7 +44,7 @@ export const LicensePlate: React.FC<LicensePlateProps> = ({
   }[size];
 
   return (
-    <div className={`inline-flex flex-col items-center gap-1 min-w-0 ${className}`}>
+    <div className={`inline-flex flex-col items-center gap-1 ${className}`}>
       {/* Badge superior: OT + MARCA (como en el diseño) */}
       {(showOtBadge || ot || brand) && (
         <div className="inline-flex items-center rounded overflow-hidden text-[9px] font-black font-mono shadow-sm border border-zinc-700">

@@ -68,7 +68,7 @@ export const Header: React.FC = () => {
           }
         >
           <Wrench className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">Taller</span>
+          <span className="hidden md:inline">Terminal</span>
         </NavLink>
 
         <NavLink
@@ -106,7 +106,7 @@ export const Header: React.FC = () => {
           title="Acceso al módulo de Coordinación en diseño"
         >
           <GitFork className="w-3.5 h-3.5 text-amber-500" />
-          <span className="hidden md:inline">Coordinación</span>
+          <span className="hidden md:inline">Coordinación (HTML)</span>
         </a>
 
         <div className="w-[1px] h-5 bg-panol-border mx-1" />

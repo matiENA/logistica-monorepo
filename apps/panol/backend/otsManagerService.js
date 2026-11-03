@@ -15,7 +15,6 @@ const fs = require('fs');
 const path = require('path');
 const { extractPlates } = require('./plateNormalizer');
 const db = require('./utils/db');
-const bridge = require('./fleetOtBridgeService');
 
 const OTS_TAB = 'ots';
 const OTS_ANTERIORES_TAB = 'ots_anteriores';
@@ -861,66 +860,8 @@ async function getCurrentOtsMap(sheetsClient, spreadsheetId, force = false) {
 async function getOtsAnterioresForPlate(sheetsClient, spreadsheetId, plate) {
   if (!plate) return [];
   const cleanDom = normalizePlate(plate) || String(plate).trim().toUpperCase();
-
-  // 🐘 Prioridad 1: Supabase PostgreSQL (panol.v_ots_anteriores)
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const qRes = await db.query(`
-        SELECT 
-          wo.ot_number as ot,
-          to_char(wo.close_date, 'DD/MM') as fecha,
-          wo.status,
-          COALESCE(t.patente, sm.patente, '') as dominio,
-          COALESCE((
-            SELECT jsonb_agg(jsonb_build_object(
-              'id', wot.id,
-              'task_index', wot.task_index,
-              'sector_task', wot.sector_task,
-              'rubro', COALESCE(substring(wot.sector_task from '^\\[([^\\]]+)\\]'), 'GENERAL'),
-              'desc', trim(regexp_replace(wot.sector_task, '^\\[[^\\]]+\\]\\s*', '')),
-              'descripcion', trim(regexp_replace(wot.sector_task, '^\\[[^\\]]+\\]\\s*', '')),
-              'ubicacion', wot.ubicacion,
-              'box', wot.ubicacion,
-              'operario', COALESCE(s.name, ''),
-              'empezo', to_char(wot.empezo, 'DD/MM HH24:MI'),
-              'termino', to_char(wot.termino, 'DD/MM HH24:MI'),
-              'estado', wot.estado,
-              'porcentaje', wot.porcentaje,
-              'isTerminado', true
-            ) ORDER BY wot.task_index)
-            FROM panol.work_order_tasks wot
-            LEFT JOIN panol.staff s ON wot.worker_id = s.id
-            WHERE wot.work_order_id = wo.id
-          ), '[]'::jsonb) as payload
-        FROM panol.unit_work_orders uwo
-        JOIN panol.work_orders wo ON uwo.work_order_id = wo.id
-        LEFT JOIN public.tractores t ON uwo.tractor_id = t.id
-        LEFT JOIN public.semis sm ON uwo.semi_id = sm.id
-        WHERE (
-          UPPER(REPLACE(REPLACE(COALESCE(t.patente, ''), '-', ''), ' ', '')) = $1
-          OR UPPER(REPLACE(REPLACE(COALESCE(sm.patente, ''), '-', ''), ' ', '')) = $1
-        )
-        AND wo.status = 'COMPLETADA'
-        ORDER BY wo.close_date DESC
-        LIMIT 20;
-      `, [cleanDom]);
-
-      if (qRes.rows.length > 0) {
-        return qRes.rows;
-      }
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Advertencia getOtsAnterioresForPlate:', sqlErr.message);
-    }
-  }
-
-  // Fallback Google Sheets
-  if (sheetsClient && spreadsheetId) {
-    try {
-      const otsData = await getCurrentOtsMap(sheetsClient, spreadsheetId);
-      return (otsData.anterioresByPlate && otsData.anterioresByPlate.get(cleanDom)) || [];
-    } catch (e) {}
-  }
-  return [];
+  const otsData = await getCurrentOtsMap(sheetsClient, spreadsheetId);
+  return (otsData.anterioresByPlate && otsData.anterioresByPlate.get(cleanDom)) || [];
 }
 
 /**
@@ -1052,119 +993,7 @@ async function findUnitOrOt({ sheetsClient, spreadsheetId, query, type }) {
   const isTractorOtContext = ['OT', 'TRACTOR_OT', 'OT_TRACTOR'].includes(tUpper);
   const isSemiOtContext = ['SEMI_OT', 'OT_SEMI'].includes(tUpper);
 
-  // 🐘 Paso 1: Búsqueda PRINCIPAL en Supabase PostgreSQL (panol.v_flota_busqueda)
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const sql = `
-        SELECT 
-          v.unidad_id,
-          COALESCE(v.n_ute, '') as n_ute,
-          COALESCE(v.tractor, '') as tractor,
-          COALESCE(v.marca_tr, '') as marca_t,
-          COALESCE(v.semi, '') as semi,
-          COALESCE(v.marca_semi, '') as marca_s,
-          COALESCE(v.servicio, 'GENERAL') as servicio,
-          COALESCE(v.tractor_ot, '') as tractor_ot,
-          COALESCE(v.semi_ot, '') as semi_ot
-        FROM panol.v_flota_busqueda v
-        WHERE 
-          (length($1) >= 2 AND (
-            UPPER(REPLACE(REPLACE(v.tractor, '-', ''), ' ', '')) = $1 
-            OR UPPER(REPLACE(REPLACE(v.semi, '-', ''), ' ', '')) = $1
-            OR v.n_ute = $1
-          ))
-          OR (length($2) >= 2 AND (
-            regexp_replace(v.tractor_ot, '^0+', '') = $2 
-            OR regexp_replace(v.semi_ot, '^0+', '') = $2
-          ))
-        LIMIT 1;
-      `;
-      const res = await db.query(sql, [qNorm, qOtNorm]);
-      if (res && res.rows && res.rows.length > 0) {
-        const row = res.rows[0];
-
-        // Leer OT canónica directamente desde Supabase PostgreSQL
-        const resolvedTractorOt = row.tractor_ot || '';
-        const resolvedSemiOt = row.semi_ot || '';
-
-        // Consultar OTs anteriores desde panol.v_ots_anteriores
-        let sqlOtsAnt = [];
-        try {
-          const antRes = await db.query(`
-            SELECT 
-              wo.ot_number, 
-              to_char(wo.close_date, 'DD/MM') as date_label,
-              wo.close_date as entry_date, 
-              wo.status, 
-              CASE WHEN uwo.tractor_id IS NOT NULL THEN 'TRACTOR' ELSE 'SEMI' END as applied_to
-            FROM panol.unit_work_orders uwo
-            JOIN panol.work_orders wo ON uwo.work_order_id = wo.id
-            WHERE (
-              (uwo.tractor_id IS NOT NULL AND uwo.tractor_id IN (SELECT tractor_id FROM public.unidades WHERE id = $1))
-              OR (uwo.semi_id IS NOT NULL AND uwo.semi_id IN (SELECT semi_id FROM public.unidades WHERE id = $1))
-            )
-            AND wo.status = 'COMPLETADA'
-            ORDER BY wo.close_date DESC
-            LIMIT 10;
-          `, [row.unidad_id]);
-          sqlOtsAnt = (antRes.rows || []).map(r => ({
-            ot: r.ot_number,
-            fecha: r.date_label || r.entry_date,
-            dominio: r.applied_to === 'SEMI' ? row.semi : row.tractor,
-            status: r.status
-          }));
-        } catch (_) {}
-
-        const tractorOtsAnteriores = sqlOtsAnt.filter(x => x.dominio === row.tractor);
-        const semiOtsAnteriores = sqlOtsAnt.filter(x => x.dominio === row.semi);
-
-        let otsAnteriores = [];
-        if (isSemiContext || isSemiOtContext || qNorm === normalizePlate(row.semi)) {
-          otsAnteriores = semiOtsAnteriores;
-        } else if (isTractorContext || isTractorOtContext || qNorm === normalizePlate(row.tractor)) {
-          otsAnteriores = tractorOtsAnteriores;
-        } else {
-          otsAnteriores = tractorOtsAnteriores.length > 0 ? tractorOtsAnteriores : semiOtsAnteriores;
-        }
-
-        return {
-          success: true,
-          unit: row.tractor || '',
-          ot: resolvedTractorOt || (isTractorOtContext ? qOtNorm : ''),
-          semi: row.semi || '',
-          semiOt: resolvedSemiOt || (isSemiOtContext ? qOtNorm : ''),
-          producto: row.servicio || '',
-          marca: row.marca_t || '',
-          marcaSemi: row.marca_s || '',
-          tractorOtsAnteriores,
-          semiOtsAnteriores,
-          otsAnteriores
-        };
-      }
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Advertencia en findUnitOrOt Supabase:', sqlErr.message);
-    }
-  }
-
-  // ⚡ Paso 2: Consulta instantánea en memoria RAM de DB_OT_LIST (fleetOtBridgeService)
-  const memMapping = bridge.getOtMappingForPlate(qNorm);
-  if (memMapping) {
-    return {
-      success: true,
-      unit: memMapping.tractorPlate || '',
-      ot: memMapping.tractorOt || (isTractorOtContext ? qOtNorm : ''),
-      semi: memMapping.semiPlate || '',
-      semiOt: memMapping.semiOt || (isSemiOtContext ? qOtNorm : ''),
-      producto: memMapping.producto || '',
-      marca: memMapping.marcaTractor || '',
-      marcaSemi: memMapping.marcaSemi || '',
-      tractorOtsAnteriores: [],
-      semiOtsAnteriores: [],
-      otsAnteriores: []
-    };
-  }
-
-  // Paso 3: Fallback secundario a Google Sheets si Supabase y RAM no devolvieron resultado
+  // Paso 1: Búsqueda PRINCIPAL en Google Sheets 'DB_OT_LIST' y 'ots'
   if (sheetsClient && spreadsheetId) {
     try {
       // 1. Obtener OTs vigentes y anteriores desde 'ots' y 'ots_anteriores'
@@ -1316,6 +1145,80 @@ async function findUnitOrOt({ sheetsClient, spreadsheetId, query, type }) {
     }
   }
 
+  // Paso 2: Fallback a Supabase PostgreSQL si Sheets no encontró coincidencia
+  if (db && db.isConfigured && db.isConfigured()) {
+    try {
+      const sql = `
+        SELECT 
+          u.id as unidad_id,
+          COALESCE(t.patente, '') as tractor,
+          COALESCE(t.marca, '') as marca_t,
+          COALESCE(s.patente, '') as semi,
+          COALESCE(s.marca, '') as marca_s,
+          COALESCE(su.denominacion, 'GENERAL') as servicio,
+          COALESCE(wot.ot_number, '') as tractor_ot,
+          COALESCE(wos.ot_number, '') as semi_ot
+        FROM public.unidades u
+        LEFT JOIN public.tractores t ON u.tractor_id = t.id
+        LEFT JOIN public.semis s ON u.semi_id = s.id
+        LEFT JOIN public.servicios_unidades su ON u.servicio_id = su.id
+        LEFT JOIN panol.work_orders wot ON wot.unidad_id = u.id AND wot.applied_to = 'TRACTOR' AND wot.status = 'ACTIVA'
+        LEFT JOIN panol.work_orders wos ON wos.unidad_id = u.id AND wos.applied_to = 'SEMI' AND wos.status = 'ACTIVA'
+        WHERE 
+          (length($1) >= 2 AND (UPPER(REPLACE(REPLACE(t.patente, '-', ''), ' ', '')) = $1 OR UPPER(REPLACE(REPLACE(s.patente, '-', ''), ' ', '')) = $1))
+          OR (length($2) >= 2 AND u.id IN (SELECT unidad_id FROM panol.work_orders WHERE ot_number = $2))
+        LIMIT 1;
+      `;
+      const res = await db.query(sql, [qNorm, qOtNorm]);
+      if (res && res.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        let sqlOtsAnt = [];
+        try {
+          const antRes = await db.query(`
+            SELECT ot_number, entry_date, status, applied_to
+            FROM panol.work_orders
+            WHERE unidad_id = $1 AND status <> 'ACTIVA'
+            ORDER BY entry_date DESC
+          `, [row.unidad_id]);
+          sqlOtsAnt = (antRes.rows || []).map(r => ({
+            ot: r.ot_number,
+            fecha: r.entry_date,
+            dominio: r.applied_to === 'SEMI' ? row.semi : row.tractor,
+            status: r.status
+          }));
+        } catch (_) {}
+
+        const tractorOtsAnteriores = sqlOtsAnt.filter(x => x.dominio === row.tractor);
+        const semiOtsAnteriores = sqlOtsAnt.filter(x => x.dominio === row.semi);
+
+        let otsAnteriores = [];
+        if (isSemiContext || isSemiOtContext || qNorm === normalizePlate(row.semi)) {
+          otsAnteriores = semiOtsAnteriores;
+        } else if (isTractorContext || isTractorOtContext || qNorm === normalizePlate(row.tractor)) {
+          otsAnteriores = tractorOtsAnteriores;
+        } else {
+          otsAnteriores = tractorOtsAnteriores.length > 0 ? tractorOtsAnteriores : semiOtsAnteriores;
+        }
+
+        return {
+          success: true,
+          unit: row.tractor || '',
+          ot: row.tractor_ot || (isTractorOtContext ? qOtNorm : ''),
+          semi: row.semi || '',
+          semiOt: row.semi_ot || (isSemiOtContext ? qOtNorm : ''),
+          producto: row.servicio || '',
+          marca: row.marca_t || '',
+          marcaSemi: row.marca_s || '',
+          tractorOtsAnteriores,
+          semiOtsAnteriores,
+          otsAnteriores
+        };
+      }
+    } catch (sqlErr) {
+      console.warn('⚠️ [SQL] Advertencia en findUnitOrOt Supabase:', sqlErr.message);
+    }
+  }
+
   return { success: false };
 }
 
@@ -1339,77 +1242,7 @@ async function getFleetSearchCatalog(sheetsClient, spreadsheetId, forceRefresh =
     return fleetCatalogCache;
   }
 
-  // 1. PRIORIDAD CANÓNICA: Supabase PostgreSQL (panol.v_flota_busqueda + RAM Bridge)
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const sql = `
-        SELECT 
-          unidad_id,
-          COALESCE(tractor, '') as tractor,
-          COALESCE(marca_tr, '') as marca_t,
-          COALESCE(semi, '') as semi,
-          COALESCE(marca_semi, '') as marca_s,
-          COALESCE(servicio, 'GENERAL') as servicio,
-          COALESCE(tractor_ot, '') as tractor_ot,
-          COALESCE(semi_ot, '') as semi_ot
-        FROM panol.v_flota_busqueda
-        WHERE COALESCE(tractor, '') <> '' OR COALESCE(semi, '') <> '';
-      `;
-      const res = await db.query(sql);
-      if (res && res.rows && res.rows.length > 0) {
-        const tractors = new Set();
-        const semis = new Set();
-        const tractorOts = new Set();
-        const semiOts = new Set();
-        const allOts = new Set();
-        const pairs = [];
-
-        res.rows.forEach(r => {
-          const t = String(r.tractor || '').trim().toUpperCase();
-          const s = String(r.semi || '').trim().toUpperCase();
-          if (!t && !s) return;
-          if (t) tractors.add(t);
-          if (s) semis.add(s);
-
-          const tOt = normalizeOt(r.tractor_ot);
-          const sOt = normalizeOt(r.semi_ot);
-
-          if (tOt) { tractorOts.add(tOt); allOts.add(tOt); }
-          if (sOt) { semiOts.add(sOt); allOts.add(sOt); }
-
-          pairs.push({
-            tractor: t,
-            semi: s,
-            tractorOt: tOt,
-            semiOt: sOt,
-            producto: String(r.servicio || '').trim(),
-            marcaT: String(r.marca_t || '').trim(),
-            marcaS: String(r.marca_s || '').trim()
-          });
-        });
-
-        const catalogResult = {
-          pairs,
-          tractors: Array.from(tractors).sort(),
-          tractores: Array.from(tractors).sort(),
-          semis: Array.from(semis).sort(),
-          tractorOts: Array.from(tractorOts).sort(),
-          semiOts: Array.from(semiOts).sort(),
-          allOts: Array.from(allOts).sort(),
-          unitList: Array.from(new Set([...tractors, ...semis, ...allOts])).sort(),
-          count: pairs.length
-        };
-
-        fleetCatalogCache = catalogResult;
-        fleetCatalogCacheTime = Date.now();
-        return catalogResult;
-      }
-    } catch (sqlErr) {
-      console.warn('⚠️ [SQL] Error al consultar flota en Supabase:', sqlErr.message);
-    }
-  }
-
-  // 2. FALLBACK SECUNDARIO: Google Sheets DB_OT_LIST (Sólo si Supabase no está disponible)
+  // 1. Prioridad Principal: Google Sheets DB_OT_LIST + ots (Fuente canónica de OTs de pruebas)
   if (sheetsClient && spreadsheetId) {
     try {
       const otsData = await getCurrentOtsMap(sheetsClient, spreadsheetId);
@@ -1442,7 +1275,10 @@ async function getFleetSearchCatalog(sheetsClient, spreadsheetId, forceRefresh =
         const dbBOt = normalizeOt(r[1]);
         const dbDOt = normalizeOt(r[3]);
 
+        // Principal: 'DB_OT_LIST' Col B, Fallback: 'ots' Col C
         const tOt = dbBOt || (tOtObj ? tOtObj.ot : '');
+
+        // Principal: 'DB_OT_LIST' Col D, Fallback: 'ots' Col C
         const sOt = dbDOt || (sOtObj ? sOtObj.ot : '');
 
         if (tOt) { tractorOts.add(tOt); allOts.add(tOt); }
@@ -1461,6 +1297,7 @@ async function getFleetSearchCatalog(sheetsClient, spreadsheetId, forceRefresh =
         });
       });
 
+      // Integrar unidades o patentes que estén registradas en 'ots' y no estuvieran en DB_OT_LIST
       otsData.byPlate.forEach((otItem, plate) => {
         if (otItem.ot) allOts.add(otItem.ot);
         if (!tractors.has(plate) && !semis.has(plate)) {
@@ -1495,6 +1332,80 @@ async function getFleetSearchCatalog(sheetsClient, spreadsheetId, forceRefresh =
       return catalogResult;
     } catch (sheetsErr) {
       console.warn('⚠️ [Sheets] Error al consultar DB_OT_LIST para catálogo de flota:', sheetsErr.message);
+    }
+  }
+
+  // 2. Fallback SQL: Supabase PostgreSQL (EOR Flota canónica + OTs panol)
+  if (db && db.isConfigured && db.isConfigured()) {
+    try {
+      const sql = `
+        SELECT 
+          u.id as unidad_id,
+          COALESCE(t.patente, '') as tractor,
+          COALESCE(t.marca, '') as marca_t,
+          COALESCE(s.patente, '') as semi,
+          COALESCE(s.marca, '') as marca_s,
+          COALESCE(su.denominacion, 'GENERAL') as servicio,
+          COALESCE(wot.ot_number, '') as tractor_ot,
+          COALESCE(wos.ot_number, '') as semi_ot
+        FROM public.unidades u
+        LEFT JOIN public.tractores t ON u.tractor_id = t.id
+        LEFT JOIN public.semis s ON u.semi_id = s.id
+        LEFT JOIN public.servicios_unidades su ON u.servicio_id = su.id
+        LEFT JOIN panol.work_orders wot ON wot.unidad_id = u.id AND wot.applied_to = 'TRACTOR' AND wot.status = 'ACTIVA'
+        LEFT JOIN panol.work_orders wos ON wos.unidad_id = u.id AND wos.applied_to = 'SEMI' AND wos.status = 'ACTIVA'
+        WHERE COALESCE(t.patente, '') <> '' OR COALESCE(s.patente, '') <> '';
+      `;
+      const res = await db.query(sql);
+      if (res && res.rows && res.rows.length > 0) {
+        const tractors = new Set();
+        const semis = new Set();
+        const tractorOts = new Set();
+        const semiOts = new Set();
+        const allOts = new Set();
+        const pairs = [];
+
+        res.rows.forEach(r => {
+          const t = String(r.tractor || '').trim().toUpperCase();
+          const s = String(r.semi || '').trim().toUpperCase();
+          if (!t && !s) return;
+          if (t) tractors.add(t);
+          if (s) semis.add(s);
+
+          const tOt = normalizeOt(r.tractor_ot);
+          const sOt = normalizeOt(r.semi_ot);
+
+          if (tOt) { tractorOts.add(tOt); allOts.add(tOt); }
+          if (sOt) { semiOts.add(sOt); allOts.add(sOt); }
+
+          pairs.push({
+            tractor: t,
+            semi: s,
+            tractorOt: tOt,
+            semiOt: sOt,
+            producto: String(r.servicio || '').trim(),
+            marcaT: String(r.marca_t || '').trim(),
+            marcaS: String(r.marca_s || '').trim()
+          });
+        });
+
+        const fallbackResult = {
+          pairs,
+          tractors: Array.from(tractors).sort(),
+          tractores: Array.from(tractors).sort(),
+          semis: Array.from(semis).sort(),
+          tractorOts: Array.from(tractorOts).sort(),
+          semiOts: Array.from(semiOts).sort(),
+          allOts: Array.from(allOts).sort(),
+          unitList: Array.from(new Set([...tractors, ...semis, ...allOts])).sort(),
+          count: pairs.length
+        };
+        fleetCatalogCache = fallbackResult;
+        fleetCatalogCacheTime = Date.now();
+        return fallbackResult;
+      }
+    } catch (sqlErr) {
+      console.warn('⚠️ [SQL] Error al consultar flota en Supabase:', sqlErr.message);
     }
   }
 

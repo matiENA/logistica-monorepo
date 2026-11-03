@@ -155,34 +155,10 @@ function getPoolMetrics() {
     };
 }
 
-/**
- * Ejecuta un bloque de consultas dentro de una transacción ACID (BEGIN/COMMIT/ROLLBACK)
- * garantizando la liberación del cliente en el pool en todos los escenarios.
- * @param {Function} callback - async (client) => Promise<any>
- */
-async function transaction(callback) {
-    if (!pool) {
-        throw new Error('PostgreSQL no está configurado (DATABASE_URL ausente)');
-    }
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        const res = await callback(client);
-        await client.query('COMMIT');
-        return res;
-    } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
-        throw err;
-    } finally {
-        client.release();
-    }
-}
-
 module.exports = {
     pool,
     query,
     getClient,
-    transaction,
     checkHealth,
     getPoolMetrics,
     isConfigured: () => isConfigured

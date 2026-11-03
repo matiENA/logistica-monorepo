@@ -32,52 +32,27 @@ export interface Unidad {
 export interface WorkOrder {
   id: string;
   ot_number: string;
-  unidad_id?: string | null;
-  tractor_id?: string | null;
-  semi_id?: string | null;
-  target_type?: 'TRACTOR' | 'SEMI';
-  plate?: string;
-  status: 'ACTIVA' | 'COMPLETADA' | 'CERRADA' | 'SUSPENDIDA';
-  avg?: number;
-  progress_percentage?: number;
-  entry_date?: string;
-  close_date?: string | null;
+  unidad_id: string;
+  target_type: 'TRACTOR' | 'SEMI';
+  plate: string;
+  status: 'ACTIVA' | 'CERRADA' | 'SUSPENDIDA';
+  progress_percentage: number;
   created_at: string;
   tasks?: WorkOrderTask[];
-}
-
-export interface UnitWorkOrder {
-  id: string;
-  tractor_id?: string | null;
-  semi_id?: string | null;
-  work_order_id: string;
-  vehicle_type?: 'TRACTOR' | 'SEMI';
-  vehicle_id?: string;
-  created_at?: string;
 }
 
 export interface WorkOrderTask {
   id: string;
   work_order_id: string;
   task_index: number;
-  task_description?: string;
-  sector_task?: string;
-  sector?: SectorType;
-  status?: TaskStatus;
-  estado?: 'PENDIENTE' | 'EN_CURSO' | 'TERMINADO' | 'COMPLETADA';
-  porcentaje?: number;
-  ubicacion?: string | null;
-  assigned_box?: string | null;
-  asignado?: string | null;
+  task_description: string;
+  sector: SectorType;
+  status: TaskStatus;
   started_at?: string | null;
-  empezo?: string | null;
   finished_at?: string | null;
-  termino?: string | null;
-  worker_id?: string | null;
   assigned_staff_id?: string | null;
   assigned_staff_name?: string | null;
-  assigned_op_code?: string | null;
-  operario?: string | null;
+  assigned_box?: string | null;
 }
 
 export interface CatalogItem {
@@ -97,37 +72,6 @@ export interface CartItem {
   exchangeStatus: 'PENDIENTE' | 'ENTREGADO' | 'NO_APLICA';
 }
 
-export interface CanjePayload {
-  canje: boolean;
-  tipo: 'ENTREGO_USADA' | 'FALTANTE' | 'NO_APLICA';
-  cant_pedida: number;
-  cant_entregada: number;
-  cant_faltante: number;
-  motivo?: string;
-}
-
-export interface StockMovement {
-  movement_id: string;
-  created_at: string;
-  ready_at?: string | null;
-  order_id?: string | null;
-  order_item_id?: string | null;
-  item_id: string;
-  item_code: string;
-  item_name: string;
-  quantity_delta: number;
-  previous_stock: number;
-  new_stock: number;
-  movement_type: 'PEDIDO_LISTO' | 'DEVOLUCION_NUEVO' | 'DEVOLUCION_CANJE' | 'AJUSTE_MANUAL';
-  mechanic_id?: string | null;
-  mechanic_op_code?: string | null;
-  mechanic_name?: string | null;
-  panol_staff_id?: string | null;
-  panol_op_code?: string | null;
-  panol_staff_name?: string | null;
-  notes?: string | null;
-}
-
 export interface PanolOrderItem {
   id?: string;
   order_id?: string;
@@ -136,11 +80,6 @@ export interface PanolOrderItem {
   description: string;
   quantity: number;
   exchange_status: string;
-  requires_exchange?: boolean;
-  returned_qty?: number | null;
-  return_notes?: string | null;
-  panol_confirmation?: string | null;
-  status?: string;
 }
 
 export interface PanolOrder {
@@ -179,58 +118,24 @@ export interface EnvInfo {
 
 export interface HoldUnit {
   id?: string;
-  holdId?: string;
-  staffId?: string;
-  opCode?: string;
-  staffName?: string;
-  workOrderId?: string;
-  tractorWorkOrderId?: string;
-  semiWorkOrderId?: string;
-  tractorOtStatus?: string;
-  semiOtStatus?: string;
-  tractorId?: string;
-  semiId?: string;
   tractorPlate: string;
   tractorOt: string;
   semiPlate: string;
   semiOt: string;
   addedAt?: string;
-  createdAt?: string;
   brand?: string;
   brandSemi?: string;
-  tractorBrand?: string;
-  semiBrand?: string;
-  source?: 'MANUAL' | 'COORDINACION';
-  reviewedAt?: string | null;
-  isCoordAssigned?: boolean;
-  tractorHasCoordTasks?: boolean;
-  semiHasCoordTasks?: boolean;
-  hasCoordTasks?: boolean;
-  assignedTasksCount?: number;
 }
 
 export interface TimelineTask {
   id: string;
   taskIndex?: number;
-  task_index?: number;
   rubro?: string;
-  sector?: string;
   desc?: string;
   descripcion?: string;
-  description?: string;
-  sectorTask?: string;
-  sector_task?: string;
   estado?: 'PENDIENTE' | 'EN_CURSO' | 'TERMINADO' | 'COMPLETADA';
-  status?: string;
-  porcentaje?: number;
   operario?: string;
-  workerId?: string | null;
-  worker_id?: string | null;
-  assignedStaffId?: string | null;
-  assignedStaffName?: string | null;
-  assignedOpCode?: string | null;
   box?: string;
-  ubicacion?: string;
   empezo?: string;
   termino?: string;
   isEmpezado?: boolean;
@@ -239,10 +144,6 @@ export interface TimelineTask {
 
 export interface TimelineGroup {
   ot: string;
-  workOrderId?: string;
-  work_order_id?: string;
-  type?: 'TRACTOR' | 'SEMI';
-  vehicleType?: 'TRACTOR' | 'SEMI';
   date?: string;
   tasks: TimelineTask[];
   progress?: number;
@@ -252,9 +153,6 @@ export interface HistoricalNode {
   ot?: string;
   date?: string;
   ots?: string[];
-  type?: 'TRACTOR' | 'SEMI';
-  status?: string;
-  avg?: number;
-  tasks?: (TimelineTask | { rubro?: string; desc?: string; descripcion?: string; sectorTask?: string; operario?: string; box?: string; empezo?: string; termino?: string; isTerminado?: boolean; estado?: string })[];
+  tasks?: { rubro?: string; desc?: string; descripcion?: string }[];
 }
 

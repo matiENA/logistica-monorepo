@@ -1,28 +1,46 @@
 services:
   # ==============================================================
-  # 🚀 STATIC SERVICE EN RENDER (Frontend React / Vite)
-  # Publica el bundle compilado de ./frontend/dist en el CDN global
+  # 🚀 STATIC SERVICE EN RENDER (Frontend CDN - 100 GB/mes gratis)
+  # Publica la carpeta ./public con cero consumo de RAM
   # ==============================================================
   - type: static
     name: panol-static-site
     region: oregon
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
+    staticPublishPath: ./public
     routes:
       - type: rewrite
-        source: /*
+        source: /coordinacion
+        destination: /coordinacion.html
+      - type: rewrite
+        source: /panol
+        destination: /panol.html
+      - type: rewrite
+        source: /monitor
+        destination: /panol.html
+      - type: rewrite
+        source: /mobile
+        destination: /mobile.html
+      - type: rewrite
+        source: /m
+        destination: /mobile.html
+      - type: rewrite
+        source: /app-mecanico
+        destination: /mobile.html
+      - type: rewrite
+        source: /login
+        destination: /login.html
+      - type: rewrite
+        source: /wireframe
+        destination: /coordinacion.html
+      - type: rewrite
+        source: /terminal
         destination: /index.html
-    envVars:
-      - key: VITE_BACKEND_URL
-        value: https://panolnd.onrender.com
-      - key: VITE_SUPABASE_URL
-        value: https://rsvajuxihvmpmrmlcbul.supabase.co
-      - key: VITE_SUPABASE_ANON_KEY
-        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
+      - type: rewrite
+        source: /legacy
+        destination: /index.html
 
   # ==============================================================
-  # 🔄 WEB SERVICE EN RENDER (Backend Node.js + Supabase + WebSockets)
+  # 🔄 WEB SERVICE EN RENDER (Backend Node.js + APIs + WebSockets)
   # Ejecuta el microservicio en la raíz con node index.js
   # ==============================================================
   - type: web
@@ -35,20 +53,14 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        value: postgresql://postgres.rsvajuxihvmpmrmlcbul:kMmGplQEcWDYUBAB@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require
-      - key: SUPABASE_URL
-        value: https://rsvajuxihvmpmrmlcbul.supabase.co
-      - key: SUPABASE_KEY
-        value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
       - key: SPREADSHEET_ID
         value: 1aKptNgy8a9Ca3rDW-HSlWEiriMRJMOIJuFsdViwEGFc
       - key: SOURCE_SPREADSHEET_ID
         value: 1HKXGsRC149Kw4aBXQwGcPVpAvObvTUFis6YV6R5cTXk
       - key: MES_MOVIMIENTOS_ID
-        value: 1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc
+        value: 1Bwj8WCykMn_FbZhQ_FqnDH3K_WCod52YTSvsaxIDNS8
       - key: OT_SYNC_INTERVAL_MINUTES
-        value: "2"
+        value: 2
       - key: SYSTEM_USER
         value: taller
       - key: SYSTEM_PASSWORD
@@ -61,3 +73,4 @@ services:
         value: "5"
       - key: PG_IDLE_TIMEOUT
         value: "10000"
+

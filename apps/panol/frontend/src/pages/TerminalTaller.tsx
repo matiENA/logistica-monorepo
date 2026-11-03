@@ -13,9 +13,7 @@ import {
   requestOrderReturn,
 } from '../services/tallerApi';
 import { getSocket } from '../services/socket';
-import { supabase } from '../services/supabaseClient';
 import { CatalogItem, PanolOrder, HoldUnit } from '../types';
-import { parseCanjeStatus, formatCanjeBadge } from '../utils/canjeHelper';
 import { toast } from 'sonner';
 import {
   Search,
@@ -31,15 +29,6 @@ import { WorkOrderTimeline } from '../components/taller/WorkOrderTimeline';
 import { LicensePlate } from '../components/common/LicensePlate';
 import { resolveBoxOrSector } from './MonitorPanol';
 
-export const cleanTallerItemNote = (note?: string): string => {
-  if (!note) return '';
-  return String(note)
-    .replace(/devoluci[oó]n[^|]*(\|)?\s*/gi, '')
-    .replace(/\[op:[^\]]*\]\s*(-)?\s*(ok|incompleto)?(\|)?\s*/gi, '')
-    .replace(/despacho listo:[^|]*(\|)?\s*/gi, '')
-    .trim();
-};
-
 export const TerminalTaller: React.FC = () => {
   const { user, activeBox, logout } = useAuthStore();
   const { items: cartItems, addItem, removeItem, updateQuantity, setQuantity, clearCart } = useCartStore();
@@ -48,51 +37,9 @@ export const TerminalTaller: React.FC = () => {
   // Pestaña principal: ORDENES (Unidad, Tareas & Catálogo) vs PEDIDOS (Monitor)
   const [activeMainTab, setActiveMainTab] = useState<'ordenes' | 'pedidos'>('ordenes');
 
-  // Clave de caché aislada e independiente para las retenciones del puesto de cada operario
-  const getHoldsCacheKey = (opCodeOrId?: string) => {
-    const clean = String(opCodeOrId || '').trim();
-    return clean ? `panol_cached_holds_${clean}` : null;
-  };
-
-  // Unidades en Bahía / Puesto de Taller (Estrictamente delimitado por panol.staff_holds para el operario activo)
-  const [holdUnits, setHoldUnits] = useState<HoldUnit[]>(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('panol_cached_holds');
-        localStorage.removeItem('mechanic_op');
-      }
-      const key = getHoldsCacheKey(user?.op_code || user?.id);
-      if (!key || typeof window === 'undefined') return [];
-      const saved = localStorage.getItem(key);
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-  const [selectedHoldIndex, setSelectedHoldIndex] = useState<number>(() => (holdUnits.length > 0 ? 0 : -1));
-
-  // Título de la pestaña de navegación: Taller a secas
-  useEffect(() => {
-    document.title = 'Taller';
-    try {
-      if (window.top && window.top !== window) {
-        window.top.document.title = 'Taller';
-      }
-    } catch (e) {}
-  }, []);
-
-  // Sincronizar holds en localStorage de forma aislada por operario para persistencia ante Ctrl+R / F5
-  useEffect(() => {
-    const key = getHoldsCacheKey(user?.op_code || user?.id);
-    if (!key || typeof window === 'undefined') return;
-    try {
-      if (holdUnits.length > 0) {
-        localStorage.setItem(key, JSON.stringify(holdUnits));
-      } else {
-        localStorage.removeItem(key);
-      }
-    } catch (e) {}
-  }, [holdUnits, user?.op_code, user?.id]);
+  // Unidades en Bahía / Puesto de Taller (Hold Units desde panol.staff_holds)
+  const [holdUnits, setHoldUnits] = useState<HoldUnit[]>([]);
+  const [selectedHoldIndex, setSelectedHoldIndex] = useState<number>(0);
 
   // Inputs de carga limpios (sin valores precargados)
   const [inputTractorPlate, setInputTractorPlate] = useState('');
@@ -109,7 +56,6 @@ export const TerminalTaller: React.FC = () => {
   // Modal para Devolución de Repuesto (Mecánicos)
   const [returnModalData, setReturnModalData] = useState<{
     order: any;
-    selectedItemId?: string;
     selectedItemName: string;
     maxQty: number;
     returnQty: number;
@@ -162,31 +108,24 @@ export const TerminalTaller: React.FC = () => {
   const [itemNoteText, setItemNoteText] = useState('');
   const [itemNotesMap, setItemNotesMap] = useState<Record<string, string>>({});
 
-  // Delimitación de pedidos: pedidos propios del operario conectado
+  // Delimitación de pedidos exclusivos al operario conectado
   const myOrders = useMemo(() => {
     const currentOpCode = String(user?.op_code || user?.id || '').trim();
     const currentName = String(user?.name || '').trim().toLowerCase();
-    const curStaffId = String(user?.id || '').trim();
 
     return orders.filter((o: any) => {
-      // 1. Filtrar por estado (ACTIVOS vs HISTORIAL)
-      const isActiveStatus = ['PENDIENTE', 'PREPARANDO', 'LISTO', 'DEVOLUCION PENDIENTE', 'DEVOLUCION_PENDIENTE'].includes(o.status);
-      const isHistStatus = ['ENTREGADO', 'DEVUELTO', 'DEVOLUCION', 'CANCELADO'].includes(o.status);
-
-      if (ordersFilter === 'ACTIVOS' && !isActiveStatus) return false;
-      if (ordersFilter === 'HISTORIAL' && !isHistStatus) return false;
-
-      // 2. Filtrar por operario conectado
       const oOp = String(o.opId || o.mechanic_op_code || '').trim();
-      const oStaffId = String(o.mechanic_id || '').trim();
       const oName = String(o.opInfo || o.mechanic_name || '').trim().toLowerCase();
 
-      const isMine =
-        !currentOpCode ||
-        (curStaffId && oStaffId === curStaffId) ||
-        (currentOpCode && oOp === currentOpCode) ||
-        (currentName && oName.includes(currentName));
-      return isMine;
+      // Si coincide op_code o nombre del operario (o si está en modo prueba/admin)
+      const isMine = !currentOpCode || oOp === currentOpCode || (currentName && oName.includes(currentName));
+      if (!isMine) return false;
+
+      if (ordersFilter === 'ACTIVOS') {
+        return ['PENDIENTE', 'PREPARANDO', 'LISTO', 'DEVOLUCION PENDIENTE'].includes(o.status);
+      } else {
+        return ['ENTREGADO', 'DEVUELTO', 'CANCELADO'].includes(o.status);
+      }
     });
   }, [orders, user, ordersFilter]);
 
@@ -194,18 +133,12 @@ export const TerminalTaller: React.FC = () => {
   const myActiveOrdersCount = useMemo(() => {
     const currentOpCode = String(user?.op_code || user?.id || '').trim();
     const currentName = String(user?.name || '').trim().toLowerCase();
-    const curStaffId = String(user?.id || '').trim();
 
     return orders.filter((o: any) => {
       const oOp = String(o.opId || o.mechanic_op_code || '').trim();
-      const oStaffId = String(o.mechanic_id || '').trim();
       const oName = String(o.opInfo || o.mechanic_name || '').trim().toLowerCase();
-      const isMine =
-        !currentOpCode ||
-        (curStaffId && oStaffId === curStaffId) ||
-        (currentOpCode && oOp === currentOpCode) ||
-        (currentName && oName.includes(currentName));
-      return isMine && ['PENDIENTE', 'PREPARANDO', 'LISTO', 'DEVOLUCION PENDIENTE', 'DEVOLUCION_PENDIENTE'].includes(o.status);
+      const isMine = !currentOpCode || oOp === currentOpCode || (currentName && oName.includes(currentName));
+      return isMine && ['PENDIENTE', 'PREPARANDO', 'LISTO', 'DEVOLUCION PENDIENTE'].includes(o.status);
     }).length;
   }, [orders, user]);
 
@@ -214,9 +147,7 @@ export const TerminalTaller: React.FC = () => {
     if (!isDraggingV) return;
     const handleMove = (e: MouseEvent) => {
       const totalWidth = window.innerWidth;
-      const minPct = Math.max(35, (560 / totalWidth) * 100);
-      const maxPct = Math.min(75, 100 - (340 / totalWidth) * 100);
-      const pct = Math.min(maxPct, Math.max(minPct, (e.clientX / totalWidth) * 100));
+      const pct = Math.min(75, Math.max(25, (e.clientX / totalWidth) * 100));
       setLeftColWidthPct(pct);
     };
     const handleUp = () => setIsDraggingV(false);
@@ -247,31 +178,8 @@ export const TerminalTaller: React.FC = () => {
     };
   }, [isDraggingH]);
 
-  // Carga inicial y listeners reactivos
+  // Carga inicial
   useEffect(() => {
-    // Si cambia el usuario conectado, resetear inmediatamente las unidades al nuevo operario
-    const userKey = getHoldsCacheKey(user?.op_code || user?.id);
-    let initialUserHolds: HoldUnit[] = [];
-    if (userKey && typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(userKey);
-        if (saved) initialUserHolds = JSON.parse(saved);
-      } catch (e) {}
-    }
-    setHoldUnits(initialUserHolds);
-    setSelectedHoldIndex(initialUserHolds.length > 0 ? 0 : -1);
-    if (initialUserHolds.length > 0) {
-      setInputTractorPlate(initialUserHolds[0].tractorPlate || '');
-      setInputTractorOt(initialUserHolds[0].tractorOt || '');
-      setInputSemiPlate(initialUserHolds[0].semiPlate || '');
-      setInputSemiOt(initialUserHolds[0].semiOt || '');
-    } else {
-      setInputTractorPlate('');
-      setInputTractorOt('');
-      setInputSemiPlate('');
-      setInputSemiOt('');
-    }
-
     loadData();
 
     const socket = getSocket();
@@ -279,15 +187,6 @@ export const TerminalTaller: React.FC = () => {
       if (Array.isArray(newOrders)) {
         setOrders(newOrders);
       }
-    };
-
-    const handleFleetCatalogSync = () => {
-      getFleetSearchCatalog().then((fleet) => {
-        if (fleet && Array.isArray(fleet.pairs)) {
-          setFleetPlates({ tractores: fleet.tractores || [], semis: fleet.semis || [] });
-          setFleetPairs(fleet.pairs || []);
-        }
-      });
     };
 
     const handleHoldSync = (data: { opId?: string; units?: any[] }) => {
@@ -306,16 +205,9 @@ export const TerminalTaller: React.FC = () => {
       getOperarioHoldUnits(myOp).then((holds) => {
         if (Array.isArray(holds)) {
           setHoldUnits(holds);
-          const key = getHoldsCacheKey(myOp);
           if (holds.length > 0) {
-            if (key) {
-              try { localStorage.setItem(key, JSON.stringify(holds)); } catch (e) {}
-            }
             setSelectedHoldIndex((prev) => (prev < 0 || prev >= holds.length ? 0 : prev));
           } else {
-            if (key) {
-              try { localStorage.removeItem(key); } catch (e) {}
-            }
             setSelectedHoldIndex(-1);
           }
         }
@@ -324,68 +216,9 @@ export const TerminalTaller: React.FC = () => {
 
     socket.on('orders_sync', handleOrdersSync);
     socket.on('taller_hold_updated', handleHoldSync);
-    socket.on('ot_updated', handleFleetCatalogSync);
-    socket.on('fleet_catalog_updated', handleFleetCatalogSync);
-
-    // 🐘 Suscripción Reactiva en tiempo real (Supabase Realtime)
-    const realtimeChannel = supabase
-      .channel('terminal-taller-fleet-ots')
-      .on('postgres_changes', { event: '*', schema: 'panol', table: 'unit_work_orders' }, () => {
-        handleFleetCatalogSync();
-      })
-      .on('postgres_changes', { event: '*', schema: 'panol', table: 'work_orders' }, () => {
-        handleFleetCatalogSync();
-      })
-      .on('postgres_changes', { event: '*', schema: 'panol', table: 'staff_holds' }, (payload) => {
-        const myStaffId = user?.id;
-        const myOp = String(user?.op_code || user?.id || '').trim();
-        if (!myOp) return;
-        const changedStaffId = (payload.new as any)?.staff_id || (payload.old as any)?.staff_id;
-        if (!changedStaffId || changedStaffId === myStaffId) {
-          getOperarioHoldUnits(myOp).then((holds) => {
-            if (Array.isArray(holds)) {
-              setHoldUnits(holds);
-              const key = getHoldsCacheKey(myOp);
-              if (holds.length > 0) {
-                if (key) {
-                  try { localStorage.setItem(key, JSON.stringify(holds)); } catch (e) {}
-                }
-                setSelectedHoldIndex((prev) => (prev < 0 || prev >= holds.length ? 0 : prev));
-              } else {
-                if (key) {
-                  try { localStorage.removeItem(key); } catch (e) {}
-                }
-                setSelectedHoldIndex(-1);
-              }
-            }
-          });
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'panol', table: 'work_order_tasks' }, (payload) => {
-        const myStaffId = user?.id;
-        const myOp = String(user?.op_code || user?.id || '').trim();
-        if (!myOp) return;
-        const workerId = (payload.new as any)?.worker_id || (payload.old as any)?.worker_id;
-        if (!workerId || workerId === myStaffId) {
-          getOperarioHoldUnits(myOp).then((holds) => {
-            if (Array.isArray(holds)) {
-              setHoldUnits(holds);
-              const key = getHoldsCacheKey(myOp);
-              if (holds.length > 0 && key) {
-                try { localStorage.setItem(key, JSON.stringify(holds)); } catch (e) {}
-              }
-            }
-          });
-        }
-      })
-      .subscribe();
-
     return () => {
       socket.off('orders_sync', handleOrdersSync);
       socket.off('taller_hold_updated', handleHoldSync);
-      socket.off('ot_updated', handleFleetCatalogSync);
-      socket.off('fleet_catalog_updated', handleFleetCatalogSync);
-      supabase.removeChannel(realtimeChannel);
     };
   }, [user]);
 
@@ -413,30 +246,17 @@ export const TerminalTaller: React.FC = () => {
       setFleetPairs(fleet.pairs || []);
       setOrders(ords);
 
-      // Cargar unidades en puesto reales desde Supabase (delimitado por panol.staff_holds para este operario)
-      const key = getHoldsCacheKey(opCode);
-      if (Array.isArray(holds)) {
+      // Cargar unidades en puesto reales desde Supabase (sin precargas mock)
+      if (Array.isArray(holds) && holds.length > 0) {
         setHoldUnits(holds);
-        if (holds.length > 0) {
-          if (key) {
-            try { localStorage.setItem(key, JSON.stringify(holds)); } catch (e) {}
-          }
-          setSelectedHoldIndex((prev) => (prev >= 0 && prev < holds.length ? prev : 0));
-          setInputTractorPlate(holds[0].tractorPlate || '');
-          setInputTractorOt(holds[0].tractorOt || '');
-          setInputSemiPlate(holds[0].semiPlate || '');
-          setInputSemiOt(holds[0].semiOt || '');
-        } else {
-          // Si el operario no tiene unidades retenidas en staff_holds, limpiar la sección y su caché
-          if (key) {
-            try { localStorage.removeItem(key); } catch (e) {}
-          }
-          setSelectedHoldIndex(-1);
-          setInputTractorPlate('');
-          setInputTractorOt('');
-          setInputSemiPlate('');
-          setInputSemiOt('');
-        }
+        setSelectedHoldIndex(0);
+        setInputTractorPlate(holds[0].tractorPlate || '');
+        setInputTractorOt(holds[0].tractorOt || '');
+        setInputSemiPlate(holds[0].semiPlate || '');
+        setInputSemiOt(holds[0].semiOt || '');
+      } else {
+        setHoldUnits([]);
+        setSelectedHoldIndex(-1);
       }
     } catch (err) {
       console.error('Error loading taller data:', err);
@@ -469,11 +289,7 @@ export const TerminalTaller: React.FC = () => {
       return;
     }
 
-    const opCode = String(user?.op_code || user?.id || '').trim();
-    if (!opCode) {
-      toast.warning('No se pudo identificar al operario para cargar la unidad en puesto.');
-      return;
-    }
+    const opCode = String(user?.op_code || user?.id || '150150').trim();
     const saved = await addOperarioHoldUnit({
       opCode,
       tractorPlate: tp,
@@ -486,8 +302,6 @@ export const TerminalTaller: React.FC = () => {
 
     const newUnit: HoldUnit = {
       id: saved?.id,
-      tractorWorkOrderId: saved?.tractorWorkOrderId,
-      semiWorkOrderId: saved?.semiWorkOrderId,
       tractorPlate: tp,
       tractorOt: tot,
       semiPlate: sp,
@@ -497,12 +311,7 @@ export const TerminalTaller: React.FC = () => {
       addedAt: new Date().toISOString(),
     };
 
-    const updated = [newUnit, ...holdUnits];
-    setHoldUnits(updated);
-    const key = getHoldsCacheKey(opCode);
-    if (key) {
-      try { localStorage.setItem(key, JSON.stringify(updated)); } catch (e) {}
-    }
+    setHoldUnits((prev) => [newUnit, ...prev]);
     setSelectedHoldIndex(0);
     // Limpiar campos de carga para el siguiente ingreso
     setInputTractorPlate('');
@@ -518,25 +327,8 @@ export const TerminalTaller: React.FC = () => {
     if (unitToRemove?.id) {
       await removeOperarioHoldUnit(unitToRemove.id);
     }
-    const updated = holdUnits.filter((_, i) => i !== idx);
-    setHoldUnits(updated);
-    const key = getHoldsCacheKey(user?.op_code || user?.id);
-    if (key) {
-      try {
-        if (updated.length > 0) {
-          localStorage.setItem(key, JSON.stringify(updated));
-        } else {
-          localStorage.removeItem(key);
-        }
-      } catch (e) {}
-    }
-    if (updated.length === 0) {
-      setSelectedHoldIndex(-1);
-      setInputTractorPlate('');
-      setInputTractorOt('');
-      setInputSemiPlate('');
-      setInputSemiOt('');
-    } else if (selectedHoldIndex >= idx) {
+    setHoldUnits((prev) => prev.filter((_, i) => i !== idx));
+    if (selectedHoldIndex >= idx) {
       setSelectedHoldIndex(Math.max(0, selectedHoldIndex - 1));
     }
     toast.info('Unidad removida del puesto.');
@@ -618,10 +410,10 @@ export const TerminalTaller: React.FC = () => {
           (p) => p.tractor && p.tractor.toUpperCase().replace(/[\s\-_.]/g, '') === clean
         );
         if (match) {
-          setInputTractorOt(match.tractorOt ? String(match.tractorOt) : '');
+          if (match.tractorOt || match.activeOt) setInputTractorOt(String(match.tractorOt || match.activeOt));
           if (match.semi) {
             setInputSemiPlate(match.semi.toUpperCase());
-            setInputSemiOt(match.semiOt ? String(match.semiOt) : '');
+            if (match.semiOt || match.activeOt) setInputSemiOt(String(match.semiOt || match.activeOt));
           } else {
             setInputSemiPlate('');
             setInputSemiOt('');
@@ -640,10 +432,10 @@ export const TerminalTaller: React.FC = () => {
           (p) => p.semi && p.semi.toUpperCase().replace(/[\s\-_.]/g, '') === clean
         );
         if (match) {
-          setInputSemiOt(match.semiOt ? String(match.semiOt) : '');
+          if (match.semiOt || match.activeOt) setInputSemiOt(String(match.semiOt || match.activeOt));
           if (match.tractor) {
             setInputTractorPlate(match.tractor.toUpperCase());
-            setInputTractorOt(match.tractorOt ? String(match.tractorOt) : '');
+            if (match.tractorOt || match.activeOt) setInputTractorOt(String(match.tractorOt || match.activeOt));
           } else {
             setInputTractorPlate('');
             setInputTractorOt('');
@@ -661,15 +453,14 @@ export const TerminalTaller: React.FC = () => {
       if (cleanOt.length >= 4) {
         const match = fleetPairs.find(
           (p) =>
-            p.tractorOt &&
-            (String(p.tractorOt).trim() === cleanOt ||
-              (cleanOt.length >= 4 && String(p.tractorOt).trim().startsWith(cleanOt)))
+            (p.tractorOt && String(p.tractorOt).trim() === cleanOt) ||
+            (p.activeOt && String(p.activeOt).trim() === cleanOt)
         );
         if (match) {
           if (match.tractor) setInputTractorPlate(match.tractor.toUpperCase());
           if (match.semi) {
             setInputSemiPlate(match.semi.toUpperCase());
-            setInputSemiOt(match.semiOt ? String(match.semiOt) : '');
+            if (match.semiOt || match.activeOt) setInputSemiOt(String(match.semiOt || match.activeOt));
           } else {
             setInputSemiPlate('');
             setInputSemiOt('');
@@ -687,15 +478,14 @@ export const TerminalTaller: React.FC = () => {
       if (cleanOt.length >= 4) {
         const match = fleetPairs.find(
           (p) =>
-            p.semiOt &&
-            (String(p.semiOt).trim() === cleanOt ||
-              (cleanOt.length >= 4 && String(p.semiOt).trim().startsWith(cleanOt)))
+            (p.semiOt && String(p.semiOt).trim() === cleanOt) ||
+            (p.activeOt && String(p.activeOt).trim() === cleanOt)
         );
         if (match) {
           if (match.semi) setInputSemiPlate(match.semi.toUpperCase());
           if (match.tractor) {
             setInputTractorPlate(match.tractor.toUpperCase());
-            setInputTractorOt(match.tractorOt ? String(match.tractorOt) : '');
+            if (match.tractorOt || match.activeOt) setInputTractorOt(String(match.tractorOt || match.activeOt));
           } else {
             setInputTractorPlate('');
             setInputTractorOt('');
@@ -745,7 +535,6 @@ export const TerminalTaller: React.FC = () => {
 
       await submitBatchOrder({
         opId: user?.op_code || '150150',
-        mechanicId: user?.id,
         mechanicName: user?.name || 'MECÁNICO',
         box: effectiveBox,
         tractorPlate: effectiveTractorPlate,
@@ -891,7 +680,7 @@ export const TerminalTaller: React.FC = () => {
           {/* ===================================================================== */}
           <div
             className="flex flex-col gap-2 h-full overflow-hidden"
-            style={{ width: `${leftColWidthPct}%`, minWidth: '560px' }}
+            style={{ width: `${leftColWidthPct}%`, minWidth: '320px' }}
           >
             {/* BARRA SUPERIOR DE ENTRADAS (TRACTOR, SEMI + AGREGAR A PUESTO) */}
             <div className="bg-[#111622] border border-[#1E2530] rounded-xl p-2.5 shadow-sm shrink-0">
@@ -980,10 +769,10 @@ export const TerminalTaller: React.FC = () => {
               </div>
             </div>
 
-            {/* SPLIT: UNIDADES EN PUESTO (IZQ - FIJA) Y TIMELINE DE TAREAS (DER - FLUIDA) */}
-            <div className="flex-1 flex flex-row gap-2 overflow-hidden min-h-0">
-              {/* COLUMNA 1: UNIDADES EN TALLER (HOLD UNITS / SECCIÓN PATENTES - FIJA, INDEPENDIENTE DEL RESIZE) */}
-              <div className="w-[235px] xl:w-[245px] shrink-0 bg-[#111622] border border-[#1E2530] rounded-xl p-2 flex flex-col overflow-hidden">
+            {/* SPLIT: UNIDADES EN PUESTO (IZQ) Y TIMELINE DE TAREAS (DER) */}
+            <div className="flex-1 grid grid-cols-12 gap-2 overflow-hidden min-h-0">
+              {/* COLUMNA 1: UNIDADES EN TALLER (HOLD UNITS) */}
+              <div className="col-span-4 bg-[#111622] border border-[#1E2530] rounded-xl p-2 flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-[#1E2530] shrink-0">
                   <span className="text-[10px] font-black text-zinc-400 uppercase">
                     UNIDADES EN PUESTO ({holdUnits.length})
@@ -998,13 +787,6 @@ export const TerminalTaller: React.FC = () => {
                   ) : (
                     holdUnits.map((u, idx) => {
                       const isSelected = idx === selectedHoldIndex;
-                      const isCoord = Boolean(
-                        u.isCoordAssigned ||
-                        u.hasCoordTasks ||
-                        u.tractorHasCoordTasks ||
-                        u.semiHasCoordTasks ||
-                        (u.source === 'COORDINACION' && !u.reviewedAt)
-                      );
                       return (
                         <div
                           key={idx}
@@ -1015,39 +797,18 @@ export const TerminalTaller: React.FC = () => {
                             setInputSemiPlate(u.semiPlate);
                             setInputSemiOt(u.semiOt);
                           }}
-                          className={`p-2 rounded-lg border transition-all cursor-pointer flex flex-col gap-1.5 overflow-hidden ${
+                          className={`p-2 rounded-lg border transition-all cursor-pointer flex flex-col gap-1.5 ${
                             isSelected
-                              ? isCoord
-                                ? 'bg-[#1C1708] border-amber-400 shadow-sm ring-1 ring-amber-400/40'
-                                : 'bg-[#0E1520] border-[#388BFD] shadow-sm'
-                              : isCoord
-                              ? 'bg-[#141006] border-amber-500/40 hover:border-amber-400'
+                              ? 'bg-[#0E1520] border-[#388BFD] shadow-sm'
                               : 'bg-[#0B0F15] border-[#1E2530] hover:border-zinc-700'
                           }`}
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1 font-mono text-[9px] font-black">
-                              {/* Badge OT Tractor: resaltado en amarillo si tiene tareas preasignadas */}
-                              <span
-                                className={`px-1.5 py-0.2 rounded border transition-colors ${
-                                  u.tractorHasCoordTasks
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs'
-                                    : 'bg-[#161D2A] text-zinc-300 border-[#202938]'
-                                }`}
-                                title={u.tractorHasCoordTasks ? 'OT de tractor con tareas preasignadas por Coordinación' : undefined}
-                              >
+                              <span className="px-1.5 py-0.2 rounded bg-[#161D2A] text-zinc-300 border border-[#202938]">
                                 OT {u.tractorOt || '---'}
                               </span>
-
-                              {/* Badge OT Semi: resaltado en amarillo si tiene tareas preasignadas */}
-                              <span
-                                className={`px-1.5 py-0.2 rounded border transition-colors ${
-                                  u.semiHasCoordTasks
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-xs'
-                                    : 'bg-[#161D2A] text-zinc-300 border-[#202938]'
-                                }`}
-                                title={u.semiHasCoordTasks ? 'OT de semi con tareas preasignadas por Coordinación' : undefined}
-                              >
+                              <span className="px-1.5 py-0.2 rounded bg-[#161D2A] text-zinc-300 border border-[#202938]">
                                 {u.semiOt ? `SEMI ${u.semiOt}` : '---'}
                               </span>
                             </div>
@@ -1065,20 +826,18 @@ export const TerminalTaller: React.FC = () => {
                             </button>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-[#1E2530]/60 items-center justify-items-center overflow-hidden">
+                          <div className="flex items-center justify-around gap-1 pt-1 border-t border-[#1E2530]/60">
                             <LicensePlate
                               plate={u.tractorPlate}
                               type="TRACTOR"
                               size="sm"
                               showOtBadge={false}
-                              className="w-full justify-center"
                             />
                             <LicensePlate
                               plate={u.semiPlate}
                               type="SEMI"
                               size="sm"
                               showOtBadge={false}
-                              className="w-full justify-center"
                             />
                           </div>
                         </div>
@@ -1089,7 +848,7 @@ export const TerminalTaller: React.FC = () => {
               </div>
 
               {/* COLUMNA 2: TIMELINE DE TAREAS */}
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              <div className="col-span-8 overflow-hidden flex flex-col min-h-0">
                 <WorkOrderTimeline
                   tractorPlate={activeUnit?.tractorPlate || inputTractorPlate}
                   tractorOt={activeUnit?.tractorOt || inputTractorOt}
@@ -1126,7 +885,7 @@ export const TerminalTaller: React.FC = () => {
           {/* ===================================================================== */}
           <div
             className="flex-1 flex flex-col h-full overflow-hidden"
-            style={{ width: `${100 - leftColWidthPct}%`, minWidth: '340px' }}
+            style={{ width: `${100 - leftColWidthPct}%`, minWidth: '320px' }}
           >
             {/* Card: CATÁLOGO DE REPUESTOS */}
             <div
@@ -1200,17 +959,10 @@ export const TerminalTaller: React.FC = () => {
                     className="p-1.5 px-2 bg-[#0B0F15] border border-[#1A2230] hover:border-[#388BFD]/40 rounded-lg flex items-center justify-between gap-2 transition-colors"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h4 className="text-xs font-bold text-white truncate">
-                          {item.description}
-                        </h4>
-                        {item.requires_exchange && (
-                          <span className="inline-flex items-center gap-1 text-[9px] font-black text-amber-400 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/60 shrink-0">
-                            ♻️ CANJE OBLIGATORIO
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[9px] font-extrabold text-zinc-500 uppercase block mt-0.5">
+                      <h4 className="text-xs font-bold text-white truncate">
+                        {item.description}
+                      </h4>
+                      <span className="text-[9px] font-extrabold text-zinc-500 uppercase block">
                         RUBRO: {item.category}
                       </span>
                     </div>
@@ -1291,15 +1043,10 @@ export const TerminalTaller: React.FC = () => {
                           </button>
                         </div>
 
-                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="text-[9px] font-extrabold text-[#388BFD] uppercase">
                             {orderTarget}
                           </span>
-                          {ci.item.requires_exchange && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-600/50 text-amber-400 text-[9px] font-black">
-                              ♻️ REQUIERE USADA
-                            </span>
-                          )}
                           {note && (
                             <span className="px-1.5 py-0.2 rounded bg-[#D97706] text-black text-[9px] font-bold">
                               {note}
@@ -1372,12 +1119,12 @@ export const TerminalTaller: React.FC = () => {
         /* PESTAÑA PEDIDOS (MONITOR DE PEDIDOS AL PAÑOL) */
         <main className="flex-1 p-3 overflow-hidden flex flex-col h-[calc(100vh-44px)]">
           <div className="bg-[#111622] border border-[#1E2530] rounded-xl p-3 shadow-sm flex flex-col flex-1 overflow-hidden">
-            <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#1E2530] shrink-0 gap-2 flex-wrap">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#1E2530] shrink-0">
               <span className="text-xs font-black tracking-wide text-zinc-200 uppercase">
                 MONITOR DE PEDIDOS AL PAÑOL
               </span>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setOrdersFilter('ACTIVOS')}
                   className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
@@ -1431,9 +1178,9 @@ export const TerminalTaller: React.FC = () => {
                   const isDevuelto = o.status === 'DEVUELTO' || o.status === 'DEVOLUCION';
 
                   const returnableItems = (o.items || []).filter(
-                    (it: any) => it.status === 'ENTREGADO' || it.status === 'LISTO' || !it.status || o.status === 'ENTREGADO' || o.status === 'LISTO'
+                    (it: any) => it.status === 'ENTREGADO' || !it.status || o.status === 'ENTREGADO'
                   );
-                  const canReturn = (isDelivered || isReady || returnableItems.length > 0) && !isDevolucionPending && !isDevuelto;
+                  const canReturn = (isDelivered || returnableItems.length > 0) && !isDevolucionPending && !isDevuelto;
 
                   const trPlate = o.tractorPlate || o.tractor_plate || o.tractor;
                   const trOt = o.otNumber || o.ot_number || o.ot;
@@ -1453,9 +1200,12 @@ export const TerminalTaller: React.FC = () => {
                           : 'border-[#1E2530] hover:border-[#2A3649]'
                       }`}
                     >
-                      {/* Cabecera del pedido: Box/Sector, Hora y Estado */}
+                      {/* Cabecera del pedido: Código, Box/Sector, Hora y Estado */}
                       <div className="flex items-center justify-between pb-2 border-b border-[#1A2230]">
                         <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-sm text-[#388BFD]">
+                            {reqCode}
+                          </span>
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-[#161D2A] border border-[#202938] text-zinc-300">
                             {resolveBoxOrSector(o.box_number || o.box).label}
                           </span>
@@ -1489,7 +1239,6 @@ export const TerminalTaller: React.FC = () => {
                                 const first = returnableItems[0] || (o.items && o.items[0]);
                                 setReturnModalData({
                                   order: o,
-                                  selectedItemId: first?.id || first?.order_item_id || '',
                                   selectedItemName: first?.name || '',
                                   maxQty: first?.qty || 1,
                                   returnQty: first?.qty || 1,
@@ -1537,58 +1286,52 @@ export const TerminalTaller: React.FC = () => {
 
                       {/* Lista detallada de repuestos */}
                       <div className="space-y-1.5 pt-1">
-                        {(o.items || []).map((it: any, itIdx: number) => {
-                          const canjeParsed = parseCanjeStatus(it.canjeStatus || it.exchange_status || (it.requiereCanje ? 'true' : null), it.qty || it.quantity || 1);
-                          const canjeBadge = canjeParsed ? formatCanjeBadge(canjeParsed) : null;
-
-                          return (
-                            <div
-                              key={itIdx}
-                              className="flex items-center justify-between text-xs bg-[#0F141E] p-2 rounded-md border border-[#1E2530]"
-                            >
-                              <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                                <span className="font-mono font-bold text-white text-xs bg-[#1A2230] px-1.5 py-0.5 rounded shrink-0">
-                                  {it.qty || it.quantity || 1}x
+                        {(o.items || []).map((it: any, itIdx: number) => (
+                          <div
+                            key={itIdx}
+                            className="flex items-center justify-between text-xs bg-[#0F141E] p-2 rounded-md border border-[#1E2530]"
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="font-mono font-bold text-white text-xs bg-[#1A2230] px-1.5 py-0.5 rounded shrink-0">
+                                {it.qty || it.quantity || 1}x
+                              </span>
+                              <span className="font-bold text-white text-xs truncate">
+                                {it.name || it.description}
+                              </span>
+                              {it.code && (
+                                <span className="font-mono text-[10px] text-zinc-400 bg-[#0B0F15] px-1.5 py-0.5 rounded border border-zinc-800 shrink-0">
+                                  {it.code}
                                 </span>
-                                <span className="font-bold text-white text-xs truncate">
-                                  {it.name || it.description}
+                              )}
+                              {it.loc && it.loc !== 'S/D' && (
+                                <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60 shrink-0">
+                                  📍 {it.loc}
                                 </span>
-                                {it.code && (
-                                  <span className="font-mono text-[10px] text-zinc-400 bg-[#0B0F15] px-1.5 py-0.5 rounded border border-zinc-800 shrink-0">
-                                    {it.code}
-                                  </span>
-                                )}
-                                {it.loc && it.loc !== 'S/D' && (
-                                  <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60 shrink-0">
-                                    📍 {it.loc}
-                                  </span>
-                                )}
-                                {cleanTallerItemNote(it.note) && (
-                                  <span className="text-[10px] text-amber-300 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/60 shrink-0">
-                                    📝 {cleanTallerItemNote(it.note)}
-                                  </span>
-                                )}
-                                {canjeBadge && (
-                                  <span className={`text-[10px] ${canjeBadge.bgClass} ${canjeBadge.textClass} px-1.5 py-0.5 rounded border ${canjeBadge.borderClass} font-bold shrink-0 flex items-center gap-1`}>
-                                    <span>{canjeBadge.icon}</span>
-                                    <span>{canjeBadge.text}</span>
-                                  </span>
-                                )}
-                                {it.returned_qty > 0 && (
-                                  <span className="text-[10px] text-purple-300 bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-800/60 font-bold shrink-0">
-                                    ↩️ Devuelto: {it.returned_qty}
-                                  </span>
-                                )}
-                              </div>
-
-                              {it.status && (
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase shrink-0 ml-2">
-                                  {it.status}
+                              )}
+                              {it.note && (
+                                <span className="text-[10px] text-amber-300 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/60 shrink-0">
+                                  📝 {it.note}
+                                </span>
+                              )}
+                              {(it.requiereCanje || it.canje) && (
+                                <span className="text-[10px] text-orange-400 bg-orange-950/60 px-1.5 py-0.5 rounded border border-orange-800/60 font-bold shrink-0">
+                                  ♻️ Canje
+                                </span>
+                              )}
+                              {it.returned_qty > 0 && (
+                                <span className="text-[10px] text-purple-300 bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-800/60 font-bold shrink-0">
+                                  ↩️ Devuelto: {it.returned_qty}
                                 </span>
                               )}
                             </div>
-                          );
-                        })}
+
+                            {it.status && (
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase shrink-0 ml-2">
+                                {it.status}
+                              </span>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
@@ -1710,11 +1453,6 @@ export const TerminalTaller: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="text-[11px] font-bold text-amber-400 bg-amber-950/40 p-2 rounded border border-amber-800/40 flex items-center justify-between">
-                        <span>♻️ Entregadas: {Math.max(0, d.qty - d.missingQty)} de {d.qty}</span>
-                        <span>⚠️ Faltantes: {d.missingQty}</span>
-                      </div>
-
                       <input
                         type="text"
                         value={d.motivo}
@@ -1823,7 +1561,6 @@ export const TerminalTaller: React.FC = () => {
                     const max = it?.qty || 1;
                     setReturnModalData({
                       ...returnModalData,
-                      selectedItemId: it?.id || it?.order_item_id || '',
                       selectedItemName: selName,
                       maxQty: max,
                       returnQty: max,
@@ -1902,7 +1639,6 @@ export const TerminalTaller: React.FC = () => {
                     returnModalData.order?.reqId ||
                     returnModalData.order?.id;
                   const ok = await requestOrderReturn({
-                    id: returnModalData.selectedItemId,
                     reqId,
                     itemName: returnModalData.selectedItemName,
                     returnQty: returnModalData.returnQty,

@@ -10,10 +10,7 @@
  * 5. Cold Storage & Hot Purge: Al completarse el 100% de las tareas de una OT, se archiva en 'HISTORICO_COLD' y se purga de la tabla activa.
  */
 
-const fs = require('fs');
-const path = require('path');
 const { extractPlates } = require('./plateNormalizer');
-const db = require('./utils/db');
 
 const DB_TASKS_TAB = 'DB_OT_TASKS';
 const COLD_STORAGE_TAB = 'HISTORICO_TAREAS_COLD';
@@ -366,11 +363,6 @@ async function syncOtsToTasksDatabase({ sheetsClient, spreadsheetId, io }) {
       console.warn('⚠️ Nota: Actualización de porcentajes en sync:', ePct.message);
     });
 
-    // Ingesta automática e idempotente hacia Supabase (panol.work_orders & work_order_tasks)
-    ingestOtsFromSheetsToSupabase({ sheetsClient, spreadsheetId }).catch(eIngest => {
-      console.warn('⚠️ Nota: Ingesta hacia Supabase en sync:', eIngest.message);
-    });
-
     const durationMs = Date.now() - startTime;
     return {
       success: true,
@@ -429,44 +421,39 @@ async function getActiveTasksBoard({ sheetsClient, spreadsheetId }) {
 
   await ensureSheetsStructure(sheetsClient, spreadsheetId);
 
-  // 1. Mapeo maestro de diferenciación y unión Tractor/Semi desde panol.v_flota_busqueda (Supabase)
+  // 1. Mapeo maestro de diferenciación y unión Tractor/Semi desde DB_OT_LIST (Cols A y C)
   const plateToType = new Map();
   const pairByPlate = new Map();
   const pairByOt = new Map();
 
   try {
-    if (db && db.isConfigured && db.isConfigured()) {
-      const fleetRes = await db.query(`
-        SELECT 
-          COALESCE(tractor, '') as tractor,
-          COALESCE(semi, '') as semi,
-          COALESCE(tractor_ot, '') as tractor_ot,
-          COALESCE(semi_ot, '') as semi_ot,
-          COALESCE(active_ot_number, '') as active_ot_number
-        FROM panol.v_flota_busqueda
-        WHERE COALESCE(tractor, '') <> '' OR COALESCE(semi, '') <> '';
-      `);
-      (fleetRes.rows || []).forEach(r => {
-        const tractor = String(r.tractor || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-        const semi = String(r.semi || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-        const tot = String(r.tractor_ot || r.active_ot_number || '').trim();
-        const sot = String(r.semi_ot || r.active_ot_number || '').trim();
+    const otListRes = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId,
+      range: "'DB_OT_LIST'!A2:C"
+    });
+    const otListRows = otListRes.data.values || [];
 
-        const pair = { tractor, semi, ot: tot || sot, otTractor: tot, otSemi: sot };
-        if (tractor) {
-          plateToType.set(tractor, 'TRACTOR');
-          pairByPlate.set(tractor, pair);
-        }
-        if (semi) {
-          plateToType.set(semi, 'SEMI');
-          pairByPlate.set(semi, pair);
-        }
-        if (tot) pairByOt.set(tot, pair);
-        if (sot) pairByOt.set(sot, pair);
-      });
-    }
+    otListRows.forEach(r => {
+      const tractor = String(r[0] || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+      const ot = String(r[1] || '').trim();
+      const semi = String(r[2] || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+
+      const pair = { tractor, semi, ot };
+
+      if (tractor) {
+        plateToType.set(tractor, 'TRACTOR');
+        pairByPlate.set(tractor, pair);
+      }
+      if (semi) {
+        plateToType.set(semi, 'SEMI');
+        pairByPlate.set(semi, pair);
+      }
+      if (ot) {
+        pairByOt.set(ot, pair);
+      }
+    });
   } catch (err) {
-    console.error('Error al cargar v_flota_busqueda para mapeo Tractor/Semi:', err.message);
+    console.error('Error al cargar DB_OT_LIST para mapeo Tractor/Semi:', err.message);
   }
 
   // 2. Leer tareas activas desde DB_OT_TASKS (11 columnas: A:K)
@@ -582,7 +569,7 @@ async function getActiveTasksBoard({ sheetsClient, spreadsheetId }) {
 /**
  * Actualiza de forma atómica una tarea específica en 'DB_OT_TASKS' por su TASK_ID.
  */
-async function updateTaskExecution({ sheetsClient, spreadsheetId, taskId, ubicacion, operario, asignado, empezo, termino, estado, io, skipSupabaseSync = false }) {
+async function updateTaskExecution({ sheetsClient, spreadsheetId, taskId, ubicacion, operario, asignado, empezo, termino, estado, io }) {
   if (!sheetsClient || !spreadsheetId || !taskId) {
     throw new Error('Parámetros requeridos: sheetsClient, spreadsheetId, taskId');
   }
@@ -637,20 +624,6 @@ async function updateTaskExecution({ sheetsClient, spreadsheetId, taskId, ubicac
   });
 
   console.log(`✅ Tarea ${taskId} actualizada en DB_OT_TASKS fila ${targetRowIndex}: ${newEstado}`);
-
-  // ⚡ Sincronización transaccional en Supabase panol.work_order_tasks
-  if (!skipSupabaseSync && db && db.isConfigured && db.isConfigured()) {
-    updateTaskExecutionInSupabase({
-      taskId,
-      ubicacion: newUbicacion,
-      operario: newOperario,
-      empezo: newEmpezo,
-      termino: newTermino,
-      estado: newEstado,
-      otNumber: currentRowData[1],
-      io
-    }).catch(sbErr => console.warn('⚠️ [SQL Supabase] Error en updateTaskExecutionInSupabase:', sbErr.message));
-  }
 
   // Sincronizar también con Col I de 'ots' o 'ots_anteriores'
   const otNumber = currentRowData[1];
@@ -1438,20 +1411,6 @@ async function updateOtTaskTerminado({ sheetsClient, spreadsheetId, otNumber, ta
       console.error('Nota: Sync secundario a DB_OT_TASKS:', e.message);
     }
 
-    // Sincronizar en Supabase (panol.work_order_tasks)
-    if (db && db.isConfigured && db.isConfigured()) {
-      updateTaskExecutionInSupabase({
-        taskId: safeTaskId,
-        otNumber: cleanOt,
-        desc,
-        rubro,
-        operario: opId,
-        isCompleted,
-        estado: isCompleted ? 'TERMINADO' : 'PENDIENTE',
-        io
-      }).catch(e => console.warn('⚠️ [SQL Supabase] Error en updateTaskExecutionInSupabase desde updateOtTaskTerminado:', e.message));
-    }
-
     const resObj = {
       success: true,
       otNumber: cleanOt,
@@ -1472,666 +1431,10 @@ async function updateOtTaskTerminado({ sheetsClient, spreadsheetId, otNumber, ta
 }
 
 /**
- * Ingesta e indexa OTs activas desde Google Sheets ('ots') hacia Supabase (panol.work_orders, panol.unit_work_orders y panol.work_order_tasks).
- * Idempotente: si la OT ya existe y está COMPLETADA no se toca; si está ACTIVA, asegura que las tareas estén desglosadas sin sobreescribir.
- * Soporta filtrado por última semana (daysCutoff = 7) y resolución en memoria O(1) de patentes.
- */
-async function ingestOtsFromSheetsToSupabase({
-  sheetsClient,
-  spreadsheetId,
-  daysCutoff = 7,
-  onlyLastWeek = true,
-  mode = 'latest'
-} = {}) {
-  if (!db || !db.isConfigured || !db.isConfigured()) return { success: false, reason: 'DB not configured' };
-  if (!sheetsClient || !spreadsheetId) return { success: false, reason: 'Sheets client missing' };
-
-  try {
-    // 1. Cargar patentes de tractores y semis en memoria para resolución O(1) de alto rendimiento
-    const [trRes, smRes] = await Promise.all([
-      db.query("SELECT id, UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) as clean_plate FROM public.tractores"),
-      db.query("SELECT id, UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) as clean_plate FROM public.semis")
-    ]);
-    const tractorMap = new Map();
-    trRes.rows.forEach(r => tractorMap.set(r.clean_plate, r.id));
-    const semiMap = new Map();
-    smRes.rows.forEach(r => semiMap.set(r.clean_plate, r.id));
-
-    // 2. Obtener todas las filas de la hoja 'ots'
-    const res = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId,
-      range: `'${OTS_SOURCE_TAB}'!A2:J`
-    });
-    const rows = res.data.values || [];
-    let ingestedOrders = 0;
-    let ingestedTasks = 0;
-    let linkedUnits = 0;
-    let filteredCount = 0;
-
-    function parseSheetDate(raw) {
-      if (!raw) return null;
-      const str = String(raw).trim();
-      const dmyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-      if (dmyMatch) {
-        const day = parseInt(dmyMatch[1], 10);
-        const month = parseInt(dmyMatch[2], 10) - 1;
-        const year = parseInt(dmyMatch[3], 10);
-        return new Date(year, month, day);
-      }
-      const parsed = new Date(str);
-      if (!isNaN(parsed.getTime())) return parsed;
-      return null;
-    }
-
-    // Calcular fecha de corte para 'última semana'
-    let maxDate = null;
-    rows.forEach(r => {
-      const d = parseSheetDate(r[1]);
-      if (d && (!maxDate || d > maxDate)) maxDate = d;
-    });
-
-    const now = new Date();
-    const referenceDate = maxDate || now;
-    const cutoffTimestamp = onlyLastWeek
-      ? (referenceDate.getTime() - (daysCutoff * 24 * 60 * 60 * 1000))
-      : 0;
-
-    for (const row of rows) {
-      const rawOt = String(row[2] || '').trim();
-      const rawDom = String(row[3] || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-      const rawTasks = String(row[4] || '').trim();
-      if (!rawOt || !rawDom) continue;
-
-      const rowDate = parseSheetDate(row[1]) || new Date();
-      if (onlyLastWeek && rowDate.getTime() < cutoffTimestamp) {
-        continue; // Excluir órdenes anteriores a la última semana
-      }
-      filteredCount++;
-
-      const otNumber = rawOt.replace(/^0+/, '') || rawOt;
-
-      // 3. Resolver patente en memoria (tractor/semi uuid)
-      let vehicleType = 'TRACTOR';
-      let vehicleId = null;
-      if (tractorMap.has(rawDom)) {
-        vehicleType = 'TRACTOR';
-        vehicleId = tractorMap.get(rawDom);
-      } else if (semiMap.has(rawDom)) {
-        vehicleType = 'SEMI';
-        vehicleId = semiMap.get(rawDom);
-      }
-
-      // 4. Upsert en panol.work_orders (Nivel Intermedio) - SIN raw_tasks_text
-      const coldCheck = await db.query("SELECT id, status FROM panol.work_orders_cold WHERE ot_number = $1 LIMIT 1;", [otNumber]);
-      if (coldCheck.rows.length > 0) continue; // Proteger órdenes ya transferidas a cold storage
-
-      const existQ = await db.query("SELECT id, status FROM panol.work_orders WHERE ot_number = $1 LIMIT 1;", [otNumber]);
-      let woId = null;
-
-      if (existQ.rows.length > 0) {
-        woId = existQ.rows[0].id;
-        if (existQ.rows[0].status === 'COMPLETADA' || existQ.rows[0].status === 'INCOMPLETA') continue; // Proteger cerradas
-      } else {
-        const insWo = await db.query(`
-          INSERT INTO panol.work_orders (
-            id, ot_number, status, avg, entry_date, created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), $1, 'ACTIVA', 0.00, $2, NOW(), NOW()
-          ) RETURNING id;
-        `, [otNumber, rowDate]);
-
-        woId = insWo.rows[0].id;
-        ingestedOrders++;
-      }
-
-      // 5. Upsert en panol.unit_work_orders (Nivel Superior)
-      if (vehicleId && woId) {
-        const tractorId = vehicleType === 'TRACTOR' ? vehicleId : null;
-        const semiId = vehicleType === 'SEMI' ? vehicleId : null;
-        const insUwo = await db.query(`
-          INSERT INTO panol.unit_work_orders (
-            tractor_id, semi_id, work_order_id
-          ) VALUES (
-            $1, $2, $3
-          )
-          ON CONFLICT DO NOTHING
-          RETURNING id;
-        `, [tractorId, semiId, woId]);
-        if (insUwo.rows.length > 0) linkedUnits++;
-      }
-
-      // 6. Upsert de tareas atómicas en panol.work_order_tasks (Nivel Inferior)
-      const parsed = parseTasksFromString(rawTasks);
-      if (parsed.length > 0 && woId) {
-        for (const t of parsed) {
-          const sectorTask = `[${t.rubro}] ${t.descripcion}`;
-          const insTaskRes = await db.query(`
-            INSERT INTO panol.work_order_tasks (
-              id, work_order_id, task_index, sector_task, estado, porcentaje, created_at, updated_at
-            ) VALUES (
-              gen_random_uuid(), $1, $2, $3, 'PENDIENTE', 0.00, NOW(), NOW()
-            )
-            ON CONFLICT (work_order_id, task_index) DO NOTHING
-            RETURNING id;
-          `, [woId, t.index, sectorTask]);
-          
-          if (insTaskRes.rows.length > 0) ingestedTasks++;
-        }
-      }
-    }
-
-    return {
-      success: true,
-      mode,
-      totalRows: rows.length,
-      filteredRows: filteredCount,
-      ingestedOrders,
-      ingestedTasks,
-      linkedUnits,
-      onlyLastWeek,
-      daysCutoff,
-      referenceDate: referenceDate ? referenceDate.toISOString() : null,
-      cutoffDate: cutoffTimestamp ? new Date(cutoffTimestamp).toISOString() : null
-    };
-  } catch (err) {
-    console.error('❌ Error en ingestOtsFromSheetsToSupabase:', err.message);
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Actualiza el estado y operario de una tarea en Supabase (panol.work_order_tasks).
- * Si la orden alcanza el 100% de finalización, el trigger panol.trg_wot_sync_avg
- * dispara automáticamente panol.consolidate_completed_work_order.
- */
-async function updateTaskExecutionInSupabase({ taskId, ubicacion, operario, workerId, assignedStaffId, empezo, termino, estado, otNumber, desc, rubro, isCompleted, io } = {}) {
-  if (!db || !db.isConfigured || !db.isConfigured()) return { success: false, reason: 'DB not configured' };
-
-  try {
-    const cleanOt = otNumber ? String(otNumber).trim().replace(/^0+/, '') : '';
-    const cleanDesc = desc ? String(desc).trim() : '';
-    const isTerminado = isCompleted === true || estado === 'COMPLETADA' || estado === 'TERMINADO';
-    const isEnCurso = estado === 'EN_CURSO' || (empezo && !isTerminado);
-    const targetStatus = isTerminado ? 'COMPLETADA' : (isEnCurso ? 'EN_CURSO' : 'PENDIENTE');
-    const targetPct = isTerminado ? 100.00 : (isEnCurso ? 50.00 : 0.00);
-
-    // Resolver staff_id si se especificó workerId, assignedStaffId directamente o por operario
-    let staffId = workerId || assignedStaffId || null;
-    let resolvedStaffName = operario || '';
-    let resolvedOpCode = '';
-
-    if (staffId) {
-      const sById = await db.query("SELECT id, name, op_code FROM panol.staff WHERE id = $1 LIMIT 1;", [staffId]);
-      if (sById.rows.length > 0) {
-        resolvedStaffName = sById.rows[0].name;
-        resolvedOpCode = sById.rows[0].op_code;
-      }
-    } else if (operario) {
-      const cleanOp = String(operario).trim();
-      const staffRes = await db.query(
-        "SELECT id, name, op_code FROM panol.staff WHERE op_code = $1 OR name ILIKE $1 OR name ILIKE $2 LIMIT 1;",
-        [cleanOp, `%${cleanOp}%`]
-      );
-      if (staffRes.rows.length > 0) {
-        staffId = staffRes.rows[0].id;
-        resolvedStaffName = staffRes.rows[0].name;
-        resolvedOpCode = staffRes.rows[0].op_code;
-      }
-    }
-
-    const cleanTaskId = String(taskId || '').trim();
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTaskId);
-
-    // Actualizar panol.work_order_tasks (dispara trigger trg_wot_sync_avg)
-    let updateRes;
-    if (isUuid) {
-      // 🎯 CASO 1: UUID CANÓNICO DE SUPABASE panol.work_order_tasks.id
-      // Actualiza ÚNICA y EXCLUSIVAMENTE la tarea exacta cuyo ID coincide con el UUID seleccionado.
-      updateRes = await db.query(`
-        UPDATE panol.work_order_tasks
-        SET 
-          estado = $1,
-          porcentaje = $2,
-          empezo = CASE WHEN $3 THEN COALESCE(empezo, NOW()) ELSE empezo END,
-          termino = CASE WHEN $4 THEN COALESCE(termino, NOW()) ELSE NULL END,
-          ubicacion = COALESCE($5, ubicacion),
-          worker_id = COALESCE($6, worker_id),
-          updated_at = NOW()
-        WHERE id = $7::uuid
-        RETURNING id, work_order_id, worker_id, estado, empezo, termino, porcentaje;
-      `, [
-        targetStatus,
-        targetPct,
-        isEnCurso || isTerminado,
-        isTerminado,
-        ubicacion || null,
-        staffId,
-        cleanTaskId
-      ]);
-    } else {
-      // 🎯 CASO 2: IDENTIFICADOR LEGADO (ej. "12122-1" o "12122-AD337AV-1")
-      let legacyIndex = null;
-      if (cleanTaskId) {
-        const parts = cleanTaskId.split('-');
-        const lastPart = parts[parts.length - 1];
-        if (/^\d+$/.test(lastPart)) {
-          legacyIndex = parseInt(lastPart, 10);
-        }
-      }
-
-      if (legacyIndex !== null && cleanOt) {
-        updateRes = await db.query(`
-          UPDATE panol.work_order_tasks
-          SET 
-            estado = $1,
-            porcentaje = $2,
-            empezo = CASE WHEN $3 THEN COALESCE(empezo, NOW()) ELSE empezo END,
-            termino = CASE WHEN $4 THEN COALESCE(termino, NOW()) ELSE NULL END,
-            ubicacion = COALESCE($5, ubicacion),
-            worker_id = COALESCE($6, worker_id),
-            updated_at = NOW()
-          WHERE work_order_id IN (SELECT id FROM panol.work_orders WHERE ot_number = $7 OR regexp_replace(ot_number, '^0+', '') = $7)
-            AND task_index = $8::int
-          RETURNING id, work_order_id, worker_id, estado, empezo, termino, porcentaje;
-        `, [
-          targetStatus,
-          targetPct,
-          isEnCurso || isTerminado,
-          isTerminado,
-          ubicacion || null,
-          staffId,
-          cleanOt,
-          legacyIndex
-        ]);
-      } else if (cleanOt && cleanDesc) {
-        updateRes = await db.query(`
-          UPDATE panol.work_order_tasks
-          SET 
-            estado = $1,
-            porcentaje = $2,
-            empezo = CASE WHEN $3 THEN COALESCE(empezo, NOW()) ELSE empezo END,
-            termino = CASE WHEN $4 THEN COALESCE(termino, NOW()) ELSE NULL END,
-            ubicacion = COALESCE($5, ubicacion),
-            worker_id = COALESCE($6, worker_id),
-            updated_at = NOW()
-          WHERE work_order_id IN (SELECT id FROM panol.work_orders WHERE ot_number = $7 OR regexp_replace(ot_number, '^0+', '') = $7)
-            AND LOWER(sector_task) = LOWER($8)
-          RETURNING id, work_order_id, worker_id, estado, empezo, termino, porcentaje;
-        `, [
-          targetStatus,
-          targetPct,
-          isEnCurso || isTerminado,
-          isTerminado,
-          ubicacion || null,
-          staffId,
-          cleanOt,
-          cleanDesc
-        ]);
-      } else {
-        updateRes = { rows: [] };
-      }
-    }
-
-    let targetWoId = null;
-    let updatedTaskId = taskId;
-    if (updateRes.rows.length > 0) {
-      targetWoId = updateRes.rows[0].work_order_id;
-      updatedTaskId = updateRes.rows[0].id;
-    } else if (cleanOt) {
-      const woFind = await db.query("SELECT id FROM panol.work_orders WHERE ot_number = $1 OR regexp_replace(ot_number, '^0+', '') = $1 LIMIT 1;", [cleanOt]);
-      if (woFind.rows.length > 0) targetWoId = woFind.rows[0].id;
-    }
-
-    if (io) {
-      io.emit('task_status_changed', {
-        taskId: updatedTaskId,
-        otNumber: cleanOt,
-        estado: targetStatus,
-        operario: resolvedStaffName || null,
-        assignedStaffId: staffId,
-        assignedStaffName: resolvedStaffName || null,
-        assignedOpCode: resolvedOpCode || null,
-        targetWoId,
-        empezo: isEnCurso ? new Date().toISOString() : undefined,
-        termino: isTerminado ? new Date().toISOString() : undefined,
-        timestamp: new Date().toISOString()
-      });
-
-      if (targetWoId) {
-        const checkWo = await db.query("SELECT ot_number, status, avg FROM panol.work_orders WHERE id = $1;", [targetWoId]);
-        if (checkWo.rows.length === 0) {
-          const checkCold = await db.query("SELECT ot_number, status, avg FROM panol.work_orders_cold WHERE id = $1;", [targetWoId]);
-          if (checkCold.rows.length > 0) {
-            io.emit('work_order_completed', {
-              workOrderId: targetWoId,
-              otNumber: checkCold.rows[0].ot_number,
-              status: checkCold.rows[0].status,
-              snapshotCount: 0
-            });
-          }
-        } else if (checkWo.rows[0].status === 'COMPLETADA' || checkWo.rows[0].status === 'INCOMPLETA') {
-          io.emit('work_order_completed', {
-            workOrderId: targetWoId,
-            otNumber: checkWo.rows[0].ot_number,
-            status: checkWo.rows[0].status,
-            snapshotCount: 0
-          });
-        }
-      }
-    }
-
-    return { success: true, targetWoId, targetStatus, taskId: updatedTaskId };
-  } catch (err) {
-    console.error('❌ Error en updateTaskExecutionInSupabase:', err.message);
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Consulta las tareas del timeline (activas e históricas) utilizando la arquitectura en 3 niveles y vistas SQL.
- * Retorna la estructura canónica esperada por WorkOrderTimeline.tsx: { success, timelineGroups, historicalNodes, progress }.
- */
-async function getUnitTimelineTasksFromSupabase({ tractorOt, semiOt, tractorPlate, semiPlate }) {
-  if (!db || !db.isConfigured || !db.isConfigured()) return null;
-
-  const cleanTractorOt = String(tractorOt || '').trim().replace(/^0+/, '');
-  const cleanSemiOt = String(semiOt || '').trim().replace(/^0+/, '');
-  const cleanTractorPlate = String(tractorPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-  const cleanSemiPlate = String(semiPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-
-  const otFilter = [cleanTractorOt, cleanSemiOt].filter(Boolean);
-  const plateFilter = [cleanTractorPlate, cleanSemiPlate].filter(Boolean);
-
-  if (otFilter.length === 0 && plateFilter.length === 0) {
-    return { success: true, timelineGroups: [], historicalNodes: [], progress: 0 };
-  }
-
-  try {
-    // 1. Resolver UUIDs de vehículos a partir de las patentes si vienen provistas
-    let vehicleIds = [];
-    if (plateFilter.length > 0) {
-      const vq = await db.query(`
-        SELECT id FROM public.tractores WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = ANY($1::text[])
-        UNION ALL
-        SELECT id FROM public.semis WHERE UPPER(REPLACE(REPLACE(patente, '-', ''), ' ', '')) = ANY($1::text[])
-      `, [plateFilter]);
-      vehicleIds = vq.rows.map(r => r.id);
-    }
-
-    // 2. Consultar Tareas Activas (panol.v_taller_unit_tasks o JOIN canónico con staff)
-    const activeQ = await db.query(`
-      SELECT 
-        CASE WHEN uwo.tractor_id IS NOT NULL THEN 'TRACTOR' ELSE 'SEMI' END as vehicle_type,
-        wo.id as work_order_id,
-        wo.ot_number,
-        wo.avg as progress_percentage,
-        to_char(wo.entry_date, 'DD/MM') as entry_date_label,
-        wot.id as task_id,
-        wot.task_index,
-        wot.sector_task,
-        wot.ubicacion,
-        wot.worker_id,
-        wot.worker_id as assigned_staff_id,
-        s.name as operario,
-        s.name as assigned_staff_name,
-        s.op_code as assigned_op_code,
-        wot.estado as task_status,
-        wot.porcentaje,
-        to_char(wot.empezo, 'DD/MM HH24:MI') as empezo,
-        to_char(wot.termino, 'DD/MM HH24:MI') as termino
-      FROM panol.unit_work_orders uwo
-      JOIN panol.work_orders wo ON uwo.work_order_id = wo.id
-      JOIN panol.work_order_tasks wot ON wot.work_order_id = wo.id
-      LEFT JOIN panol.staff s ON wot.worker_id = s.id
-      WHERE wo.status = 'ACTIVA'
-        AND (
-          (cardinality($1::text[]) > 0 AND regexp_replace(wo.ot_number, '^0+', '') = ANY($1::text[]))
-          OR (cardinality($2::uuid[]) > 0 AND (uwo.tractor_id = ANY($2::uuid[]) OR uwo.semi_id = ANY($2::uuid[])))
-        )
-      ORDER BY (uwo.tractor_id IS NOT NULL) DESC, wot.task_index ASC;
-    `, [otFilter, vehicleIds]);
-
-    // 3. Consultar Órdenes Históricas (desde la vista canónica de Cold Storage panol.v_ots_anteriores)
-    const completedQ = await db.query(`
-      SELECT 
-        vehicle_type,
-        work_order_id AS id,
-        ot_number,
-        date_label,
-        status,
-        avg,
-        close_date,
-        tasks
-      FROM panol.v_ots_anteriores
-      WHERE (
-        (cardinality($1::text[]) > 0 AND regexp_replace(ot_number, '^0+', '') = ANY($1::text[]))
-        OR (cardinality($2::uuid[]) > 0 AND vehicle_id = ANY($2::uuid[]))
-      )
-      ORDER BY close_date DESC
-      LIMIT 20;
-    `, [otFilter, vehicleIds]);
-
-    // Agrupar tareas activas por OT
-    const groupsMap = new Map();
-    activeQ.rows.forEach(r => {
-      const otKey = r.ot_number || 'S/OT';
-      if (!groupsMap.has(otKey)) {
-        groupsMap.set(otKey, {
-          ot: otKey,
-          type: r.vehicle_type || 'TRACTOR',
-          date: r.entry_date_label || 'dd/mm',
-          progress: parseFloat(r.progress_percentage) || 0,
-          tasks: []
-        });
-      }
-
-      const isDone = r.task_status === 'TERMINADO' || r.task_status === 'COMPLETADA' || parseFloat(r.porcentaje) === 100 || !!r.termino;
-      const isStart = !!r.empezo || r.task_status === 'EN_CURSO';
-
-      const rubroMatch = (r.sector_task || '').match(/^\[([^\]]+)\]\s*(.*)$/);
-      const parsedRubro = rubroMatch ? rubroMatch[1] : 'GENERAL';
-      const parsedDesc = rubroMatch ? rubroMatch[2] : (r.sector_task || '');
-
-      groupsMap.get(otKey).tasks.push({
-        id: r.task_id,
-        taskIndex: r.task_index,
-        rubro: parsedRubro,
-        desc: parsedDesc,
-        descripcion: parsedDesc,
-        sectorTask: r.sector_task,
-        estado: isDone ? 'COMPLETADA' : (isStart ? 'EN_CURSO' : 'PENDIENTE'),
-        operario: r.operario || '',
-        assignedStaffId: r.assigned_staff_id || null,
-        assignedStaffName: r.assigned_staff_name || r.operario || '',
-        assignedOpCode: r.assigned_op_code || '',
-        box: r.ubicacion || '',
-        empezo: r.empezo || '',
-        termino: r.termino || '',
-        porcentaje: parseFloat(r.porcentaje) || 0,
-        isEmpezado: isStart,
-        isTerminado: isDone
-      });
-    });
-
-    const timelineGroups = Array.from(groupsMap.values());
-
-    // Mapear historial (OTs Anteriores Front)
-    const historicalNodes = completedQ.rows.map(r => {
-      const snap = Array.isArray(r.tasks) ? r.tasks : [];
-      return {
-        ot: r.ot_number,
-        date: r.date_label || 'dd/mm',
-        ots: [r.ot_number],
-        type: r.vehicle_type || 'TRACTOR',
-        status: r.status,
-        avg: parseFloat(r.avg) || (r.status === 'COMPLETADA' ? 100 : 0),
-        tasks: snap.map(s => ({
-          rubro: s.rubro || 'GENERAL',
-          desc: s.desc || s.descripcion || '',
-          descripcion: s.desc || s.descripcion || '',
-          sectorTask: s.sectorTask || '',
-          operario: s.operario || '',
-          box: s.box || '',
-          empezo: s.empezo || '',
-          termino: s.termino || '',
-          estado: s.estado || (s.isTerminado ? 'COMPLETADA' : 'PENDIENTE'),
-          isTerminado: !!s.isTerminado
-        }))
-      };
-    });
-
-    let totalWeight = 0;
-    let taskCount = 0;
-    timelineGroups.forEach(g => {
-      g.tasks.forEach(t => {
-        taskCount++;
-        if (t.isTerminado) totalWeight += 1.0;
-        else if (t.isEmpezado) totalWeight += 0.5;
-      });
-    });
-    const overallProgress = taskCount > 0 ? Math.round((totalWeight / taskCount) * 100) : 0;
-
-    return {
-      success: true,
-      timelineGroups,
-      historicalNodes,
-      progress: overallProgress,
-      source: 'supabase',
-      timestamp: new Date().toISOString()
-    };
-  } catch (err) {
-    console.error('❌ Error en getUnitTimelineTasksFromSupabase:', err.message);
-    return null;
-  }
-}
-
-/**
- * Regla de almacenamiento en frío (Cold Storage):
- * Las órdenes completadas en Supabase (status = 'COMPLETADA') con close_date > 180 días (6 meses)
- * se descargan y respaldan en 'backend/data/ots_historico_cold.json' y se purgan de Supabase.
- */
-async function exportAndPurgeColdOrdersOlderThan180Days() {
-  if (!db || !db.isConfigured || !db.isConfigured()) return { success: false, reason: 'DB not configured' };
-
-  try {
-    const coldQ = await db.query(`
-      SELECT 
-        wo.id,
-        wo.ot_number,
-        COALESCE(t.patente, sm.patente, '') as patente,
-        CASE WHEN uwo.tractor_id IS NOT NULL THEN 'TRACTOR' ELSE 'SEMI' END as applied_to,
-        wo.entry_date,
-        wo.close_date,
-        COALESCE((
-          SELECT jsonb_agg(jsonb_build_object(
-            'id', wot.id,
-            'task_index', wot.task_index,
-            'sector_task', wot.sector_task,
-            'rubro', COALESCE(substring(wot.sector_task from '^\\[([^\\]]+)\\]'), 'GENERAL'),
-            'desc', trim(regexp_replace(wot.sector_task, '^\\[[^\\]]+\\]\\s*', '')),
-            'descripcion', trim(regexp_replace(wot.sector_task, '^\\[[^\\]]+\\]\\s*', '')),
-            'ubicacion', wot.ubicacion,
-            'box', wot.ubicacion,
-            'operario', COALESCE(s.name, ''),
-            'empezo', to_char(wot.empezo, 'DD/MM HH24:MI'),
-            'termino', to_char(wot.termino, 'DD/MM HH24:MI'),
-            'estado', wot.estado,
-            'porcentaje', wot.porcentaje,
-            'isTerminado', true
-          ) ORDER BY wot.task_index)
-          FROM panol.work_order_tasks wot
-          LEFT JOIN panol.staff s ON wot.worker_id = s.id
-          WHERE wot.work_order_id = wo.id
-        ), '[]'::jsonb) as tasks_snapshot,
-        wo.created_at
-      FROM panol.work_orders wo
-      LEFT JOIN panol.unit_work_orders uwo ON uwo.work_order_id = wo.id
-      LEFT JOIN tractores t ON uwo.tractor_id = t.id
-      LEFT JOIN semis sm ON uwo.semi_id = sm.id
-      WHERE wo.status = 'COMPLETADA'
-        AND wo.close_date < NOW() - INTERVAL '180 days';
-    `);
-
-    const coldOrders = coldQ.rows || [];
-    if (coldOrders.length === 0) {
-      console.log('❄️ [Cold Storage] No hay órdenes con más de 180 días para purgar.');
-      return { success: true, exportedCount: 0 };
-    }
-
-    const coldFilePath = path.resolve(__dirname, 'data/ots_historico_cold.json');
-    let existingArchive = [];
-    if (fs.existsSync(coldFilePath)) {
-      try {
-        const fileContent = fs.readFileSync(coldFilePath, 'utf8');
-        existingArchive = JSON.parse(fileContent);
-        if (!Array.isArray(existingArchive)) existingArchive = [];
-      } catch (eParse) {
-        console.warn('⚠️ Error leyendo ots_historico_cold.json existente, iniciando nuevo array:', eParse.message);
-        existingArchive = [];
-      }
-    }
-
-    const exportTimestamp = new Date().toISOString();
-    const formattedPurge = coldOrders.map(o => ({
-      id: o.id,
-      ot: o.ot_number,
-      patente: o.patente,
-      tipo: o.applied_to,
-      fechaIngreso: o.entry_date,
-      fechaCierre: o.close_date,
-      tasks: o.tasks_snapshot,
-      archivedAt: exportTimestamp,
-      motivo: 'Purga automática de 6 meses (180 días)'
-    }));
-
-    // Evitar duplicados por id
-    const existingIds = new Set(existingArchive.map(a => a.id || a.ot));
-    const newItems = formattedPurge.filter(p => !existingIds.has(p.id));
-    const updatedArchive = [...existingArchive, ...newItems];
-
-    fs.writeFileSync(coldFilePath, JSON.stringify(updatedArchive, null, 2), 'utf8');
-    console.log(`❄️ [Cold Storage] ${newItems.length} órdenes exportadas a ${coldFilePath}.`);
-
-    // Purgar de Supabase
-    const purgeIds = coldOrders.map(o => o.id);
-    await db.query("DELETE FROM panol.work_orders WHERE id = ANY($1::uuid[]);", [purgeIds]);
-    console.log(`🗑️ [Cold Storage Purge] ${purgeIds.length} órdenes eliminadas de panol.work_orders.`);
-
-    return { success: true, exportedCount: newItems.length, purgedCount: purgeIds.length };
-  } catch (err) {
-    console.error('❌ Error en exportAndPurgeColdOrdersOlderThan180Days:', err.message);
-    return { success: false, error: err.message };
-  }
-}
-
-/**
  * Obtiene las tareas estructuradas para el timeline de una unidad (Tractor + Semi).
  */
 async function getUnitTimelineTasks({ sheetsClient, spreadsheetId, tractorOt, semiOt, tractorPlate, semiPlate }) {
-  // 🐘 1. Prioridad Supabase: consultar PostgreSQL y snapshots JSONB
-  if (db && db.isConfigured && db.isConfigured()) {
-    try {
-      const sbResult = await getUnitTimelineTasksFromSupabase({
-        tractorOt,
-        semiOt,
-        tractorPlate,
-        semiPlate
-      });
-
-      if (sbResult && (sbResult.timelineGroups.length > 0 || sbResult.historicalNodes.length > 0)) {
-        return sbResult;
-      }
-
-      // Si no hay tareas en Supabase pero hay OTs especificadas, intentar ingesta rápida
-      if (tractorOt || semiOt) {
-        ingestOtsFromSheetsToSupabase({ sheetsClient, spreadsheetId }).catch(() => {});
-      }
-    } catch (eSb) {
-      console.warn('⚠️ [Supabase Timeline] Error consultando Postgres, usando Sheets como respaldo:', eSb.message);
-    }
-  }
-
-  if (!sheetsClient || !spreadsheetId) return { success: false, timelineGroups: [], historicalNodes: [] };
+  if (!sheetsClient || !spreadsheetId) return { success: false, timelineGroups: [] };
 
   const cleanTractorOt = String(tractorOt || '').trim().replace(/^0+/, '');
   const cleanSemiOt = String(semiOt || '').trim().replace(/^0+/, '');
@@ -2139,7 +1442,7 @@ async function getUnitTimelineTasks({ sheetsClient, spreadsheetId, tractorOt, se
   const cleanSemiPlate = String(semiPlate || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
 
   try {
-    // 2. Leer tareas directamente desde DB_OT_TASKS (Col A:M) como capa viva única (Sheets Fallback)
+    // 1. Leer tareas directamente desde DB_OT_TASKS (Col A:M) como capa viva única
     let tRows = [];
     try {
       const tasksRes = await sheetsClient.spreadsheets.values.get({
@@ -2499,45 +1802,39 @@ async function getCoordinacionBoard({ sheetsClient, spreadsheetId }) {
     // 1. Obtener operarios y ubicaciones
     const { staff, locations } = await getStaffAndLocations({ sheetsClient, spreadsheetId });
 
-    // 2. Mapeo de pares Tractor / Semi desde panol.v_flota_busqueda (Supabase)
+    // 2. Mapeo de pares Tractor / Semi desde DB_OT_LIST
     const plateToType = new Map();
     const pairByPlate = new Map();
     const pairByOt = new Map();
 
     try {
-      if (db && db.isConfigured && db.isConfigured()) {
-        const fleetRes = await db.query(`
-          SELECT 
-            COALESCE(tractor, '') as tractor,
-            COALESCE(semi, '') as semi,
-            COALESCE(tractor_ot, '') as tractor_ot,
-            COALESCE(semi_ot, '') as semi_ot,
-            COALESCE(active_ot_number, '') as active_ot_number
-          FROM panol.v_flota_busqueda
-          WHERE COALESCE(tractor, '') <> '' OR COALESCE(semi, '') <> '';
-        `);
-        (fleetRes.rows || []).forEach(r => {
-          const tractor = String(r.tractor || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-          const semi = String(r.semi || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
-          const otTractor = String(r.tractor_ot || r.active_ot_number || '').trim();
-          const otSemi = String(r.semi_ot || r.active_ot_number || '').trim();
+      const otListRes = await sheetsClient.spreadsheets.values.get({
+        spreadsheetId,
+        range: "'DB_OT_LIST'!A2:G500"
+      });
+      const otListRows = otListRes.data.values || [];
 
-          const pair = { tractor, semi, otTractor, otSemi };
+      otListRows.forEach(r => {
+        const tractor = String(r[0] || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+        const otTractor = String(r[1] || '').trim();
+        const semi = String(r[2] || '').trim().toUpperCase().replace(/[\s\-_.]/g, '');
+        const otSemi = String(r[3] || '').trim();
 
-          if (tractor) {
-            plateToType.set(tractor, 'TRACTOR');
-            pairByPlate.set(tractor, pair);
-          }
-          if (semi) {
-            plateToType.set(semi, 'SEMI');
-            pairByPlate.set(semi, pair);
-          }
-          if (otTractor) pairByOt.set(otTractor, pair);
-          if (otSemi) pairByOt.set(otSemi, pair);
-        });
-      }
+        const pair = { tractor, semi, otTractor, otSemi };
+
+        if (tractor) {
+          plateToType.set(tractor, 'TRACTOR');
+          pairByPlate.set(tractor, pair);
+        }
+        if (semi) {
+          plateToType.set(semi, 'SEMI');
+          pairByPlate.set(semi, pair);
+        }
+        if (otTractor) pairByOt.set(otTractor, pair);
+        if (otSemi) pairByOt.set(otSemi, pair);
+      });
     } catch (eList) {
-      console.warn('⚠️ Error al leer v_flota_busqueda para Coordinación:', eList.message);
+      console.warn('⚠️ Error al leer DB_OT_LIST para Coordinación:', eList.message);
     }
 
     // 3. Leer pestaña 'ots' (Cols A a I)
@@ -2916,10 +2213,6 @@ module.exports = {
   getStaffAndLocations,
   getCoordinacionBoard,
   saveOtCoordinacionJson,
-  saveAllCoordinacionBatch,
-  ingestOtsFromSheetsToSupabase,
-  updateTaskExecutionInSupabase,
-  getUnitTimelineTasksFromSupabase,
-  exportAndPurgeColdOrdersOlderThan180Days
+  saveAllCoordinacionBatch
 };
 

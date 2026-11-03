@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { TimelineGroup, HistoricalNode, StaffUser, TimelineTask } from '../../types';
+import { TimelineGroup, HistoricalNode, StaffUser } from '../../types';
 import { getUnitTimelineTasks, updateTaskExecution } from '../../services/tallerApi';
-import { getSocket } from '../../services/socket';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronUp, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 
 interface WorkOrderTimelineProps {
   tractorPlate: string;
@@ -30,57 +29,10 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [expandedHistIndex, setExpandedHistIndex] = useState<number | null>(null);
 
-  // Modal para confirmar reasignación de tarea si ya tenía otro operario asignado
-  const [reassignModal, setReassignModal] = useState<{
-    isOpen: boolean;
-    taskId: string;
-    otNum: string;
-    taskDesc: string;
-    currentAssignee: string;
-  } | null>(null);
-
   // Cargar tareas al cambiar de unidad u OT
   useEffect(() => {
     fetchTimeline();
   }, [tractorPlate, tractorOt, semiPlate, semiOt]);
-
-  // Sincronización en tiempo real vía WebSockets
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    const handleTaskChanged = (data: any) => {
-      if (!data) return;
-      const curOts = [tractorOt, semiOt].filter(Boolean);
-      if (data.otNumber && curOts.includes(data.otNumber)) {
-        fetchTimeline();
-      } else if (data.taskId) {
-        setTimelineGroups((prev) => {
-          const hasTask = prev.some((g) => g.tasks.some((t) => t.id === data.taskId));
-          if (hasTask) {
-            fetchTimeline();
-          }
-          return prev;
-        });
-      }
-    };
-
-    const handleWoCompleted = (data: any) => {
-      const curOts = [tractorOt, semiOt].filter(Boolean);
-      if (data && data.otNumber && curOts.includes(data.otNumber)) {
-        fetchTimeline();
-        if (onTasksUpdated) onTasksUpdated();
-      }
-    };
-
-    socket.on('task_status_changed', handleTaskChanged);
-    socket.on('work_order_completed', handleWoCompleted);
-
-    return () => {
-      socket.off('task_status_changed', handleTaskChanged);
-      socket.off('work_order_completed', handleWoCompleted);
-    };
-  }, [tractorOt, semiOt, tractorPlate, semiPlate]);
 
   const fetchTimeline = async () => {
     if (!tractorPlate && !tractorOt && !semiPlate && !semiOt) {
@@ -133,31 +85,8 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
     setProgressPercentage(pct);
   };
 
-  // Verificación antes de iniciar: si ya está asignada a otro operario, solicitar confirmación
-  const handleEmpeceClick = (task: TimelineTask, otNum: string) => {
-    const isAssignedToOther =
-      Boolean(task.workerId || task.assignedStaffId || task.operario) &&
-      Boolean(currentUser?.id || currentUser?.name) &&
-      (task.workerId || task.assignedStaffId
-        ? (task.workerId || task.assignedStaffId) !== currentUser?.id
-        : task.operario !== currentUser?.name && task.operario !== currentUser?.op_code);
-
-    if (isAssignedToOther) {
-      setReassignModal({
-        isOpen: true,
-        taskId: task.id,
-        otNum,
-        taskDesc: task.desc || task.descripcion || '',
-        currentAssignee: task.assignedStaffName || task.operario || 'otro operario',
-      });
-      return;
-    }
-
-    executeEmpece(task.id, otNum, task.desc || task.descripcion || '');
-  };
-
-  // Ejecución atómica de "Empecé"
-  const executeEmpece = async (taskId: string, otNum: string, taskDesc: string) => {
+  // Botón "Empecé"
+  const handleEmpece = async (taskId: string, otNum: string, taskDesc: string) => {
     const now = new Date();
     const d = String(now.getDate()).padStart(2, '0');
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -176,10 +105,6 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                 estado: 'EN_CURSO' as const,
                 empezo: nowStr,
                 operario: currentUser?.name || 'Operario',
-                assignedStaffId: currentUser?.id,
-                workerId: currentUser?.id,
-                assignedStaffName: currentUser?.name || 'Operario',
-                assignedOpCode: currentUser?.op_code || '',
               }
             : task
         ),
@@ -194,8 +119,6 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
         estado: 'EN_CURSO',
         empezo: nowStr,
         operario: currentUser?.name || 'Operario',
-        assignedStaffId: currentUser?.id,
-        workerId: currentUser?.id,
         ubicacion: activeBox ? `Box ${activeBox}` : '',
         otNumber: otNum,
         plate: tractorPlate || semiPlate,
@@ -228,10 +151,6 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                 isTerminado: true,
                 estado: 'COMPLETADA' as const,
                 termino: nowStr,
-                operario: currentUser?.name || task.operario || 'Operario',
-                assignedStaffId: currentUser?.id || task.assignedStaffId || task.workerId,
-                workerId: currentUser?.id || task.workerId || task.assignedStaffId,
-                assignedStaffName: currentUser?.name || task.assignedStaffName || 'Operario',
               }
             : task
         ),
@@ -246,11 +165,8 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
       await updateTaskExecution({
         taskId,
         estado: 'COMPLETADA',
-        isCompleted: true,
         termino: nowStr,
         operario: currentUser?.name || 'Operario',
-        assignedStaffId: currentUser?.id,
-        workerId: currentUser?.id,
         ubicacion: activeBox ? `Box ${activeBox}` : '',
         otNumber: otNum,
         plate: tractorPlate || semiPlate,
@@ -268,7 +184,7 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
   const hasHistorical = historicalNodes.length > 0;
 
   return (
-    <div className="bg-[#111622] border border-[#1E2530] rounded-xl p-2.5 shadow-sm flex flex-col flex-1 h-full overflow-hidden min-h-0 relative">
+    <div className="bg-[#111622] border border-[#1E2530] rounded-xl p-2.5 shadow-sm flex flex-col flex-1 h-full overflow-hidden min-h-0">
       {/* ========================================================================= */}
       {/* CABECERA (Solo texto: ORDEN DE TRABAJO & TAREAS + PROGRESO)              */}
       {/* ========================================================================= */}
@@ -330,7 +246,7 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
 
           return (
             <div key={`group-${groupIdx}`} className="flex flex-col">
-              {/* Encabezado del Nodo de OT */}
+              {/* Encabezado del Nodo de OT (Solo texto) */}
               <div className="flex items-center gap-2 py-1 sticky top-0 bg-[#111622]/95 backdrop-blur-sm z-10">
                 <span className="text-xs font-black font-mono text-white tracking-wider">
                   OT {group.ot}
@@ -362,62 +278,23 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                       (task.empezo && task.empezo.trim() !== ''))
                   );
 
-                  const assignedName = task.assignedStaffName || task.operario;
-                  const isAssignedToOther =
-                    Boolean(task.workerId || task.assignedStaffId || task.operario) &&
-                    Boolean(currentUser?.id || currentUser?.name) &&
-                    (task.workerId || task.assignedStaffId
-                      ? (task.workerId || task.assignedStaffId) !== currentUser?.id
-                      : task.operario !== currentUser?.name && task.operario !== currentUser?.op_code);
-                  const isAssignedToMe = Boolean(
-                    (task.workerId && task.workerId === currentUser?.id) ||
-                    (task.assignedStaffId && task.assignedStaffId === currentUser?.id) ||
-                    (task.operario && (task.operario === currentUser?.name || task.operario === currentUser?.op_code))
-                  );
-                  const isStartedByOther = isEmpezado && isAssignedToOther;
-                  const isStartedByMe = isEmpezado && !isAssignedToOther;
-                  const isAssignedPending = isAssignedToMe && !isEmpezado && !isDone;
-
                   return (
                     <div
                       key={task.id}
                       className={`p-2 rounded-lg border transition-all flex items-center justify-between gap-2 ${
                         isDone
                           ? 'bg-[#0B0F15]/70 border-[#1A2230]'
-                          : isStartedByOther
-                          ? 'bg-[#18140B] border-amber-500/40 shadow-sm'
                           : isEmpezado
                           ? 'bg-[#0E1520] border-[#10B981]/40 shadow-sm'
-                          : isAssignedPending
-                          ? 'bg-[#18140B] border-amber-500/40 shadow-sm'
                           : 'bg-[#0B0F15] border-[#1E2530] hover:border-zinc-700'
                       }`}
                     >
-                      {/* Descripción de Tarea + Rubro + Operario Asignado */}
+                      {/* Descripción de Tarea + Rubro (Solo texto) */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="px-1.5 py-0.2 rounded bg-[#161D2A] border border-[#202938] text-[9px] font-black text-white uppercase">
                             {task.rubro || 'GENERAL'}
                           </span>
-
-                          {/* Badge de Operario Responsable */}
-                          {assignedName && !isStartedByOther && (
-                            <span
-                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold border flex items-center gap-1 ${
-                                isEmpezado
-                                  ? 'bg-[#10B981]/15 border-[#10B981]/30 text-[#34D399]'
-                                  : isDone
-                                  ? 'bg-zinc-800/60 border-zinc-700/50 text-zinc-400'
-                                  : isAssignedPending
-                                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                                  : 'bg-sky-500/10 border-sky-500/20 text-sky-400'
-                              }`}
-                              title={isAssignedPending ? `Asignada por Coordinación: ${assignedName}` : `Operario asignado: ${assignedName}`}
-                            >
-                              <span className="text-[8px]">👤</span> {assignedName}
-                              {isAssignedPending && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-0.5" />}
-                            </span>
-                          )}
 
                           {isDone && (
                             <span className="text-[9px] font-bold text-zinc-500">
@@ -425,14 +302,7 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                             </span>
                           )}
 
-                          {isStartedByOther && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-                              En curso por {assignedName}
-                            </span>
-                          )}
-
-                          {isStartedByMe && (
+                          {isEmpezado && (
                             <span className="text-[9px] font-bold text-[#34D399] animate-pulse">
                               En curso {task.empezo ? `(${task.empezo})` : ''}
                             </span>
@@ -448,57 +318,32 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                         </p>
                       </div>
 
-                      {/* Botones de Acción */}
+                      {/* Botones de Acción (Solo texto) */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {isStartedByOther ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEmpeceClick(task, group.ot);
-                            }}
-                            className="px-2.5 py-1 rounded text-[11px] font-black bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 cursor-pointer shadow-sm transition-all"
-                            title={`En curso por ${assignedName}. Clic para tomar o reasignar esta tarea.`}
-                          >
-                            Reasignar
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEmpeceClick(task, group.ot);
-                            }}
-                            disabled={isDone || isEmpezado}
-                            className={`px-2.5 py-1 rounded text-[11px] font-black transition-all ${
-                              isEmpezado
-                                ? 'bg-[#10B981]/15 text-[#34D399] border border-[#10B981]/40 cursor-default'
-                                : isDone
-                                ? 'bg-[#161D2A] text-zinc-600 border border-[#202938] cursor-not-allowed opacity-50'
-                                : 'bg-[#00A86B] hover:bg-[#009E60] text-white shadow-sm cursor-pointer'
-                            }`}
-                          >
-                            Empecé
-                          </button>
-                        )}
+                        <button
+                          onClick={() =>
+                            handleEmpece(task.id, group.ot, task.desc || task.descripcion || '')
+                          }
+                          disabled={isDone || isEmpezado}
+                          className={`px-2.5 py-1 rounded text-[11px] font-black transition-all ${
+                            isEmpezado
+                              ? 'bg-[#10B981]/15 text-[#34D399] border border-[#10B981]/40 cursor-default'
+                              : isDone
+                              ? 'bg-[#161D2A] text-zinc-600 border border-[#202938] cursor-not-allowed opacity-50'
+                              : 'bg-[#00A86B] hover:bg-[#009E60] text-white shadow-sm cursor-pointer'
+                          }`}
+                        >
+                          Empecé
+                        </button>
 
                         <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleTermine(task.id, group.ot, task.desc || task.descripcion || '');
-                          }}
-                          disabled={!isEmpezado || isDone || isStartedByOther}
-                          title={
-                            isStartedByOther
-                              ? `En curso por ${assignedName}. Debes reasignártela primero para poder finalizarla.`
-                              : undefined
+                          onClick={() =>
+                            handleTermine(task.id, group.ot, task.desc || task.descripcion || '')
                           }
+                          disabled={!isEmpezado || isDone}
                           className={`px-2.5 py-1 rounded text-[11px] font-black transition-all ${
                             isDone
                               ? 'bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/30 cursor-default'
-                              : isStartedByOther
-                              ? 'bg-[#161D2A] text-zinc-600 border border-[#202938] cursor-not-allowed opacity-40'
                               : isEmpezado
                               ? 'bg-[#059669] hover:bg-[#10B981] text-white shadow-md cursor-pointer animate-pulse'
                               : 'bg-[#161D2A] text-zinc-600 border border-[#202938] cursor-not-allowed opacity-50'
@@ -544,15 +389,6 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                         <span className="text-[11px] font-black font-mono text-zinc-200">
                           {otsLabel}
                         </span>
-                        {hist.status === 'INCOMPLETA' ? (
-                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                            INCOMPLETA
-                          </span>
-                        ) : (
-                          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            100%
-                          </span>
-                        )}
                         {hist.date && (
                           <span className="text-[10px] font-mono text-zinc-400">
                             · {hist.date}
@@ -573,29 +409,17 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
                     {isExpanded && (
                       <div className="px-2.5 pb-2 pt-1 border-t border-[#1E2530] bg-[#070A0F]/60 space-y-1">
                         {hist.tasks && hist.tasks.length > 0 ? (
-                          hist.tasks.map((ht: any, htIdx: number) => (
+                          hist.tasks.map((ht, htIdx) => (
                             <div
                               key={htIdx}
-                              className="text-xs py-1 px-2 rounded bg-[#111622]/80 border border-[#1E2530] flex items-center justify-between gap-1.5"
+                              className="text-xs py-1 px-2 rounded bg-[#111622]/80 border border-[#1E2530] flex items-center gap-1.5"
                             >
-                              <div className="flex items-center gap-1.5 min-w-0">
-                                {ht.isTerminado ? (
-                                  <span className="text-[9px] text-emerald-400 font-bold shrink-0">✓</span>
-                                ) : (
-                                  <span className="text-[9px] text-amber-400 font-bold shrink-0">○</span>
-                                )}
-                                <span className="font-extrabold text-zinc-300 uppercase text-[9px] shrink-0">
-                                  {ht.rubro || 'GENERAL'}:
-                                </span>
-                                <span className="text-zinc-400 text-[11px] truncate">
-                                  {ht.desc || ht.descripcion}
-                                </span>
-                              </div>
-                              {ht.operario && (
-                                <span className="text-[9px] text-zinc-400 font-bold shrink-0 flex items-center gap-0.5">
-                                  👤 {ht.operario}
-                                </span>
-                              )}
+                              <span className="font-extrabold text-zinc-300 uppercase text-[9px]">
+                                {ht.rubro || 'GENERAL'}:
+                              </span>
+                              <span className="text-zinc-400 text-[11px] truncate">
+                                {ht.desc || ht.descripcion}
+                              </span>
                             </div>
                           ))
                         ) : (
@@ -612,57 +436,6 @@ export const WorkOrderTimeline: React.FC<WorkOrderTimelineProps> = ({
           </div>
         )}
       </div>
-
-      {/* ========================================================================= */}
-      {/* MODAL DE CONFIRMACIÓN: REASIGNACIÓN DE TAREA PRE-ASIGNADA                 */}
-      {/* ========================================================================= */}
-      {reassignModal && reassignModal.isOpen && (
-        <div className="absolute inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center z-50 p-4 rounded-xl">
-          <div className="bg-[#111622] border border-[#2A3447] rounded-xl p-4 max-w-sm w-full shadow-2xl">
-            <div className="flex items-center gap-2 text-amber-400 mb-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <h4 className="text-xs font-black uppercase tracking-wider text-white">
-                Reasignar Tarea Operativa
-              </h4>
-            </div>
-
-            <p className="text-[11px] text-zinc-300 leading-relaxed mb-2">
-              Esta tarea (<strong className="text-white">{reassignModal.taskDesc}</strong>) está actualmente pre-asignada a:
-            </p>
-
-            <div className="bg-[#161D2A] border border-[#202938] rounded p-2 mb-3 text-center">
-              <span className="text-xs font-black text-amber-400">
-                👤 {reassignModal.currentAssignee}
-              </span>
-            </div>
-
-            <p className="text-[11px] text-zinc-400 mb-4">
-              ¿Deseas transferirla a tu nombre (<strong className="text-[#10B981]">{currentUser?.name || 'Tu usuario'}</strong>) e iniciarla ahora?
-            </p>
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setReassignModal(null)}
-                className="px-3 py-1.5 rounded bg-[#161D2A] hover:bg-[#202938] text-[11px] font-bold text-zinc-400 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const { taskId, otNum, taskDesc } = reassignModal;
-                  setReassignModal(null);
-                  executeEmpece(taskId, otNum, taskDesc);
-                }}
-                className="px-3.5 py-1.5 rounded bg-[#00A86B] hover:bg-[#009E60] text-[11px] font-black text-white shadow-md transition-all"
-              >
-                Sí, Reasignar e Iniciar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
