@@ -81,7 +81,9 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
       setDetalle(novedadEnEdicion.detalle || '');
 
       if (novedadEnEdicion.fecha_objetivo) {
-        const parts = novedadEnEdicion.fecha_objetivo.split('-');
+        const clean = String(novedadEnEdicion.fecha_objetivo).split('T')[0];
+        setFechaObjetivo(clean);
+        const parts = clean.split('-');
         if (parts.length === 3) {
           setCalendarMonth(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
         }
@@ -165,7 +167,8 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
       if (!q) return true;
       return (
         (f.nom && f.nom.toLowerCase().includes(q)) ||
-        (f.tractor && f.tractor.toLowerCase().includes(q))
+        (f.tractor && f.tractor.toLowerCase().includes(q)) ||
+        (f.n_ute && f.n_ute.toLowerCase().includes(q))
       );
     })
     .slice(0, 20);

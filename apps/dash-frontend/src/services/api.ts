@@ -16,6 +16,19 @@ function resolveBackendUrl(url?: string): string {
 
 const API_BASE = resolveBackendUrl((import.meta as any).env?.VITE_API_URL);
 
+export function normalizarNovedad(n: any): Novedad {
+  if (!n) return n;
+  let fechaObj = n.fecha_objetivo;
+  if (fechaObj) {
+    fechaObj = String(fechaObj).split('T')[0].trim();
+    if (fechaObj === '' || fechaObj === 'null') fechaObj = null;
+  }
+  return {
+    ...n,
+    fecha_objetivo: fechaObj || null
+  };
+}
+
 export const api = {
   async fetchNovedades(): Promise<Novedad[]> {
     // ⚡ Priorizar vista relacional directa public.view_cards_diarias con Column Pruning
@@ -23,7 +36,9 @@ export const api = {
       const res = await fetch(`${API_BASE}/api/views/cards?limit=150`);
       if (res.ok) {
         const json = await res.json();
-        if (json.datos && Array.isArray(json.datos)) return json.datos;
+        if (json.datos && Array.isArray(json.datos)) {
+          return json.datos.map(normalizarNovedad);
+        }
       }
     } catch (e) {
       console.warn('⚠️ [API] Fallback de cards a endpoint /api/dash/novedades:', e);
@@ -35,10 +50,10 @@ export const api = {
       const fallbackRes = await fetch(`${API_BASE}/api/novedades`);
       if (!fallbackRes.ok) throw new Error('Error al cargar novedades');
       const json = await fallbackRes.json();
-      return json.data || [];
+      return (json.data || []).map(normalizarNovedad);
     }
     const json = await res.json();
-    return json.data || [];
+    return (json.data || []).map(normalizarNovedad);
   },
 
   // 🎯 Patrón "Listen on Table, Fetch from View": Obtiene solo la fila modificada (< 1ms en Postgres)
@@ -47,7 +62,8 @@ export const api = {
       const res = await fetch(`${API_BASE}/api/views/cards?id=${encodeURIComponent(id)}&limit=1`);
       if (res.ok) {
         const json = await res.json();
-        return json.datos?.[0] || null;
+        const item = json.datos?.[0];
+        return item ? normalizarNovedad(item) : null;
       }
     } catch (e) {
       console.warn('⚠️ Error al consultar fila única de novedad en vista:', e);
@@ -63,7 +79,7 @@ export const api = {
       const res = await fetch(`${API_BASE}/api/views/cards?ids=${idsParam}&limit=${ids.length}`);
       if (res.ok) {
         const json = await res.json();
-        return json.datos || [];
+        return (json.datos || []).map(normalizarNovedad);
       }
     } catch (e) {
       console.warn('⚠️ Error al consultar lote de novedades en vista:', e);

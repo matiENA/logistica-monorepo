@@ -50,7 +50,8 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
     if (!q) return true;
     return (
       (f.nom && f.nom.toLowerCase().includes(q)) ||
-      (f.tractor && f.tractor.toLowerCase().includes(q))
+      (f.tractor && f.tractor.toLowerCase().includes(q)) ||
+      (f.n_ute && f.n_ute.toLowerCase().includes(q))
     );
   }).slice(0, 25);
 

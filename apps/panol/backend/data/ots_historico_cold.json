@@ -9,7 +9,7 @@
     "cierreRespaldo": "",
     "payload": "",
     "confirmacion": "Transitorio",
-    "archivedAt": "2026-11-03T18:16:46.271Z"
+    "archivedAt": "2026-11-04T18:48:55.038Z"
   },
   {
     "key": "AB882WX - 00004142",
@@ -21,7 +21,7 @@
     "cierreRespaldo": "[Electricidad - Cambiar Sensor Sobrellenado C6] - Op: Betancourt Felipe Posada Carrazan Juan Mateo - Ini: 16/10/2025 14:07:00 - Fin: 16/10/2025 14:07:00 - Obs: Hecho | [Electricidad - Problema Electrico] - Op: Betancourt Felipe - Ini: 16/10/2025 14:08:00 - Fin: 16/10/2025 14:08:00 - Obs: Realizada reparacion de corto cirtuitode los conectores de retroceso del semi. | [Gomeria - Cambio De Cubierta] - Op: Muñoz Franco - Ini: 22/10/2025 11:49:00 - Fin: 22/10/2025 13:49:00 - Obs: Se cambio una cubierta de eje neumatico",
     "payload": "",
     "confirmacion": "Sin confirmar",
-    "archivedAt": "2026-11-03T18:16:46.271Z"
+    "archivedAt": "2026-11-04T18:48:55.038Z"
   },
   {
     "key": "JLG - 00003253",
@@ -33,7 +33,7 @@
     "cierreRespaldo": "",
     "payload": "",
     "confirmacion": "",
-    "archivedAt": "2026-11-03T18:16:46.271Z"
+    "archivedAt": "2026-11-04T18:48:55.038Z"
   },
   {
     "key": "JLG - 00003254",
@@ -45,6 +45,6 @@
     "cierreRespaldo": "",
     "payload": "",
     "confirmacion": "",
-    "archivedAt": "2026-11-03T18:16:46.271Z"
+    "archivedAt": "2026-11-04T18:48:55.038Z"
   }
 ]

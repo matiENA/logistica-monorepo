@@ -127,6 +127,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
       ? novedad.n_ute.trim()
       : extraerDigitosPatente(novedad.tractor) || 'S/D';
 
+  // Formateo de timestamps: "HH:mm dd/mm" (hora y solo dd/mm sin aa/yy)
   const formatearFecha = (ts?: string, id?: string | number) => {
     let d = ts ? new Date(ts) : null;
     if (!d || isNaN(d.getTime())) {
@@ -137,18 +138,37 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
       }
     }
     try {
-      const formatter = new Intl.DateTimeFormat('es-AR', {
+      const options: Intl.DateTimeFormatOptions = {
         timeZone: 'America/Argentina/Buenos_Aires',
-        day: 'numeric',
-        month: 'short',
+        day: '2-digit',
+        month: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
         hour12: false
-      });
-      return formatter.format(d);
+      };
+      const formatter = new Intl.DateTimeFormat('es-AR', options);
+      const parts = formatter.formatToParts(d);
+      const day = (parts.find((p) => p.type === 'day')?.value || '').padStart(2, '0');
+      const month = (parts.find((p) => p.type === 'month')?.value || '').padStart(2, '0');
+      const hour = (parts.find((p) => p.type === 'hour')?.value || '').padStart(2, '0');
+      const minute = (parts.find((p) => p.type === 'minute')?.value || '').padStart(2, '0');
+      return `${hour}:${minute} ${day}/${month}`;
     } catch {
       return '';
     }
+  };
+
+  // Formateo de fecha objetivo: "dd/mm" sin año (sin aa/yy)
+  const formatearFechaObjetivo = (fechaRaw?: string | null) => {
+    if (!fechaRaw) return '';
+    const clean = String(fechaRaw).split('T')[0].trim();
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+      const dia = parts[2].padStart(2, '0');
+      const mes = parts[1].padStart(2, '0');
+      return `${dia}/${mes}`;
+    }
+    return clean;
   };
 
   const usuariosFiltrados = (usuarios || [])
@@ -619,9 +639,10 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
           {novedad.fecha_objetivo && (
             <span
               className={`px-1.5 py-0.5 text-[9px] font-black ${cfg.text} whitespace-nowrap rounded border ${cfg.border} inline-flex items-center gap-1`}
+              title={`Fecha Objetivo: ${formatearFechaObjetivo(novedad.fecha_objetivo)}`}
             >
               <Calendar className="w-2.5 h-2.5 shrink-0 stroke-[2.2]" />
-              {novedad.fecha_objetivo.split('-').reverse().join('/')}
+              {formatearFechaObjetivo(novedad.fecha_objetivo)}
             </span>
           )}
         </div>

@@ -12,24 +12,63 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
     // GET /api/dash/flota — Lista ligera para autocompletado y enriquecimiento
     // Devuelve estructura limpia: _safeId, nom, srv_chofer, ut, dias
     router.get('/flota', async (req, res) => {
-        // 1. Si cache en RAM está disponible, devolver de RAM
+        const { normalizar } = require('../utils/shared');
+        const mapaMovimientos = {};
+
+        // Enriquecer con view_movimientos (pareos activos 1:1 en Postgres)
+        if (db && db.isConfigured()) {
+            try {
+                const movRes = await db.query(`
+                    SELECT chofer_id, chofer_nombre, tractor, semi, cisternado, n_ute, chofer_servicio, unidad_id 
+                    FROM public.view_movimientos
+                `);
+                (movRes.rows || []).forEach(m => {
+                    if (m.chofer_id) mapaMovimientos[m.chofer_id] = m;
+                    if (m.chofer_nombre) {
+                        const norm = normalizar(m.chofer_nombre);
+                        mapaMovimientos[norm] = m;
+                        if (norm.includes('ñ')) mapaMovimientos[norm.replace(/ñ/g, 'n')] = m;
+                    }
+                });
+            } catch (errMov) {
+                console.warn("⚠️ [DASH] Error consultando view_movimientos para enriquecer flota:", errMov.message);
+            }
+        }
+
+        // 1. Si cache en RAM está disponible, devolver de RAM enriquecida con view_movimientos
         if (cacheDatosGlobales.diagramas && cacheDatosGlobales.diagramas.diagramas) {
-            const flotaLite = cacheDatosGlobales.diagramas.diagramas.map(ch => ({
-                _safeId: ch._safeId,
-                nom: ch.nom,
-                srv_chofer: ch.srv_chofer || 'S/A',
-                dni: ch.dni || '',
-                foto: ch.foto || '',
-                ut: ch.ut || null,
-                tractor: ch.tractor || ch.ut?.tractor?.patente || '',
-                semi: ch.semi || ch.ut?.semi?.patente || '',
-                cisternado: ch.cisternado || ch.ut?.semi?.cisternado || ch.ut?.tractor?.semi?.cisternado || ch.ut?.tractor?.cisternado || '',
-                n_ute: ch.n_ute || ch.ut?.n_ute || '',
-                dias: ch.dias || {},
-                diagrama_tipo: ch.diagrama_tipo || null,
-                diagrama_json: ch.diagrama_json || null,
-                contabilizador: ch.contabilizador || null
-            }));
+            const flotaLite = cacheDatosGlobales.diagramas.diagramas.map(ch => {
+                const norm = normalizar(ch.nom || '');
+                const mov = (ch.id && mapaMovimientos[ch.id]) || mapaMovimientos[norm] || null;
+
+                const tractorFinal = mov?.tractor || ch.tractor || ch.ut?.tractor?.patente || '';
+                const nUteFinal = mov?.n_ute || ch.n_ute || ch.ut?.n_ute || '';
+                const semiFinal = mov?.semi || ch.semi || ch.ut?.semi?.patente || '';
+                const cisternadoFinal = mov?.cisternado || ch.cisternado || ch.ut?.semi?.cisternado || '';
+                const srvFinal = mov?.chofer_servicio || ch.srv_chofer || ch.srv || 'S/A';
+
+                return {
+                    _safeId: ch._safeId,
+                    nom: ch.nom,
+                    nombre: ch.nom,
+                    chofer_id: ch.id || mov?.chofer_id || null,
+                    srv_chofer: srvFinal,
+                    srv: srvFinal,
+                    servicio: srvFinal,
+                    dni: ch.dni || '',
+                    foto: ch.foto || '',
+                    ut: ch.ut || (mov?.unidad_id ? { id: mov.unidad_id, n_ute: nUteFinal } : null),
+                    unidad_id: ch.ut?.id || mov?.unidad_id || null,
+                    tractor: tractorFinal,
+                    semi: semiFinal,
+                    cisternado: cisternadoFinal,
+                    n_ute: nUteFinal,
+                    dias: ch.dias || {},
+                    diagrama_tipo: ch.diagrama_tipo || null,
+                    diagrama_json: ch.diagrama_json || null,
+                    contabilizador: ch.contabilizador || null
+                };
+            });
 
             return res.json({
                 success: true,
@@ -735,18 +774,18 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
     // 🚀 ENDPOINTS COMPATIBILIDAD DASH (Hot RAM + PostgreSQL Directo)
     // ==============================================================
 
-    // GET /api/dash/terminales — Catálogo de terminales desde usuarios_terminales
+    // GET /api/dash/terminales — Catálogo de terminales activas desde public.terminales
     router.get('/terminales', async (req, res) => {
         try {
             if (db && db.isConfigured()) {
                 const { rows } = await db.query(
-                    'SELECT id, codigo, nombre, activo FROM usuarios_terminales WHERE activo = true ORDER BY nombre ASC'
+                    'SELECT id, codigo, nombre, activo FROM public.terminales WHERE activo = true ORDER BY nombre ASC'
                 );
                 return res.json({ success: true, data: rows || [] });
             }
             res.json({ success: true, data: [] });
         } catch (e) {
-            console.warn("⚠️ [DASH] Error consultando usuarios_terminales:", e.message);
+            console.warn("⚠️ [DASH] Error consultando public.terminales:", e.message);
             res.json({ success: true, data: [] });
         }
     });

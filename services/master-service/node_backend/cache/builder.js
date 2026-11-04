@@ -145,8 +145,14 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
                     console.warn("⚠️ [RAM Supabase] Error consultando chofer_documentacion en Postgres:", e.message);
                     return { rows: [] };
                 }),
-                db.query('SELECT id, servicio_id, patente, n_interno, marca, modelo, vtv, mas, estado FROM tractores ORDER BY patente ASC').catch(() => ({ rows: [] })),
-                db.query('SELECT id, servicio_id, patente, n_interno, marca, cisternado, esp_es, vi, ve, vtv, mas, estado FROM semis ORDER BY patente ASC').catch(() => ({ rows: [] })),
+                db.query('SELECT id, servicio_id, patente, marca, modelo, vtv, mas, estado FROM tractores ORDER BY patente ASC').catch(e => {
+                    console.warn("⚠️ [RAM Supabase] Error consultando tractores en Postgres:", e.message);
+                    return { rows: [] };
+                }),
+                db.query('SELECT id, servicio_id, patente, marca, cisternado, esp_es, vi, ve, vtv, mas, estado FROM semis ORDER BY patente ASC').catch(e => {
+                    console.warn("⚠️ [RAM Supabase] Error consultando semis en Postgres:", e.message);
+                    return { rows: [] };
+                }),
                 db.query('SELECT id, denominacion, spreadsheet_id, activo FROM servicios_unidades ORDER BY denominacion ASC').catch(() => ({ rows: [] })),
                 db.query('SELECT id, denominacion, servicio_unidad_id, spreadsheet_id, activo FROM servicios_choferes ORDER BY denominacion ASC').catch(() => ({ rows: [] }))
             ];
@@ -158,10 +164,7 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
                         FROM view_calendario_km
                         WHERE fecha >= (CURRENT_DATE - ($1 || ' days')::interval)
                         ORDER BY fecha ASC
-                    `, [KM_RAM_DIAS]).catch(e => {
-                        console.warn("⚠️ [RAM Supabase] Error consultando view_calendario_km en Postgres:", e.message);
-                        return { rows: [] };
-                    })
+                    `, [KM_RAM_DIAS]).catch(() => ({ rows: [] }))
                 );
             }
 
