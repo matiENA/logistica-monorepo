@@ -188,15 +188,16 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       tiposNovedad.forEach((tn) => {
         if (tn.codigo === 'LIBRES') return; // Se renderiza en LibresRow
         const fallback = CATEGORIAS_CONFIG[tn.codigo] || {
-          titulo: tn.titulo.toUpperCase(),
+          titulo: (tn?.titulo || (tn as any)?.denominacion || tn?.codigo || '').toUpperCase(),
           colorText: 'text-indigo-500',
           borderColor: 'border-indigo-500'
         };
+        const tituloTexto = (tn?.titulo || (tn as any)?.denominacion || fallback.titulo || tn?.codigo || '').toUpperCase();
         map[tn.codigo] = {
-          titulo: tn.titulo.toUpperCase(),
+          titulo: tituloTexto,
           colorText: fallback.colorText,
           borderColor: fallback.borderColor,
-          bgHex: tn.bg_color || undefined
+          bgHex: tn.bg_color || (tn as any).color || undefined
         };
       });
     } else {
@@ -273,7 +274,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     const mencionesNovs = activas.filter(
       (n) =>
         Array.isArray(n.menciones) &&
-        n.menciones.some((m) => m.toUpperCase() === usuarioActual)
+        n.menciones.some((m) => (m || '').toUpperCase() === usuarioActual)
     );
     if (mencionesNovs.length === 0) {
       return (

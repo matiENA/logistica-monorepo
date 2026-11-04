@@ -147,7 +147,7 @@ export const LibresRow: React.FC<LibresRowProps> = ({
                 bg: t.color_bg || CONFIG_TERMINALES[t.codigo]?.bg || '#475569',
                 text: t.color_text || CONFIG_TERMINALES[t.codigo]?.text || '#FFFFFF'
               };
-              const esActivo = (terminalMenu.novedad.terminal || '').toUpperCase() === t.codigo.toUpperCase();
+              const esActivo = (terminalMenu.novedad.terminal || '').toUpperCase() === (t?.codigo || '').toUpperCase();
 
               return (
                 <button

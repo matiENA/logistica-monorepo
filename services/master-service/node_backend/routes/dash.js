@@ -756,7 +756,7 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
         try {
             if (db && db.isConfigured()) {
                 const { rows } = await db.query(
-                    'SELECT id, codigo, denominacion, descripcion, color, orden, activo FROM tipos_novedad WHERE activo = true ORDER BY orden ASC'
+                    'SELECT id, codigo, titulo, titulo AS denominacion, descripcion, bg_color, bg_color AS color, text_color, requiere_fecha_objetivo, imprime_nota_movimientos, orden, activo FROM tipos_novedad WHERE activo = true ORDER BY orden ASC'
                 );
                 return res.json({ success: true, data: rows || [] });
             }

@@ -150,11 +150,12 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
     }
   };
 
-  const usuariosFiltrados = usuarios
-    .map((u) => u.usuario.toUpperCase())
+  const usuariosFiltrados = (usuarios || [])
+    .map((u) => (typeof u === 'string' ? u : u?.usuario || '').trim().toUpperCase())
     .filter(
       (u) =>
-        u.includes(textoMencion.toUpperCase()) &&
+        u.length > 0 &&
+        u.includes((textoMencion || '').toUpperCase()) &&
         !(novedad.menciones || []).includes(u)
     )
     .slice(0, 5);
@@ -162,7 +163,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
   const esLibre = novedad.tipo_novedad === 'LIBRES';
   const srvCfg = obtenerColorServicio(novedad.srv || novedad.servicio);
   const listaOpcionesServicios = servicios && servicios.length > 0
-    ? Array.from(new Set(servicios.map((s) => s.denominacion.trim().toUpperCase())))
+    ? Array.from(new Set(servicios.map((s) => (s?.denominacion || '').trim().toUpperCase()).filter(Boolean)))
     : ['LIVIANO', 'METANOL', 'ABAST', 'GLP', 'CAMPO', 'GRALES', 'PASIVO EN BASE'];
 
   // ==========================================

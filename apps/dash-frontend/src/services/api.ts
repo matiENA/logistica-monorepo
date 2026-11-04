@@ -86,7 +86,19 @@ export const api = {
       const res = await fetch(`${API_BASE}/api/dash/tipos-novedad`);
       if (!res.ok) return [];
       const json = await res.json();
-      return json.data || [];
+      const raw = json.data || [];
+      return raw.map((t: any) => ({
+        id: t.id || '',
+        codigo: t.codigo || '',
+        titulo: t.titulo || t.denominacion || t.codigo || '',
+        descripcion: t.descripcion || null,
+        bg_color: t.bg_color || t.color || '#6366F1',
+        text_color: t.text_color || '#FFFFFF',
+        requiere_fecha_objetivo: Boolean(t.requiere_fecha_objetivo),
+        imprime_nota_movimientos: Boolean(t.imprime_nota_movimientos),
+        activo: t.activo !== false,
+        orden: Number(t.orden) || 0
+      }));
     } catch (e) {
       console.warn('No se pudo cargar tipos de novedad:', e);
       return [];
@@ -133,7 +145,21 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/dash/usuarios`);
     if (!res.ok) throw new Error('Error al cargar usuarios');
     const json = await res.json();
-    return json.data || [];
+    const raw = json.data || [];
+    return raw
+      .map((item: any) => {
+        if (typeof item === 'string') {
+          const u = item.trim().toUpperCase();
+          return { id: u, usuario: u, rol: 'operador' };
+        }
+        const nom = String(item?.usuario || item?.nombre || '').trim().toUpperCase();
+        return {
+          id: item?.id || nom || '',
+          usuario: nom,
+          rol: item?.rol || 'operador'
+        };
+      })
+      .filter((u: Usuario) => u.usuario.length > 0);
   },
 
   async despacharNovedad(body: { action: 'nueva' | 'editar' | 'resolver'; id_novedad?: number | string; payload?: any }) {

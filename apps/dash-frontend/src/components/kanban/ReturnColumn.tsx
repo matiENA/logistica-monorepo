@@ -86,24 +86,24 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
     if (retornos && retornos.length > 0) {
       const mapaTractor: Record<string, string> = {};
       flota.forEach((f) => {
-        if (f.nom && f.tractor) {
-          mapaTractor[f.nom.trim().toUpperCase()] = f.tractor;
+        if (f?.nom && f?.tractor) {
+          mapaTractor[(f.nom || '').trim().toUpperCase()] = f.tractor;
         }
       });
 
       const enriquecer = (r: RetornoItem): RetornoItem => ({
         ...r,
-        tractor: r.tractor || mapaTractor[(r.nom || '').trim().toUpperCase()] || ''
+        tractor: r.tractor || mapaTractor[(r?.nom || '').trim().toUpperCase()] || ''
       });
 
       hoy = retornos
-        .filter((r) => (r.retorna_cuando || '').toUpperCase() === 'HOY')
+        .filter((r) => (r?.retorna_cuando || '').toUpperCase() === 'HOY')
         .map(enriquecer);
       manana = retornos
         .filter(
           (r) =>
-            (r.retorna_cuando || '').toUpperCase() === 'MANANA' ||
-            (r.retorna_cuando || '').toUpperCase() === 'MAÑANA'
+            (r?.retorna_cuando || '').toUpperCase() === 'MANANA' ||
+            (r?.retorna_cuando || '').toUpperCase() === 'MAÑANA'
         )
         .map(enriquecer);
     } else {
