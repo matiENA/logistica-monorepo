@@ -1784,12 +1784,27 @@ function iniciarCachePolling(cacheDatosGlobales, io, ioDash) {
         console.log("⏱️ Refresco periódico desde Supabase (5 min, Dirty Check activado)..."); 
         flujoEncoladoGlobal(cacheDatosGlobales, io, ioDash, { forceFull: false, recargarKm: false }); 
     }, 5 * 60 * 1000);
+}
+
+/**
+ * 🚀 Sincronizador Autónomo de Particiones (Google Sheets -> Supabase)
+ * Se ejecuta independientemente del estado de la memoria RAM (ENABLE_RAM_CACHE_POLLING)
+ * para garantizar persistencia continua de datos operativos en Render Cloud.
+ */
+function iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash) {
+    const ENABLE_PARTICIONES_SYNC = process.env.ENABLE_PARTICIONES_SYNC !== 'false';
+    if (!ENABLE_PARTICIONES_SYNC) {
+        console.log("⚡ [Backend] Auto-Sync de Particiones 5, 6 y 7 deshabilitado por configuración (ENABLE_PARTICIONES_SYNC=false).");
+        return;
+    }
+
+    console.log("🚀 [Backend] Sincronizador Autónomo de Particiones ACTIVADO (P6 cada 5m, P5 cada 15m, P7 cada 30m).");
 
     // 🔄 Sincronización autónoma de Partición 6 (Movimientos Activos y Desuniones)
-    // Mantiene Supabase y Hot RAM al día desde Google Sheets cuando n8n está inactivo
     setTimeout(() => {
         try {
             const { sincronizarMovimientosDesdeSheets } = require('../routes/movimientos');
+            console.log("🚀 [Partición 6 Auto-Sync] Disparando barrido inicial de Movimientos...");
             sincronizarMovimientosDesdeSheets(cacheDatosGlobales, io, ioDash).catch(e => {
                 console.warn("⚠️ [Partición 6 Auto-Sync] Advertencia en ciclo inicial:", e.message);
             });
@@ -1806,13 +1821,13 @@ function iniciarCachePolling(cacheDatosGlobales, io, ioDash) {
                 console.warn("⚠️ [Partición 6 Auto-Sync] Error en ciclo periódico:", eSync.message);
             }
         }, 5 * 60 * 1000);
-    }, 45 * 1000); // Primer barrido a los 45s tras el arranque
+    }, 15 * 1000); // Primer barrido a los 15s tras el arranque
 
     // 📅 Sincronización autónoma de Partición 5 (Días Diagrama - EOR)
-    // Mantiene Supabase y Hot RAM al día desde Google Sheets sin depender de n8n local
     setTimeout(() => {
         try {
             const { sincronizarDiagramasDesdeSheets } = require('../routes/diagramasSync');
+            console.log("🚀 [Partición 5 Auto-Sync] Disparando barrido inicial de Días Diagrama...");
             sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash).catch(e => {
                 console.warn("⚠️ [Partición 5 Auto-Sync] Advertencia en ciclo inicial:", e.message);
             });
@@ -1829,13 +1844,13 @@ function iniciarCachePolling(cacheDatosGlobales, io, ioDash) {
                 console.warn("⚠️ [Partición 5 Auto-Sync] Error en ciclo periódico:", eSync.message);
             }
         }, 15 * 60 * 1000); // Cada 15 minutos (Diffing O(1) Zero Egress)
-    }, 60 * 1000); // Primer barrido a los 60s tras el arranque
+    }, 30 * 1000); // Primer barrido a los 30s tras el arranque
 
     // 🚚 Sincronización autónoma de Partición 7 (Kilómetros y Viajes)
-    // Mantiene public.choferes_km_mensual al día sin depender de n8n local
     setTimeout(() => {
         try {
             const { sincronizarKmDesdeSheets } = require('../routes/kmSync');
+            console.log("🚀 [Partición 7 Auto-Sync] Disparando barrido inicial de Kilómetros...");
             sincronizarKmDesdeSheets(cacheDatosGlobales, io, ioDash).catch(e => {
                 console.warn("⚠️ [Partición 7 Auto-Sync] Advertencia en ciclo inicial:", e.message);
             });
@@ -1852,11 +1867,12 @@ function iniciarCachePolling(cacheDatosGlobales, io, ioDash) {
                 console.warn("⚠️ [Partición 7 Auto-Sync] Error en ciclo periódico:", eSync.message);
             }
         }, 30 * 60 * 1000); // Cada 30 minutos (Diffing O(1) Zero Egress)
-    }, 90 * 1000); // Primer barrido a los 90s tras el arranque
+    }, 45 * 1000); // Primer barrido a los 45s tras el arranque
 }
 
 module.exports = { 
     iniciarCachePolling, 
+    iniciarParticionesAutoSync,
     flujoEncoladoGlobal,
     actualizarCacheDesdeSupabase,
     actualizarCacheDesdeGoogle,

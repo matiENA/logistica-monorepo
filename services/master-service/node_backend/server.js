@@ -23,7 +23,7 @@ const { Server } = require('socket.io');
 const { fetchRango, serviceAccountAuth, ID_SPREADSHEET_MASTER } = require('./utils/shared');
 const { cargarNovedades, createNovedadesRouter } = require('./novedades');
 const webhookRouter = require('./webhook');
-const { iniciarCachePolling } = require('./cache/builder');
+const { iniciarCachePolling, iniciarParticionesAutoSync } = require('./cache/builder');
 const createAuthRouter = require('./routes/auth');
 const createProxyRouter = require('./routes/proxy');
 const createFotosRouter = require('./routes/fotos');
@@ -92,7 +92,7 @@ let cacheDatosGlobales = {
 };
 
 // ==============================================================
-// ⏱️ INICIAR CACHE + POLLING
+// ⏱️ INICIAR CACHE + POLLING & AUTO-SYNC DE PARTICIONES
 // ==============================================================
 const ENABLE_RAM_CACHE_POLLING = process.env.ENABLE_RAM_CACHE_POLLING === 'true';
 if (ENABLE_RAM_CACHE_POLLING) {
@@ -100,6 +100,10 @@ if (ENABLE_RAM_CACHE_POLLING) {
 } else {
     console.log('⚡ [Backend] Polling de Google Sheets en RAM deshabilitado para optimizar consumo de memoria (ENABLE_RAM_CACHE_POLLING=false). Todo servido vía PostgreSQL views.');
 }
+
+// 🚀 Sincronización autónoma de Partición 5 (Días Diagrama), Partición 6 (Movimientos) y Partición 7 (KM)
+// Se ejecuta de forma independiente a la RAM para mantener Supabase actualizado continuamente en Render Cloud
+iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash);
 
 // ==============================================================
 // 🛣️ RUTAS
@@ -111,7 +115,16 @@ app.get(['/health', '/ping'], (req, res) => res.status(200).send('OK'));
 // ==============================================================
 // 🐍 PROXY INTERNO A PYTHON FASTAPI (/sync/* y /status)
 // ==============================================================
-app.use(['/sync', '/status'], (req, res) => {
+app.use(['/sync', '/status'], (req, res, next) => {
+    // Si la llamada es a /sync raíz o contiene el parámetro 'p' (particiones Node: p=5, p=6, p=7, etc.)
+    // o no es un sub-endpoint específico de Python, delegar al orquestador de Node (línea 390)
+    const pythonEndpoints = ['tracking', 'vacio', 'poll-vacio', 'unified', 'seguimiento-vacio', 'dispo', 'cordillera', 'conf-viaje', 'limpiar-vacio', 'all'];
+    const subPath = (req.path || '').replace(/^\//, '').split('/')[0].split('?')[0];
+
+    if (req.baseUrl === '/sync' && (!subPath || req.query?.p || req.query?.particion || !pythonEndpoints.includes(subPath))) {
+        return next();
+    }
+
     const proxyReq = http.request({
         host: '127.0.0.1',
         port: 8000,
