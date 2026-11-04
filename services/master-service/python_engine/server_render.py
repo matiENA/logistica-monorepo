@@ -448,8 +448,11 @@ def trigger_seguimiento_vacio(day: Optional[int] = Query(None)):
     return run_command(args, "seguimiento")
 
 @app.post("/sync/dispo")
-def trigger_dispo():
-    return run_command(["node", "pintarDisponibilidad.js"], "dispo")
+def trigger_dispo(spreadsheet_id: Optional[str] = Query(None)):
+    args = ["node", "pintarDisponibilidad.js"]
+    if spreadsheet_id:
+        args.append(spreadsheet_id)
+    return run_command(args, "dispo")
 
 @app.post("/sync/cordillera")
 def trigger_cordillera():
@@ -527,3 +530,5 @@ if HAS_SCHEDULER and os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
 
     scheduler.start()
     print("[SCHEDULER] ✅ APScheduler iniciado con 4 tareas operativas escalonadas y serializadas.")
+else:
+    print("[SCHEDULER] 🛡️ Scheduler en segundo plano DESHABILITADO (ENABLE_SCHEDULER=false). Modo seguro: no se ejecutarán tareas diarias ni llamadas automáticas a Google Sheets.")

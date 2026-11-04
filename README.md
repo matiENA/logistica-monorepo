@@ -34,10 +34,11 @@ logistica-monorepo/
 │       └── frontend/                    (Static site conectado a https://panolnd.onrender.com)
 │
 └── scripts/                             <-- Herramientas de desarrollo local y healthcheck
-    ├── dev-backend.bat                  (Lanza localmente Node.js :10000 + Python :8000 en paralelo)
+    ├── dev-backend.bat                  (Lanza localmente Node.js :3005 + Python :8000 en modo seguro)
+    ├── dev-panol.bat                    (Lanza backend :5000 y frontend :5173 de Pañol localmente)
+    ├── dev-backend-panol.bat            (Lanza Backend Maestro + Pañol en conjunto sin conflictos)
     ├── dev-dash.bat                     (Lanza frontend DASH en modo desarrollo)
     ├── dev-eor.bat                      (Lanza frontend EOR en modo desarrollo)
-    ├── dev-panol.bat                    (Lanza backend y frontend de Pañol localmente)
     └── test-health.ps1                  (Sonda de verificación de endpoints en producción)
 ```
 

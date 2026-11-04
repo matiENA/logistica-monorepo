@@ -22,9 +22,12 @@ WORKDIR /app
 COPY services/master-service/python_engine/requirements.txt ./python_engine/
 RUN pip install --no-cache-dir -r python_engine/requirements.txt
 
-# Instalar dependencias de Node.js
+# Instalar dependencias de Node.js (Gateway y Engine de Disponibilidad)
 COPY services/master-service/node_backend/package*.json ./node_backend/
 RUN cd node_backend && npm install --production
+
+COPY services/master-service/python_engine/package*.json ./python_engine/
+RUN cd python_engine && npm install --production
 
 # Copiar el código fuente completo del servicio maestro
 COPY services/master-service/ .

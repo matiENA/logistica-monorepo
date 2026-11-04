@@ -130,20 +130,25 @@ module.exports = function createSyncQueueRouter() {
     });
 
     // 4. Polling autónomo periódico en background (cada 90s)
-    const POLLING_INTERVAL_MS = 90 * 1000;
-    setInterval(async () => {
-        if (isProcessing) return;
-        try {
-            const r = await query("SELECT count(*) AS total FROM public.eor_sync_queue WHERE estado_sync = 'PENDIENTE' OR (estado_sync = 'EN_PROCESO' AND creado_el < NOW() - INTERVAL '5 minutes')");
-            const count = parseInt(r.rows[0]?.total || 0, 10);
-            if (count > 0) {
-                console.log(`\n⚡ [Auto-Runner / eor-backend] ${count} registros pendientes en eor_sync_queue. Consumiendo...`);
-                await executeSync({ batchLimit: 50, dryRun: false });
+    const ENABLE_QUEUE_RUNNER = process.env.ENABLE_QUEUE_RUNNER !== 'false';
+    if (ENABLE_QUEUE_RUNNER) {
+        const POLLING_INTERVAL_MS = 90 * 1000;
+        setInterval(async () => {
+            if (isProcessing) return;
+            try {
+                const r = await query("SELECT count(*) AS total FROM public.eor_sync_queue WHERE estado_sync = 'PENDIENTE' OR (estado_sync = 'EN_PROCESO' AND creado_el < NOW() - INTERVAL '5 minutes')");
+                const count = parseInt(r.rows[0]?.total || 0, 10);
+                if (count > 0) {
+                    console.log(`\n⚡ [Auto-Runner / eor-backend] ${count} registros pendientes en eor_sync_queue. Consumiendo...`);
+                    await executeSync({ batchLimit: 50, dryRun: false });
+                }
+            } catch (err) {
+                // Silencioso si la DB está temporalmente en reposo
             }
-        } catch (err) {
-            // Silencioso si la DB está temporalmente en reposo
-        }
-    }, POLLING_INTERVAL_MS);
+        }, POLLING_INTERVAL_MS);
+    } else {
+        console.log('⚡ [eor-backend] Auto-Runner de sincronización Google Sheets deshabilitado (ENABLE_QUEUE_RUNNER=false).');
+    }
 
     return router;
 };

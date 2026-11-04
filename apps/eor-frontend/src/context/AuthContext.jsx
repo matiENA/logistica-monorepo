@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../api/supabaseClient';
+import { apiClient } from '../api/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -29,7 +30,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   /**
-   * Inicia sesión validando credenciales contra la tabla 'usuarios_auth' de Supabase
+   * Inicia sesión validando credenciales vía backend seguro o RPC fn_auth_login
    */
   const login = async (usuario, password) => {
     try {
@@ -40,24 +41,45 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: 'Complete usuario y contraseña.' };
       }
 
-      // Consulta directa a la tabla usuarios_auth
-      const { data, error } = await supabase
-        .from('usuarios_auth')
-        .select('id, usuario, rol')
-        .ilike('usuario', uClean)
-        .eq('password', pClean)
-        .maybeSingle();
+      let data = null;
 
-      if (error) {
-        console.error('Error consultando usuarios_auth en Supabase:', error.message);
-        return { success: false, error: 'Error de conexión con el servidor.' };
+      // 1. Intento primario vía API Gateway Backend (Hot RAM / Pooler Postgres nativo)
+      try {
+        const res = await apiClient.fetchJson('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ usuario: uClean, password: pClean }),
+          timeoutMs: 6000
+        });
+        if (res && res.success) {
+          data = res;
+        }
+      } catch (errApi) {
+        console.warn('⚠️ [AuthContext] Fallback a RPC Supabase:', errApi.message);
+      }
+
+      // 2. Fallback secundario vía RPC seguro 'fn_auth_login' en Supabase
+      if (!data) {
+        try {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('fn_auth_login', {
+            p_usuario: uClean,
+            p_password: pClean
+          });
+          if (rpcErr) throw rpcErr;
+          if (rpcRes && rpcRes.success) {
+            data = rpcRes;
+          } else if (rpcRes && rpcRes.error) {
+            return { success: false, error: rpcRes.error };
+          }
+        } catch (sbErr) {
+          console.error('Error en autenticación fallback:', sbErr.message);
+        }
       }
 
       if (!data) {
-        return { success: false, error: 'Usuario o contraseña incorrectos.' };
+        return { success: false, error: 'Usuario o contraseña incorrectos o servidor no disponible.' };
       }
 
-      const token = 'auth_' + data.id + '_' + Date.now();
+      const token = data.token || ('auth_' + data.id + '_' + Date.now());
       const usuarioNom = String(data.usuario).toUpperCase();
       const userRol = data.rol || 'operador';
 

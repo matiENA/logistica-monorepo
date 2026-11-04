@@ -50,8 +50,9 @@ const KEY_FILE    = path.join(__dirname, 'ute-logistica-key.json');
 // ─── CARGA DE CONFIGURACIÓN DINÁMICA ──────────────────────────────────────────
 
 function cargarConfig() {
+  const envSpreadsheetId = process.env.MES_MOVIMIENTOS_ID || process.env.ID_SHEET_MOVIMIENTOS;
   const porDefecto = {
-    spreadsheetId: '1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc',
+    spreadsheetId: envSpreadsheetId || '1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc',
     planillasGuardadas: [],
     colsDispo: [
        29,  42,  55,  68,  81,  94, 107, 120, 133, 146, 159,  // Días 1-11
@@ -63,7 +64,9 @@ function cargarConfig() {
   if (fs.existsSync(CONFIG_PATH)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      return { ...porDefecto, ...parsed };
+      const cfg = { ...porDefecto, ...parsed };
+      if (envSpreadsheetId) cfg.spreadsheetId = envSpreadsheetId;
+      return cfg;
     } catch (e) {
       console.warn('⚠️ Error al leer config.json, usando valores por defecto.');
     }
