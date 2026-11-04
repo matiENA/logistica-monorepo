@@ -375,6 +375,7 @@ function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAut
                 // Optimistic Server RAM
                 cacheDatosGlobales.novedades.unshift(nuevaNovedad);
                 ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+                ioDash.emit('novedad_cambiada', { id: nuevaNovedad.id, action: 'nueva' });
                 res.json({ success: true, data: nuevaNovedad });
 
                 // Guardado en Sheets (como JSON)
@@ -398,6 +399,7 @@ function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAut
                     let novedadActualizada = cacheDatosGlobales.novedades[index];
                     
                     ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+                    ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'editar' });
                     res.json({ success: true, data: novedadActualizada });
 
                     try {
@@ -439,6 +441,7 @@ function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAut
                     let novedadActualizada = cacheDatosGlobales.novedades[index];
                     
                     ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+                    ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'editar' });
                     res.json({ success: true, data: novedadActualizada });
 
                     // Re-escritura en Sheets 'novedades'
@@ -498,6 +501,7 @@ function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAut
             }
             
             ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+            ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'mencion' });
             res.json({ success: true, data: nov });
             
             // Persist to Sheets
@@ -537,6 +541,7 @@ function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAut
             nov.terminal = String(terminal || '').toUpperCase().trim();
             
             ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+            ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'terminal' });
             res.json({ success: true, data: nov });
             
             // Persist to Sheets

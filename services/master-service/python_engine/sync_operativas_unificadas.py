@@ -31,6 +31,18 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 
+# Configurar salida UTF-8 con flush en tiempo real (unbuffered/line_buffering) para n8n y consola Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
+    except Exception:
+        pass
+
 # Prevenir caídas por timeout de sockets en Google API
 socket.setdefaulttimeout(300)
 
@@ -75,6 +87,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from credentials_helper import get_google_credentials, resolve_credentials_file
+from drive_state_manager import DriveStateManager
 from execution_shield import ExecutionShield, generate_audit_report
 from config_operativas import (
     RUTEOS_ID as DEFAULT_RUTEOS_ID,
@@ -444,6 +457,8 @@ class UnifiedOperativasSync:
         self._cached_curr_rows: Optional[List[List[str]]] = None
         self._cached_tractor_to_row: Optional[Dict[str, int]] = None
         self._cached_ut_to_row: Optional[Dict[str, int]] = None
+        self.state_mgr = DriveStateManager()
+        self.current_month_name = "Noviembre"
 
         if credentials_path and Path(credentials_path).exists():
             self.creds_path = credentials_path
@@ -471,13 +486,43 @@ class UnifiedOperativasSync:
         raise ValueError(f"No se encontró la pestaña '{TARGET_TAB_MOV}' en {self.mov_id}")
 
     def fetch_ruteos_actual(self) -> List[List[str]]:
-        """Lectura a Ruteos del mes actual (1 sola llamada HTTP con reintento)."""
-        res = api_call_with_retry(self._service.spreadsheets().values().get(
+        """Lectura ultraliviana a las columnas esenciales de Ruteos (1 sola batchGet de ~1s)."""
+        ranges = [
+            f"'{self.tab_ruteos}'!A4:B",   # Col 0: Patente, Col 1: UT
+            f"'{self.tab_ruteos}'!H4:H",   # Col 7: Tracking / Destinos
+            f"'{self.tab_ruteos}'!L4:L",   # Col 11: TD
+            f"'{self.tab_ruteos}'!X4:X",   # Col 23: Vacío
+            f"'{self.tab_ruteos}'!AK4:AK"  # Col 36: Fecha viaje
+        ]
+        res = api_call_with_retry(self._service.spreadsheets().values().batchGet(
             spreadsheetId=self.ruteos_id,
-            range=f"'{SOURCE_TAB_RUTEOS}'!A4:AL",
+            ranges=ranges,
             valueRenderOption="FORMATTED_VALUE"
         ))
-        return res.get("values", [])
+        vrs = res.get("valueRanges", [])
+        raw_ab = vrs[0].get("values", []) if len(vrs) > 0 else []
+        raw_h = vrs[1].get("values", []) if len(vrs) > 1 else []
+        raw_l = vrs[2].get("values", []) if len(vrs) > 2 else []
+        raw_x = vrs[3].get("values", []) if len(vrs) > 3 else []
+        raw_ak = vrs[4].get("values", []) if len(vrs) > 4 else []
+
+        max_len = max(len(raw_ab), len(raw_h), len(raw_l), len(raw_x), len(raw_ak), 0)
+        structured_rows = []
+        for i in range(max_len):
+            row = [""] * 37
+            if i < len(raw_ab) and raw_ab[i]:
+                row[0] = raw_ab[i][0].strip() if len(raw_ab[i]) > 0 else ""
+                row[1] = raw_ab[i][1].strip() if len(raw_ab[i]) > 1 else ""
+            if i < len(raw_h) and raw_h[i]:
+                row[7] = raw_h[i][0].strip()
+            if i < len(raw_l) and raw_l[i]:
+                row[11] = raw_l[i][0].strip()
+            if i < len(raw_x) and raw_x[i]:
+                row[23] = raw_x[i][0].strip()
+            if i < len(raw_ak) and raw_ak[i]:
+                row[36] = raw_ak[i][0].strip()
+            structured_rows.append(row)
+        return structured_rows
 
     def fetch_ruteos_anterior(self, force_refresh: bool = False) -> List[List[str]]:
         """
@@ -641,23 +686,26 @@ class UnifiedOperativasSync:
         - Capa 2: Vacío y Bordes de Col X
         - Capa 3: Seguimiento y Pintado #9fc5e8 (con soporte dual/cache y unidades standby)
         """
-        prev_ruteos_rows, ruteos_rows = self.fetch_combined_ruteos(force_refresh_prev=force_refresh_prev)
+        ruteos_rows = self.fetch_ruteos_actual()
         sheet_id, tractor_to_row, ut_to_row, day_rows = self.fetch_movimientos_targeted(day)
 
         col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(day)
         let_s1 = index_to_col_letter(col_s1)
         let_s2 = index_to_col_letter(col_s2)
 
-        # 1. Analizar Ruteos cronológico completo (mes anterior + mes actual)
-        # para determinar el ÚLTIMO TD y estado de cada tractor
+        # 1. Sembrar estado final de tractores del mes anterior (Octubre 2026) desde el JSON congelado (< 1ms)
         tractor_all_trips: Dict[str, List[Dict[str, Any]]] = {}
+        octubre_state = self.state_mgr.get_octubre_frozen_state()
+        for trk, t_data in octubre_state.get("ultimo_estado_tractores", {}).items():
+            tractor_all_trips[trk] = [{
+                "td": t_data.get("ultimo_td", ""),
+                "has_vacio": t_data.get("has_vacio", False),
+                "vacio_header": t_data.get("vacio_header", ""),
+                "last_row": t_data.get("last_row", 0)
+            }]
 
-        if self.ruteos_anterior_id == self.ruteos_id and self.tab_ruteos_anterior == self.tab_ruteos:
-            chronological_ruteos = ruteos_rows
-        else:
-            chronological_ruteos = prev_ruteos_rows + ruteos_rows
-
-        for idx, r in enumerate(chronological_ruteos):
+        # Procesar filas cronológicas del mes actual (Noviembre 2026)
+        for idx, r in enumerate(ruteos_rows):
             row_num = idx + 4
             raw_trk = str(r[0] if len(r) > 0 else "").upper().strip()
             trk = re.sub(r"[^A-Z0-9]", "", raw_trk)
@@ -753,6 +801,11 @@ class UnifiedOperativasSync:
         planned_note_updates = []
         planned_border_updates = []
         planned_color_updates = []
+        merged_cells_state: Dict[str, Dict[str, Any]] = {}
+
+        # Cargar estado previo de Noviembre para diffing O(1)
+        nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+        existing_day_cells = nov_state.get("celdas_merge", {}).get(f"dia_{day}", {})
 
         day_rows_by_num = {r["row_num"]: r for r in day_rows}
 
@@ -789,9 +842,35 @@ class UnifiedOperativasSync:
                 final_note = compose_final_note(vacio_head, track_body)
 
                 cell_coord = f"{target_col_let}{row_target}"
+                cell_hash = self.state_mgr.compute_cell_hash(
+                    vacio_header=vacio_head,
+                    tracking_text=track_body,
+                    borde_doble=bool(vacio_head),
+                    color_celeste=False
+                )
 
-                # Actualización de nota
-                if final_note and final_note != target_cell["note"]:
+                merged_cells_state[cell_coord] = {
+                    "fila": row_target,
+                    "col_idx": target_col_idx,
+                    "slot": target_slot,
+                    "tractor": trk,
+                    "ut": ut,
+                    "td": td_code,
+                    "vacio_header": vacio_head,
+                    "tracking_text": track_body,
+                    "borde_doble": bool(vacio_head),
+                    "color_celeste": False,
+                    "hash_nota": cell_hash
+                }
+
+                prev_cell = existing_day_cells.get(cell_coord)
+                needs_note = False
+                if prev_cell:
+                    needs_note = (prev_cell.get("hash_nota") != cell_hash)
+                else:
+                    needs_note = bool(final_note and final_note != target_cell["note"])
+
+                if needs_note and final_note:
                     planned_note_updates.append({
                         "row": row_target,
                         "col_idx": target_col_idx,
@@ -805,13 +884,15 @@ class UnifiedOperativasSync:
                         "td": td_code
                     })
 
-                # Bordes si hay VACÍO en Col X
+                # Bordes si hay VACÍO en Col X (solo si no fue aplicado previamente)
                 if vacio_head:
-                    planned_border_updates.append({
-                        "row": row_target,
-                        "col_idx": target_col_idx,
-                        "cell_coord": cell_coord
-                    })
+                    already_bordered = prev_cell.get("borde_doble", False) if prev_cell else False
+                    if not already_bordered:
+                        planned_border_updates.append({
+                            "row": row_target,
+                            "col_idx": target_col_idx,
+                            "cell_coord": cell_coord
+                        })
 
             else:
                 for slot_idx, (td_code, td_data) in enumerate(td_items[:2]):
@@ -825,8 +906,35 @@ class UnifiedOperativasSync:
                     final_note = compose_final_note(vacio_head, track_body)
 
                     cell_coord = f"{target_col_let}{row_target}"
+                    cell_hash = self.state_mgr.compute_cell_hash(
+                        vacio_header=vacio_head,
+                        tracking_text=track_body,
+                        borde_doble=bool(vacio_head),
+                        color_celeste=False
+                    )
 
-                    if final_note and final_note != target_cell["note"]:
+                    merged_cells_state[cell_coord] = {
+                        "fila": row_target,
+                        "col_idx": target_col_idx,
+                        "slot": slot_idx + 1,
+                        "tractor": trk,
+                        "ut": ut,
+                        "td": td_code,
+                        "vacio_header": vacio_head,
+                        "tracking_text": track_body,
+                        "borde_doble": bool(vacio_head),
+                        "color_celeste": False,
+                        "hash_nota": cell_hash
+                    }
+
+                    prev_cell = existing_day_cells.get(cell_coord)
+                    needs_note = False
+                    if prev_cell:
+                        needs_note = (prev_cell.get("hash_nota") != cell_hash)
+                    else:
+                        needs_note = bool(final_note and final_note != target_cell["note"])
+
+                    if needs_note and final_note:
                         planned_note_updates.append({
                             "row": row_target,
                             "col_idx": target_col_idx,
@@ -841,11 +949,13 @@ class UnifiedOperativasSync:
                         })
 
                     if vacio_head:
-                        planned_border_updates.append({
-                            "row": row_target,
-                            "col_idx": target_col_idx,
-                            "cell_coord": cell_coord
-                        })
+                        already_bordered = prev_cell.get("borde_doble", False) if prev_cell else False
+                        if not already_bordered:
+                            planned_border_updates.append({
+                                "row": row_target,
+                                "col_idx": target_col_idx,
+                                "cell_coord": cell_coord
+                            })
 
         # 4. Capa 3: Evaluación de Pintado Celeste (#9fc5e8) y Cleanup
         # Se evalúa sobre la celda del día (Slot 1) para cada tractor indexado
@@ -907,6 +1017,8 @@ class UnifiedOperativasSync:
                         "tipo": tipo_desc,
                         "dispo": dispo_val
                     })
+                    if cell_coord in merged_cells_state:
+                        merged_cells_state[cell_coord]["color_celeste"] = True
                 elif not qualifies and has_color_celeste:
                     # Cleanup automático: ya no cumple (ej. recibió nuevo TD o cambió Dispo)
                     reason = "nuevo TD o asignación de viaje"
@@ -930,13 +1042,17 @@ class UnifiedOperativasSync:
                         "trk": trk,
                         "reason": reason
                     })
+                    if cell_coord in merged_cells_state:
+                        merged_cells_state[cell_coord]["color_celeste"] = False
 
         return {
             "sheet_id": sheet_id,
             "day": day,
             "notes": planned_note_updates,
             "borders": planned_border_updates,
-            "colors": planned_color_updates
+            "colors": planned_color_updates,
+            "merged_cells_state": merged_cells_state,
+            "tractors_latest_state": tractors_vacio_sin_nuevo_td
         }
 
     def apply_atomic_batch(
@@ -1056,8 +1172,154 @@ class UnifiedOperativasSync:
             ))
             batches_executed += 1
 
+        # Persistir estado actualizado en JSON Drive
+        try:
+            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+            day_key = f"dia_{analysis['day']}"
+            if "celdas_merge" not in nov_state:
+                nov_state["celdas_merge"] = {}
+            if day_key not in nov_state["celdas_merge"]:
+                nov_state["celdas_merge"][day_key] = {}
+
+            for coord, c_info in analysis.get("merged_cells_state", {}).items():
+                nov_state["celdas_merge"][day_key][coord] = c_info
+
+            if "ultimo_estado_tractores" not in nov_state:
+                nov_state["ultimo_estado_tractores"] = {}
+            for trk, t_info in analysis.get("tractors_latest_state", {}).items():
+                nov_state["ultimo_estado_tractores"][trk] = t_info
+
+            self.state_mgr.save_json_to_drive(
+                self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                nov_state,
+                caller="local_n8n"
+            )
+        except Exception as e:
+            print(f"[WARN] Error guardando estado en Drive: {e}")
+
         return {
             "updated_count": len(requests),
+            "batches": batches_executed
+        }
+
+    def apply_consolidated_batch(
+        self,
+        analyses: List[Dict[str, Any]],
+        apply_borders: bool = True,
+        batch_size: int = 500
+    ) -> Dict[str, Any]:
+        """Consolida las peticiones de múltiples días en UN ÚNICO batchUpdate atómico."""
+        all_requests = []
+        sheet_id = None
+        for a in analyses:
+            sheet_id = a.get("sheet_id", sheet_id)
+            # 1. Notes
+            for item in a.get("notes", []):
+                r_idx = item["row"] - 1
+                c_idx = item["col_idx"]
+                all_requests.append({
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": r_idx,
+                            "endRowIndex": r_idx + 1,
+                            "startColumnIndex": c_idx,
+                            "endColumnIndex": c_idx + 1
+                        },
+                        "rows": [{
+                            "values": [{
+                                "note": item["new_note"]
+                            }]
+                        }],
+                        "fields": "note"
+                    }
+                })
+            # 2. Borders
+            if apply_borders:
+                for item in a.get("borders", []):
+                    r_idx = item["row"] - 1
+                    c_idx = item["col_idx"]
+                    all_requests.append({
+                        "updateBorders": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": r_idx,
+                                "endRowIndex": r_idx + 1,
+                                "startColumnIndex": c_idx,
+                                "endColumnIndex": c_idx + 1
+                            },
+                            "bottom": {
+                                "style": "SOLID_MEDIUM",
+                                "color": {"red": 0.0, "green": 0.0, "blue": 0.0}
+                            },
+                            "left": {
+                                "style": "SOLID_MEDIUM",
+                                "color": {"red": 0.0, "green": 0.0, "blue": 0.0}
+                            }
+                        }
+                    })
+            # 3. Colors
+            for item in a.get("colors", []):
+                r_idx = item["row"] - 1
+                c_idx = item["col_idx"]
+                target_color = item["color"] if item["action"] == "paint" else CLEANUP_COLOR_RGB
+                all_requests.append({
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": r_idx,
+                            "endRowIndex": r_idx + 1,
+                            "startColumnIndex": c_idx,
+                            "endColumnIndex": c_idx + 1
+                        },
+                        "rows": [{
+                            "values": [{
+                                "userEnteredFormat": {
+                                    "backgroundColor": target_color
+                                }
+                            }]
+                        }],
+                        "fields": "userEnteredFormat.backgroundColor"
+                    }
+                })
+
+        batches_executed = 0
+        if all_requests:
+            for i in range(0, len(all_requests), batch_size):
+                chunk = all_requests[i:i + batch_size]
+                api_call_with_retry(self._service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.mov_id,
+                    body={"requests": chunk}
+                ))
+                batches_executed += 1
+
+        # Persistir estados consolidados en JSON Drive
+        try:
+            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+            if "celdas_merge" not in nov_state:
+                nov_state["celdas_merge"] = {}
+            if "ultimo_estado_tractores" not in nov_state:
+                nov_state["ultimo_estado_tractores"] = {}
+
+            for a in analyses:
+                day_key = f"dia_{a['day']}"
+                if day_key not in nov_state["celdas_merge"]:
+                    nov_state["celdas_merge"][day_key] = {}
+                for coord, c_info in a.get("merged_cells_state", {}).items():
+                    nov_state["celdas_merge"][day_key][coord] = c_info
+                for trk, t_info in a.get("tractors_latest_state", {}).items():
+                    nov_state["ultimo_estado_tractores"][trk] = t_info
+
+            self.state_mgr.save_json_to_drive(
+                self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                nov_state,
+                caller="local_n8n"
+            )
+        except Exception as e:
+            print(f"[WARN] No se pudo guardar estado consolidado en Drive: {e}")
+
+        return {
+            "updated_count": len(all_requests),
             "batches": batches_executed
         }
 
@@ -1083,9 +1345,11 @@ class UnifiedOperativasSync:
             "batch_results": []
         }
 
+        all_analyses = []
         for d in days:
             eval_col = (d == cur_d)
             analysis = self.analyze_trips_and_layers(d, eval_colors=eval_col)
+            all_analyses.append(analysis)
             n_cnt = len(analysis["notes"])
             b_cnt = len(analysis["borders"])
             c_cnt = len(analysis["colors"])
@@ -1099,9 +1363,32 @@ class UnifiedOperativasSync:
                 "colors": c_cnt
             }
 
-            if apply and (n_cnt > 0 or b_cnt > 0 or c_cnt > 0):
-                batch_res = self.apply_atomic_batch(analysis, apply_borders=apply_borders)
-                results["batch_results"].append({"day": d, **batch_res})
+        if apply and (results["total_notes"] > 0 or results["total_borders"] > 0 or results["total_colors"] > 0):
+            batch_res = self.apply_consolidated_batch(all_analyses, apply_borders=apply_borders)
+            results["batch_results"].append(batch_res)
+        elif apply:
+            # Persistir mapa de celdas_merge aunque no haya habido cambios de escritura
+            try:
+                nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+                if "celdas_merge" not in nov_state:
+                    nov_state["celdas_merge"] = {}
+                if "ultimo_estado_tractores" not in nov_state:
+                    nov_state["ultimo_estado_tractores"] = {}
+                for a in all_analyses:
+                    day_key = f"dia_{a['day']}"
+                    if day_key not in nov_state["celdas_merge"]:
+                        nov_state["celdas_merge"][day_key] = {}
+                    for coord, c_info in a.get("merged_cells_state", {}).items():
+                        nov_state["celdas_merge"][day_key][coord] = c_info
+                    for trk, t_info in a.get("tractors_latest_state", {}).items():
+                        nov_state["ultimo_estado_tractores"][trk] = t_info
+                self.state_mgr.save_json_to_drive(
+                    self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                    nov_state,
+                    caller="local_n8n"
+                )
+            except Exception as e:
+                print(f"[WARN] Error persistiendo estado base en Drive: {e}")
 
         return results
 

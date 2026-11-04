@@ -170,11 +170,14 @@ async function getSheetsInstance() {
     return google.sheets({ version: 'v4', auth: client });
   }
 
-  // 3. Búsqueda de archivos locales en orden
+  // 3. Búsqueda de archivos locales y de desarrollo (resiliencia multi-entorno)
+  const homeDir = require('os').homedir();
   const candidatos = [
     KEY_FILE,
     path.join(__dirname, 'credentials.json'),
-    path.join(__dirname, 'gs account', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json')
+    path.join(__dirname, 'gs account', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json'),
+    path.join(homeDir, 'Desktop', 'gs account', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json'),
+    path.join(homeDir, 'Desktop', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json')
   ];
 
   for (const cand of candidatos) {

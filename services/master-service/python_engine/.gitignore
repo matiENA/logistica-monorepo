@@ -16,6 +16,7 @@ npm-debug.log*
 last_sync_*.json
 last_poll_*.json
 cache_ruteos_*.json
+cache_drive_states/
 .sync.lock
 reportes/reporte_*.md
 

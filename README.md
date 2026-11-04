@@ -130,6 +130,17 @@ flowchart TD
 
 ---
 
+## 🔮 Backlog de Arquitectura & Futuras Implementaciones
+
+### Propagación de Eventos de Flota desde Pañol hacia DASH (`unidad_cambiada`)
+- **Estado Actual:** Los acoples/desacoples y órdenes de trabajo (OTs) gestionadas en Pañol **no son la fuente canónica de verdad (Source of Truth)** para la asignación y movimiento operativo de la flota. La fuente canónica de verdad reside en el flujo maestro de operaciones (`public.movimientos` y `public.unidades` en Supabase/PostgreSQL). Por ende, DASH mantiene la recarga del catálogo de flota bajo demanda al interactuar con modales o selectores.
+- **Posible Implementación Futura:**  
+  Si en el futuro se requiriera reflejar en caliente estados de taller o acoples generados en Pañol en el tablero de DASH en tiempo real sin intervención del usuario:
+  1. El backend de Pañol o el gateway maestro emitirá un evento granular `ioDash.emit('unidad_cambiada', { unidad_id })` a través del WebSocket `/dash`.
+  2. Siguiendo el patrón canónico **"Listen on Table, Fetch from View"**, el hook [`useDash`](file:///c:/Users/Matias%20Rodriguez/Documents/logistica-monorepo/apps/dash-frontend/src/hooks/useDash.ts) interceptará el evento, solicitará únicamente esa fila a `public.view_dash_flota` (`GET /api/views/flota?unidad_id=...` o `.eq('unidad_id', id)`) con debounce de 300 ms, y reemplazará solo esa unidad en el estado local sin hacer polling ni re-consultar toda la flota.
+
+---
+
 ## 📦 Ubicación de Directorios Originales (Movidos al Vault)
 
 Para mantener el espacio de trabajo limpio y prevenir ejecuciones accidentales en versiones desactualizadas, los proyectos y carpetas de código originales previos a la unificación monorepo fueron **archivados y resguardados en el Vault**:

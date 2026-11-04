@@ -67,26 +67,74 @@ export function useDash() {
   useEffect(() => {
     cargarDatos();
 
-    // Socket.IO para tiempo real
+    // 🎯 Socket.IO para tiempo real reactivo (Patrón: Listen on Table/Event -> Fetch from View, SIN POLLING)
     const socket: Socket = io(`${SOCKET_URL}/dash`, {
       transports: ['websocket', 'polling']
     });
 
+    // ⚡ Cola de actualización con Debounce (300ms) para amortiguar ráfagas de cambios concurrentes
+    const pendingIds = new Set<string | number>();
+    let debounceTimer: any = null;
+
+    const procesarLoteDeCambios = async () => {
+      if (pendingIds.size === 0) return;
+      const idsAProcesar = Array.from(pendingIds);
+      pendingIds.clear();
+
+      try {
+        const filasActualizadas = await api.fetchNovedadesPorIds(idsAProcesar);
+        if (filasActualizadas && filasActualizadas.length > 0) {
+          const mapaNuevas = new Map(filasActualizadas.map(f => [String(f.id), f]));
+          setNovedades(prev => {
+            const actualizadas = prev.map(n => mapaNuevas.get(String(n.id)) || n);
+            const idsExistentes = new Set(prev.map(n => String(n.id)));
+            const completamenteNuevas = filasActualizadas.filter(f => !idsExistentes.has(String(f.id)));
+            return completamenteNuevas.length > 0 ? [...completamenteNuevas, ...actualizadas] : actualizadas;
+          });
+        }
+      } catch (e) {
+        console.warn('⚠️ [useDash] Error sincronizando filas modificadas desde view_cards_diarias:', e);
+      }
+    };
+
+    const agendarActualizacionFila = (id: string | number) => {
+      pendingIds.add(id);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(procesarLoteDeCambios, 300);
+    };
+
     socket.on('connect', () => {
-      console.log('⚡ [Socket] Conectado a /dash');
+      console.log('⚡ [Socket] Conectado reactivamente a /dash (Tiempo Real activo sin Polling)');
     });
 
+    // Evento granular por ID (Listen on Table -> Fetch from View)
+    socket.on('novedad_cambiada', (payload: { id: string | number }) => {
+      if (payload?.id) {
+        agendarActualizacionFila(payload.id);
+      }
+    });
+
+    // Evento de lote completo
     socket.on('novedades_actualizadas', (nuevasNovedades: Novedad[]) => {
-      console.log('🔔 [Socket] Novedades actualizadas en vivo:', nuevasNovedades.length);
-      setNovedades(nuevasNovedades);
+      if (Array.isArray(nuevasNovedades)) {
+        console.log('🔔 [Socket] Novedades actualizadas en vivo:', nuevasNovedades.length);
+        setNovedades(nuevasNovedades);
+      }
     });
 
+    // Evento de dirty-check global (con throttle para proteger la red)
+    let lastRefresh = 0;
     socket.on('datos_actualizados', (_payload: any) => {
-      console.log('⚡ [Socket] Hot RAM dirty-check detectó cambios globales. Refrescando datos...');
-      cargarDatos();
+      const now = Date.now();
+      if (now - lastRefresh > 5000) {
+        lastRefresh = now;
+        console.log('⚡ [Socket] Cambios detectados en datos de flota/novedades. Refrescando vistas...');
+        cargarDatos();
+      }
     });
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       socket.disconnect();
     };
   }, [cargarDatos]);

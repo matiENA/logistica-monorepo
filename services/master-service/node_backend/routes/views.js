@@ -98,14 +98,18 @@ module.exports = function createViewsRouter() {
             const countRes = await db.query(countQuery, params);
             const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
-            // Consulta paginada
+            // Consulta paginada con Column Pruning y Join Elimination garantizados
             params.push(limitNum);
             const limitIdx = params.length;
             params.push(offsetNum);
             const offsetIdx = params.length;
 
+            const cols = req.query.select 
+                ? req.query.select.split(',').map(c => c.trim()).filter(c => /^[a-zA-Z0-9_]+$/.test(c)).join(', ') || '*'
+                : 'chofer_id, nombre, dni, telefono, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el';
+
             const dataQuery = `
-                SELECT * FROM public.view_diaria_operativa 
+                SELECT ${cols} FROM public.view_diaria_operativa 
                 ${whereClause}
                 ORDER BY nombre ASC
                 LIMIT $${limitIdx} OFFSET $${offsetIdx}
@@ -147,6 +151,19 @@ module.exports = function createViewsRouter() {
             const conditions = [];
             const params = [];
 
+            if (req.query.id) {
+                params.push(String(req.query.id).trim());
+                conditions.push(`id::text = $${params.length}`);
+            }
+
+            if (req.query.ids) {
+                const idList = req.query.ids.split(',').map(s => s.trim()).filter(Boolean);
+                if (idList.length > 0) {
+                    params.push(idList);
+                    conditions.push(`id::text = ANY($${params.length}::text[])`);
+                }
+            }
+
             if (estado === 'pendientes') {
                 conditions.push(`resuelto = false`);
             } else if (estado === 'resueltas') {
@@ -186,14 +203,18 @@ module.exports = function createViewsRouter() {
             const countRes = await db.query(countQuery, params);
             const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
-            // Consulta paginada ordenada por fecha objetivo y creación
+            // Consulta paginada ordenada por fecha objetivo y creación con Column Pruning
             params.push(limitNum);
             const limitIdx = params.length;
             params.push(offsetNum);
             const offsetIdx = params.length;
 
+            const cols = req.query.select
+                ? req.query.select.split(',').map(c => c.trim()).filter(c => /^[a-zA-Z0-9_]+$/.test(c)).join(', ') || '*'
+                : 'id, card_id, tipo_novedad, tipo, tipo_novedad_id, tipo_novedad_titulo, tipo_bg_color, tipo_text_color, requiere_fecha_objetivo, imprime_nota_movimientos, fecha_objetivo, fecha, fecha_resolucion, detalle, resuelto, prioridad, creado_el, "timestamp", creado_por_id, creador, usuario, chofer_id, nom, chofer_nombre, chofer_estado, chofer_telefono, foto, unidad_id, tractor, semi, cisternado, n_ute, srv, servicio, servicio_chofer_id, vtv_tr, mas_tr, vtv_semi, mas_semi, esp_es, vi, ve, terminal, terminal_id, terminal_nombre, menciones';
+
             const dataQuery = `
-                SELECT * FROM public.view_cards_diarias 
+                SELECT ${cols} FROM public.view_cards_diarias 
                 ${whereClause}
                 ORDER BY fecha DESC NULLS LAST, creado_el DESC
                 LIMIT $${limitIdx} OFFSET $${offsetIdx}
@@ -254,8 +275,12 @@ module.exports = function createViewsRouter() {
             }
 
             const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+            const cols = req.query.select
+                ? req.query.select.split(',').map(c => c.trim()).filter(c => /^[a-zA-Z0-9_]+$/.test(c)).join(', ') || '*'
+                : 'unidad_id, n_ute, tractor, semi, chofer_id, chofer_nombre, nom, dia_diagrama, vtv_tr, mas_tr, vtv_semi, mas_semi, servicio, srv, tractor_id, marca_tr, modelo_tr, semi_id, marca_semi, cisternado, esp_es, vi, ve, estado_unidad, ot_activa, estado_chofer, foto';
+
             const dataQuery = `
-                SELECT * FROM public.view_flota_operativa 
+                SELECT ${cols} FROM public.view_flota_operativa 
                 ${whereClause}
                 ORDER BY tractor ASC NULLS LAST, semi ASC NULLS LAST
             `;
@@ -540,7 +565,14 @@ module.exports = function createViewsRouter() {
             }
 
             const dataRes = await db.query(`
-                SELECT * FROM public.view_individual_chofer
+                SELECT chofer_id, nombre, legajo, dni, cuil, telefono, email, domicilio, localidad, 
+                       telefono_emergencia, empresa, foto, servicio, estado_chofer, doc_id, 
+                       venc_licencia_nacional, venc_psicofisico, venc_cargas_peligrosas, venc_periodico, 
+                       venc_curso_shell, venc_manejo_def, apto_medico_venc, apto_medico_estado, 
+                       avalado_contratos, obs_documentacion, unidad_id, n_ute, estado_unidad, 
+                       tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi, marca_semi, cisternado, 
+                       esp_es, vi, ve, vtv_semi, mas_semi, actualizado_el
+                FROM public.view_individual_chofer
                 WHERE chofer_id::text = $1 OR dni = $1
                 LIMIT 1
             `, [choferId]);
@@ -737,14 +769,18 @@ module.exports = function createViewsRouter() {
             const countRes = await db.query(countQuery, params);
             const total = parseInt(countRes.rows[0]?.total || '0', 10);
 
-            // Consulta paginada
+            // Consulta paginada con Column Pruning
             params.push(limitNum);
             const limitIdx = params.length;
             params.push(offsetNum);
             const offsetIdx = params.length;
 
+            const cols = req.query.select
+                ? req.query.select.split(',').map(c => c.trim()).filter(c => /^[a-zA-Z0-9_]+$/.test(c)).join(', ') || '*'
+                : 'movimiento_id, unidad_id, n_ute, unidad_estado, fecha_acople, servicio_unidad, tractor_id, tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi_id, semi, marca_semi, cisternado, esp_es, vi, ve, vtv_semi, mas_semi, chofer_id, chofer_nombre, chofer_dni, chofer_cuil, chofer_telefono, chofer_foto, chofer_estado, chofer_servicio, dia_diagrama, alerta_vencimientos_unidad, actualizado_el';
+
             const dataQuery = `
-                SELECT * FROM public.view_movimientos 
+                SELECT ${cols} FROM public.view_movimientos 
                 ${whereClause}
                 ORDER BY NULLIF(regexp_replace(n_ute, '[^0-9]', '', 'g'), '')::int ASC NULLS LAST, tractor ASC NULLS LAST
                 LIMIT $${limitIdx} OFFSET $${offsetIdx}

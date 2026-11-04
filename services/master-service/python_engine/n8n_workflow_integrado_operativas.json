@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "content": "## 🎨 TAREA 4: PINTAR DISPONIBILIDAD (VTV & HABILITACIONES)\n- **Origen:** Base Vencimientos + Configuración activa (`config.json`).\n- **Destino:** 33 Columnas `Dispo.` en Movimientos Mensual.\n- **Regla:** Pinta según vencimiento: 🔴 Rojo (<0 d, vencido), 🔵 Azul (<=10 d, próx. a vencer), ⬜ Normal (#F5F7FA). Protege intactas las cabeceras de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\diaria`\n- **Comando:** `node pintarDisponibilidad.js`",
+        "content": "## 🎨 TAREA 4: PINTAR DISPONIBILIDAD (VTV & HABILITACIONES)\n- **Origen:** Base Vencimientos + Configuración activa (`config.json`).\n- **Destino:** 33 Columnas `Dispo.` en Movimientos Mensual.\n- **Regla:** Pinta según vencimiento: 🔴 Rojo (<0 d, vencido), 🔵 Azul (<=10 d, próx. a vencer), ⬜ Normal (#F5F7FA). Protege intactas las cabeceras de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `node pintarDisponibilidad.js`",
         "height": 340,
         "width": 1350,
         "color": 2
@@ -82,7 +82,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && node pintarDisponibilidad.js\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && node pintarDisponibilidad.js\""
       },
       "id": "1137b771-0746-4c99-8768-1233b590047b",
       "name": "Ejecutar Pintado de Disponibilidad",
@@ -108,7 +108,7 @@
     },
     {
       "parameters": {
-        "content": "## 🏔️ TAREA 5: VIAJES CORDILLERA ➡️ SEGURIDA VIAL\n- **Origen:** Ruteos (`1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE`).\n- **Destino:** Pestaña `SEGURIDA VIAL` (Columnas contiguas A:V).\n- **Regla:** Viaje completo por TD (Col L) si al menos una parada tiene destino a Cordillera (21 localidades declaradas). Sincroniza 22 columnas ordenadas.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias`\n- **Comando:** `py -3.13 main.py --seguridad-vial`",
+        "content": "## 🏔️ TAREA 5: VIAJES CORDILLERA ➡️ SEGURIDA VIAL\n- **Origen:** Ruteos (`1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE`).\n- **Destino:** Pestaña `SEGURIDA VIAL` (Columnas contiguas A:V).\n- **Regla:** Viaje completo por TD (Col L) si al menos una parada tiene destino a Cordillera (21 localidades declaradas). Sincroniza 22 columnas ordenadas.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `py -3.13 main.py --seguridad-vial`",
         "height": 340,
         "width": 1350
       },
@@ -143,7 +143,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 main.py --seguridad-vial\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 main.py --seguridad-vial\""
       },
       "id": "e976d847-f690-42a7-9fe1-46b3d665af38",
       "name": "Ejecutar Sync Viajes Cordillera",
@@ -169,7 +169,7 @@
     },
     {
       "parameters": {
-        "content": "## 📋 TAREA 6: UTE CORDILLERA ➡️ CONF. DE VIAJE\n- **Origen:** Pestaña `UTE Cordillera Noviembre 26` (`1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU`).\n- **Destino:** Pestaña `CONF. DE VIAJE NOVIEMBRE 26` (desde fila 5, Cols A:J).\n- **Regla:** Viaje completo por TD (Col I) si contiene símbolo ⚠️ en Columna F (Marca Temp - Respuesta). Escribe 10 columnas limpias con cliente formateado.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias`\n- **Comando:** `py -3.13 main.py --conf-viaje`",
+        "content": "## 📋 TAREA 6: UTE CORDILLERA ➡️ CONF. DE VIAJE\n- **Origen:** Pestaña `UTE Cordillera Noviembre 26` (`1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU`).\n- **Destino:** Pestaña `CONF. DE VIAJE NOVIEMBRE 26` (desde fila 5, Cols A:J).\n- **Regla:** Viaje completo por TD (Col I) si contiene símbolo ⚠️ en Columna F (Marca Temp - Respuesta). Escribe 10 columnas limpias con cliente formateado.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `py -3.13 main.py --conf-viaje`",
         "height": 340,
         "width": 1350,
         "color": 6
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 main.py --conf-viaje\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 main.py --conf-viaje\""
       },
       "id": "23b1ec3a-79b0-4696-a855-74d99ebc06e9",
       "name": "Ejecutar Sync CONF. DE VIAJE",
@@ -231,7 +231,7 @@
     },
     {
       "parameters": {
-        "content": "## 🧹 TAREA 7: LIMPIEZA DE VACÍO Y RESET (MOVIMIENTOS)\n- **Destino:** Planilla Mensual Movimientos (`1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc`).\n- **Propósito:** Herramienta administrativa para limpiar o resetear encabezados de VACÍO y bordes en hover notes ante arreglos de sheets o corrección de falsos positivos. Preserva intacto el tracking de Col H.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\diaria`\n- **Comando:** `py -3.13 limpiar_vacio.py --apply`\n\n*⚠️ Este carril posee únicamente DISPARADOR MANUAL INDIVIDUAL para evitar limpiezas accidentales no supervisadas. No está vinculado a ningún cron automático ni al orquestador general.*",
+        "content": "## 🧹 TAREA 7: LIMPIEZA DE VACÍO Y RESET (MOVIMIENTOS)\n- **Destino:** Planilla Mensual Movimientos (`1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc`).\n- **Propósito:** Herramienta administrativa para limpiar o resetear encabezados de VACÍO y bordes en hover notes ante arreglos de sheets o corrección de falsos positivos. Preserva intacto el tracking de Col H.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `py -3.13 limpiar_vacio.py --apply`\n\n*⚠️ Este carril posee únicamente DISPARADOR MANUAL INDIVIDUAL para evitar limpiezas accidentales no supervisadas. No está vinculado a ningún cron automático ni al orquestador general.*",
         "height": 340,
         "width": 1350,
         "color": 3
@@ -247,7 +247,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 limpiar_vacio.py --apply\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 limpiar_vacio.py --apply\""
       },
       "id": "89e26722-95c1-426d-be8c-c7fad076e818",
       "name": "Ejecutar Limpieza VACIO",
@@ -309,7 +309,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias && py -3.13 poll_sync_vacio.py --apply --borders\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 poll_sync_vacio.py --apply --borders\""
       },
       "id": "bdcea852-fb63-4296-a2f6-2e27eb150adc",
       "name": "Ejecutar Polling Inteligente VACIO + Seguimiento",
@@ -457,6 +457,9 @@
     }
   },
   "settings": {
-    "executionOrder": "v1"
-  }
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {}
 }

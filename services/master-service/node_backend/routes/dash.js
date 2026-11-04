@@ -48,10 +48,16 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
             });
         }
 
-        // 2. Fallback SQL a PostgreSQL view_dash_flota (cuando ENABLE_RAM_CACHE_POLLING=false)
+        // 2. Fallback SQL a PostgreSQL view_dash_flota (con Column Pruning y Join Elimination)
         try {
             if (db && db.isConfigured()) {
-                const { rows } = await db.query('SELECT * FROM public.view_dash_flota ORDER BY nom ASC');
+                const { rows } = await db.query(`
+                    SELECT chofer_id, nom, tractor, semi, cisternado, n_ute, srv, servicio, 
+                           estado_chofer, estado_unidad, ot_activa, foto, unidad_id, 
+                           vtv_tr, mas_tr, vtv_semi, mas_semi, esp_es, vi, ve 
+                    FROM public.view_dash_flota 
+                    ORDER BY nom ASC
+                `);
                 const { normalizar } = require('../utils/shared');
                 const flotaMap = {};
 

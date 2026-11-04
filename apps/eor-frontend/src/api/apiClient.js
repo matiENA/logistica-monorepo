@@ -99,9 +99,12 @@ class ApiClient {
       console.warn('⚠️ [ApiClient] Fallback a Supabase para view_diaria_operativa:', err.message);
     }
 
-    // Fallback Supabase protegido
+    // Fallback Supabase protegido con Column Pruning estricto
     try {
-      let query = supabase.from('view_diaria_operativa').select('*', { count: 'exact' });
+      let query = supabase.from('view_diaria_operativa').select(
+        'chofer_id, nombre, dni, telefono, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el',
+        { count: 'exact' }
+      );
       if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
       if (alerta === 'DOCS_VENCIDOS') query = query.eq('alerta_docs_chofer', 'VENCIDO');
       else if (alerta === 'DOCS_POR_VENCER') query = query.eq('alerta_docs_chofer', 'POR_VENCER');
@@ -184,7 +187,9 @@ class ApiClient {
     }
 
     try {
-      let query = supabase.from('view_flota_operativa').select('*');
+      let query = supabase.from('view_flota_operativa').select(
+        'unidad_id, n_ute, tractor, semi, chofer_id, chofer_nombre, dia_diagrama, vtv_tr, mas_tr, vtv_semi, mas_semi, servicio, tractor_id, marca_tr, modelo_tr, semi_id, marca_semi, cisternado, esp_es, vi, ve, estado_unidad, ot_activa, estado_chofer, foto'
+      );
       const { data, error } = await query;
       if (error) throw error;
       return data || [];
@@ -237,7 +242,9 @@ class ApiClient {
     try {
       const { data, error } = await supabase
         .from('view_individual_chofer')
-        .select('*')
+        .select(
+          'chofer_id, nombre, legajo, dni, cuil, telefono, email, domicilio, localidad, telefono_emergencia, empresa, foto, servicio, estado_chofer, doc_id, venc_licencia_nacional, venc_psicofisico, venc_cargas_peligrosas, venc_periodico, venc_curso_shell, venc_manejo_def, apto_medico_venc, apto_medico_estado, avalado_contratos, obs_documentacion, unidad_id, n_ute, estado_unidad, tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi, marca_semi, cisternado, esp_es, vi, ve, vtv_semi, mas_semi, actualizado_el'
+        )
         .eq('chofer_id', choferId)
         .maybeSingle();
 
@@ -337,7 +344,10 @@ class ApiClient {
     }
 
     try {
-      let query = supabase.from('view_cards_diarias').select('*', { count: 'exact' });
+      let query = supabase.from('view_cards_diarias').select(
+        'id, card_id, tipo_novedad, tipo, tipo_novedad_id, tipo_novedad_titulo, tipo_bg_color, tipo_text_color, requiere_fecha_objetivo, imprime_nota_movimientos, fecha_objetivo, fecha, fecha_resolucion, detalle, resuelto, prioridad, creado_el, timestamp, creado_por_id, creador, usuario, chofer_id, nom, chofer_nombre, chofer_estado, chofer_telefono, foto, unidad_id, tractor, semi, cisternado, n_ute, srv, servicio, servicio_chofer_id, vtv_tr, mas_tr, vtv_semi, mas_semi, esp_es, vi, ve, terminal, terminal_id, terminal_nombre, menciones',
+        { count: 'exact' }
+      );
       if (estado === 'pendientes') query = query.eq('resuelto', false);
       else if (estado === 'resueltas') query = query.eq('resuelto', true);
       if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
@@ -382,7 +392,9 @@ class ApiClient {
     }
 
     try {
-      let query = supabase.from('view_diagrama_mensual').select('*').eq('mes_tab', mesTab);
+      let query = supabase.from('view_diagrama_mensual').select(
+        'diagrama_id, chofer_id, chofer_nombre, legajo, mes_tab, anio, mes_numero, servicio, tira_dias, dias, contabilizador, km_mes_total, cant_viajes_mes, actualizado_el'
+      ).eq('mes_tab', mesTab);
       if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
       const { data, error } = await query.order('chofer_nombre');
       if (error) throw error;
@@ -415,7 +427,10 @@ class ApiClient {
     }
 
     try {
-      let query = supabase.from('view_movimientos').select('*', { count: 'exact' });
+      let query = supabase.from('view_movimientos').select(
+        'movimiento_id, unidad_id, n_ute, unidad_estado, fecha_acople, servicio_unidad, tractor_id, tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi_id, semi, marca_semi, cisternado, esp_es, vi, ve, vtv_semi, mas_semi, chofer_id, chofer_nombre, chofer_dni, chofer_cuil, chofer_telefono, chofer_foto, chofer_estado, chofer_servicio, dia_diagrama, alerta_vencimientos_unidad, actualizado_el',
+        { count: 'exact' }
+      );
       if (servicio && servicio !== 'TODOS') {
         query = query.or(`servicio_unidad.eq.${servicio},chofer_servicio.eq.${servicio}`);
       }

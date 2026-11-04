@@ -34,15 +34,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional, List
 
-# Configurar salida UTF-8 para consola de Windows
+# Configurar salida UTF-8 con flush en tiempo real (unbuffered/line_buffering) para n8n y consola Windows
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
 if hasattr(sys.stderr, "reconfigure"):
     try:
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8", line_buffering=True)
     except Exception:
         pass
 
@@ -85,13 +85,14 @@ class VacioPoller:
         ruteos_id: str = DEFAULT_RUTEOS_ID,
         mov_id: str = DEFAULT_MOV_ID,
         day: Optional[int] = None,
-        window: int = 5
+        window: Optional[int] = None
     ):
         self.ruteos_id = ruteos_id
         self.mov_id = mov_id
         self.day_explicit = (day is not None)
         self.day = day or datetime.now().day
-        self.window = window
+        self.window_explicit = (window is not None)
+        self.window = window or 1
         self._creds = get_google_credentials(scopes=SCOPES)
         self._service = build("sheets", "v4", credentials=self._creds)
 
@@ -113,24 +114,21 @@ class VacioPoller:
         except Exception as e:
             print(f"[WARN] Error guardando estado en {STATE_FILE.name}: {e}")
 
-    def fetch_fingerprint(self) -> Tuple[str, Dict[str, Any]]:
+    def fetch_fingerprint(self, check_movimientos: bool = False) -> Tuple[str, Dict[str, Any]]:
         """
         Fase 1: Lee únicamente las columnas indispensables para detectar cambios.
+        Por defecto consulta únicamente Ruteos (Cols L, X y H) en ~2s, evitando
+        el overhead de recalcular dependencias pesadas en Movimientos.
         Retorna (hash_sha256, metadata_resumen).
         """
         t0 = time.time()
 
-        # 1. Rangos de Ruteos: TDs (Col L) y Vacíos (Col X)
+        # 1. Rangos de Ruteos: TDs (Col L), Vacíos (Col X) y Tracking Destinos (Col H)
         ruteos_ranges = [
             f"'{SOURCE_TAB_RUTEOS}'!L4:L",
-            f"'{SOURCE_TAB_RUTEOS}'!X4:X"
+            f"'{SOURCE_TAB_RUTEOS}'!X4:X",
+            f"'{SOURCE_TAB_RUTEOS}'!H4:H"
         ]
-
-        # 2. Rangos de Movimientos para el día activo (Chofer, Dispo, Slot 1, Slot 2)
-        col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(self.day)
-        let_ch = index_to_col_letter(col_ch)
-        let_s2 = index_to_col_letter(col_s2)
-        mov_range = f"'{TARGET_TAB_MOV}'!{let_ch}3:{let_s2}350"
 
         # Consulta combinada a Ruteos (1 sola petición HTTP con reintento)
         res_ruteos = api_call_with_retry(self._service.spreadsheets().values().batchGet(
@@ -139,19 +137,31 @@ class VacioPoller:
             valueRenderOption="FORMATTED_VALUE"
         ))
 
-        # Consulta combinada a Movimientos (1 sola petición HTTP con reintento)
-        res_mov = api_call_with_retry(self._service.spreadsheets().values().get(
-            spreadsheetId=self.mov_id,
-            range=mov_range,
-            valueRenderOption="FORMATTED_VALUE"
-        ))
+        # 2. Rangos de Movimientos (opcional)
+        mov_items = []
+        if check_movimientos:
+            col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(self.day)
+            let_ch = index_to_col_letter(col_ch)
+            let_s2 = index_to_col_letter(col_s2)
+            mov_range = f"'{TARGET_TAB_MOV}'!{let_ch}3:{let_s2}350"
+            res_mov = api_call_with_retry(self._service.spreadsheets().values().get(
+                spreadsheetId=self.mov_id,
+                range=mov_range,
+                valueRenderOption="FORMATTED_VALUE"
+            ))
+            raw_mov = res_mov.get("values", [])
+            for idx, row in enumerate(raw_mov):
+                row_num = idx + 3
+                cells = [c.strip() for c in row if c and c.strip()]
+                if cells:
+                    mov_items.append({"row": row_num, "cells": cells})
 
         elapsed_read = round(time.time() - t0, 2)
 
         val_ranges = res_ruteos.get("valueRanges", [])
         raw_tds = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
         raw_x = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
-        raw_mov = res_mov.get("values", [])
+        raw_h = val_ranges[2].get("values", []) if len(val_ranges) > 2 else []
 
         # Filtrar valores significativos de Columna X (Vacío)
         vacio_items = []
@@ -167,13 +177,12 @@ class VacioPoller:
             if val and is_valid_td(val):
                 td_tail.append({"row": idx, "td": val})
 
-        # Matriz simplificada del día en Movimientos
-        mov_items = []
-        for idx, row in enumerate(raw_mov):
-            row_num = idx + 3
-            cells = [c.strip() for c in row if c and c.strip()]
-            if cells:
-                mov_items.append({"row": row_num, "cells": cells})
+        # Muestra de tracking en Col H para detectar ediciones de notas/destinos
+        tracking_tail = []
+        for idx, row in enumerate(raw_h[-150:], start=max(4, len(raw_h) - 146)):
+            val = row[0].strip() if row and row[0] else ""
+            if val:
+                tracking_tail.append({"row": idx, "text": val})
 
         payload = {
             "day": self.day,
@@ -181,6 +190,7 @@ class VacioPoller:
             "vacio_items": vacio_items,
             "total_td_rows": len(raw_tds),
             "td_tail": td_tail,
+            "tracking_tail": tracking_tail,
             "mov_items": mov_items
         }
 
@@ -194,6 +204,7 @@ class VacioPoller:
             "day": self.day,
             "vacio_count": len(vacio_items),
             "total_td_rows": len(raw_tds),
+            "total_tracking_rows": len(tracking_tail),
             "mov_active_rows": len(mov_items),
             "sample_last_vacio": vacio_items[-3:] if vacio_items else []
         }
@@ -209,7 +220,7 @@ class VacioPoller:
     ) -> Dict[str, Any]:
         """
         Fase 2: Ejecuta la sincronización completa en capas (Tracking, VACÍO con bordes y Seguimiento #9fc5e8)
-        abarcando una ventana de días para capturar viajes de campo multi-día y retroactivos.
+        abarcando el día activo o la ventana solicitada.
         """
         results = {}
         t_start = time.time()
@@ -219,8 +230,10 @@ class VacioPoller:
             target_days = days
         elif self.day_explicit:
             target_days = [self.day]
-        else:
+        elif self.window_explicit:
             target_days = list(range(max(1, today - (self.window - 1)), today + 1))
+        else:
+            target_days = [today]
 
         print("\n" + "="*80)
         print(f"  FASE 2: EJECUTANDO SINCRONIZACIÓN EN CAPAS (MOTOR UNIFICADO)")
@@ -322,8 +335,8 @@ def main():
     parser.add_argument(
         "--window",
         type=int,
-        default=5,
-        help="Cantidad de días de ventana retroactiva a sincronizar si no se pasa --day (default: 5)."
+        default=None,
+        help="Cantidad de días de ventana retroactiva a sincronizar si no se pasa --day (por defecto: día de hoy)."
     )
     parser.add_argument(
         "--check-only",

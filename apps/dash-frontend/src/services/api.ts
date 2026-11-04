@@ -18,9 +18,20 @@ const API_BASE = resolveBackendUrl((import.meta as any).env?.VITE_API_URL);
 
 export const api = {
   async fetchNovedades(): Promise<Novedad[]> {
+    // ⚡ Priorizar vista relacional directa public.view_cards_diarias con Column Pruning
+    try {
+      const res = await fetch(`${API_BASE}/api/views/cards?limit=150`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.datos && Array.isArray(json.datos)) return json.datos;
+      }
+    } catch (e) {
+      console.warn('⚠️ [API] Fallback de cards a endpoint /api/dash/novedades:', e);
+    }
+
     const res = await fetch(`${API_BASE}/api/dash/novedades`);
     if (!res.ok) {
-      // Fallback
+      // Fallback secundario
       const fallbackRes = await fetch(`${API_BASE}/api/novedades`);
       if (!fallbackRes.ok) throw new Error('Error al cargar novedades');
       const json = await fallbackRes.json();
@@ -28,6 +39,36 @@ export const api = {
     }
     const json = await res.json();
     return json.data || [];
+  },
+
+  // 🎯 Patrón "Listen on Table, Fetch from View": Obtiene solo la fila modificada (< 1ms en Postgres)
+  async fetchNovedadPorId(id: number | string): Promise<Novedad | null> {
+    try {
+      const res = await fetch(`${API_BASE}/api/views/cards?id=${encodeURIComponent(id)}&limit=1`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.datos?.[0] || null;
+      }
+    } catch (e) {
+      console.warn('⚠️ Error al consultar fila única de novedad en vista:', e);
+    }
+    return null;
+  },
+
+  // 🎯 Batch fetch de IDs modificados (con debounce de 300-500ms)
+  async fetchNovedadesPorIds(ids: (number | string)[]): Promise<Novedad[]> {
+    if (!ids || ids.length === 0) return [];
+    try {
+      const idsParam = ids.map(id => encodeURIComponent(String(id))).join(',');
+      const res = await fetch(`${API_BASE}/api/views/cards?ids=${idsParam}&limit=${ids.length}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.datos || [];
+      }
+    } catch (e) {
+      console.warn('⚠️ Error al consultar lote de novedades en vista:', e);
+    }
+    return [];
   },
 
   async fetchFlota(): Promise<{ flota: FlotaItem[]; vencimientosObj: any[] }> {
