@@ -3,6 +3,7 @@ import { Pencil, Clock, Check, X, User, Calendar } from 'lucide-react';
 import { Novedad, Usuario } from '../../types/dash';
 import { useDashStore } from '../../store/useDashStore';
 import { PatenteMercosur } from '../common/PatenteMercosur';
+import { DriverNameBadge } from '../common/DriverNameBadge';
 
 interface NoveltyCardProps {
   novedad: Novedad;
@@ -253,9 +254,13 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
         >
           {/* Fila 1: Conductor + Botones de Acción */}
           <div className="flex items-center justify-between w-full -mt-0.5 mb-1">
-            <h3 className="font-extrabold text-black text-[14px] leading-tight uppercase truncate tracking-tight flex-1 pr-1">
-              {novedad.nom || 'SIN CONDUCTOR'}
-            </h3>
+            <div className="flex-1 pr-1 truncate min-w-0">
+              <DriverNameBadge
+                nombre={novedad.nom}
+                className="bg-transparent border-black/30 text-black hover:bg-black/10 hover:border-black/50"
+                textClassName="text-[13px] font-extrabold"
+              />
+            </div>
 
             {!modoCartelera && (
               <div className="flex items-center gap-1 shrink-0 -mt-1 -mr-1">

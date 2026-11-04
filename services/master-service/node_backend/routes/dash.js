@@ -775,13 +775,24 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
         res.json({ success: true, data: servs });
     });
 
-    // GET /api/dash/retorno — Personal de retorno
+    // GET /api/dash/retorno — Personal de retorno (headers mínimos requeridos por container Vuelve)
     router.get('/retorno', async (req, res) => {
         try {
             if (db && db.isConfigured()) {
-                const { rows } = await db.query(
-                    'SELECT * FROM public.view_personal_retorno ORDER BY fecha_retorno ASC, nombre ASC LIMIT 200'
-                );
+                const { rows } = await db.query(`
+                    SELECT 
+                        nombre,
+                        nombre AS nom,
+                        COALESCE(tractor, '') AS tractor,
+                        codigo_ayer,
+                        codigo_hoy,
+                        codigo_manana,
+                        retorna_cuando
+                    FROM public.view_personal_retorno
+                    WHERE retorna_cuando IN ('HOY', 'MANANA', 'MAÑANA')
+                    ORDER BY fecha_retorno ASC, nombre ASC
+                    LIMIT 150
+                `);
                 return res.json({ success: true, data: rows || [] });
             }
             res.json({ success: true, data: [] });

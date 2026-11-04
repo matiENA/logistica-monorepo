@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
 import { RetornoItem, FlotaItem } from '../../types/dash';
 import { PatenteMercosur } from '../common/PatenteMercosur';
+import { DriverNameBadge } from '../common/DriverNameBadge';
 import { useAutoScroll } from '../../hooks/useAutoScroll';
 
 interface ReturnColumnProps {
   retornos: RetornoItem[];
-  flota: FlotaItem[];
+  flota?: FlotaItem[];
   flexWeight: number;
 }
 
@@ -76,53 +77,26 @@ const renderInsigniaEstado = (code?: string) => {
 
 export const ReturnColumn: React.FC<ReturnColumnProps> = ({
   retornos,
-  flota,
   flexWeight
 }) => {
+  // Proyección ligera y directa: no procesa la tabla completa de flota en memoria
   const { vuelvenHoy, vuelvenManana } = useMemo(() => {
     let hoy: RetornoItem[] = [];
     let manana: RetornoItem[] = [];
 
     if (retornos && retornos.length > 0) {
-      const mapaTractor: Record<string, string> = {};
-      flota.forEach((f) => {
-        if (f?.nom && f?.tractor) {
-          mapaTractor[(f.nom || '').trim().toUpperCase()] = f.tractor;
-        }
-      });
-
-      const enriquecer = (r: RetornoItem): RetornoItem => ({
-        ...r,
-        tractor: r.tractor || mapaTractor[(r?.nom || '').trim().toUpperCase()] || ''
-      });
-
-      hoy = retornos
-        .filter((r) => (r?.retorna_cuando || '').toUpperCase() === 'HOY')
-        .map(enriquecer);
-      manana = retornos
-        .filter(
-          (r) =>
-            (r?.retorna_cuando || '').toUpperCase() === 'MANANA' ||
-            (r?.retorna_cuando || '').toUpperCase() === 'MAÑANA'
-        )
-        .map(enriquecer);
-    } else {
-      // Fallback si no hay retornos cargados aún
-      flota.forEach((ch) => {
-        if (ch.dias) {
-          hoy.push({
-            nom: ch.nom,
-            tractor: ch.tractor,
-            codigo_ayer: '-',
-            codigo_hoy: '-',
-            codigo_manana: '-'
-          });
-        }
-      });
+      hoy = retornos.filter(
+        (r) => (r?.retorna_cuando || '').toUpperCase() === 'HOY'
+      );
+      manana = retornos.filter(
+        (r) =>
+          (r?.retorna_cuando || '').toUpperCase() === 'MANANA' ||
+          (r?.retorna_cuando || '').toUpperCase() === 'MAÑANA'
+      );
     }
 
     return { vuelvenHoy: hoy, vuelvenManana: manana };
-  }, [retornos, flota]);
+  }, [retornos]);
 
   // Autoscroll para modo cartelera (TV)
   useAutoScroll('carrusel-cat-vuelve', [vuelvenHoy.length, vuelvenManana.length]);
@@ -173,15 +147,13 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
 
             {vuelvenHoy.map((ch, idx) => (
               <article
-                key={`hoy-${ch.nom}-${idx}`}
+                key={`hoy-${ch.nom || ch.nombre}-${idx}`}
                 className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 gap-2 shrink-0 shadow-xs"
               >
-                <div className="flex flex-col truncate flex-1 min-w-0 pr-1">
-                  <span className="font-black text-xs text-slate-900 dark:text-slate-100 truncate uppercase">
-                    {ch.nom}
-                  </span>
+                <div className="flex flex-col truncate flex-1 min-w-0 pr-1 gap-1">
+                  <DriverNameBadge nombre={ch.nom || ch.nombre} />
                   {ch.tractor && (
-                    <div className="mt-0.5">
+                    <div className="flex items-center">
                       <PatenteMercosur patente={ch.tractor} />
                     </div>
                   )}
@@ -208,15 +180,13 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
 
             {vuelvenManana.map((ch, idx) => (
               <article
-                key={`manana-${ch.nom}-${idx}`}
+                key={`manana-${ch.nom || ch.nombre}-${idx}`}
                 className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 gap-2 shrink-0 shadow-xs"
               >
-                <div className="flex flex-col truncate flex-1 min-w-0 pr-1">
-                  <span className="font-black text-xs text-slate-900 dark:text-slate-100 truncate uppercase">
-                    {ch.nom}
-                  </span>
+                <div className="flex flex-col truncate flex-1 min-w-0 pr-1 gap-1">
+                  <DriverNameBadge nombre={ch.nom || ch.nombre} />
                   {ch.tractor && (
-                    <div className="mt-0.5">
+                    <div className="flex items-center">
                       <PatenteMercosur patente={ch.tractor} />
                     </div>
                   )}
