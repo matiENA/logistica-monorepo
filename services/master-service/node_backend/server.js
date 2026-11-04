@@ -175,8 +175,7 @@ app.get('/api/datos', (req, res) => {
         diagramas: payload,
         ut: payload.ut || [],
         vencimientosObj: payload.vencimientosObj || [],
-        timestamp: cacheDatosGlobales.ultimaActualizacion,
-        usuarios: cacheDatosGlobales.usuarios || []
+        timestamp: cacheDatosGlobales.ultimaActualizacion
     });
 });
 

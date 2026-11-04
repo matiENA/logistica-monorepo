@@ -52,8 +52,7 @@ function buildSocketPayload(cache) {
             ut: cache.diagramas.ut || []
         },
         ut: cache.diagramas.ut || [],
-        vencimientosObj: cache.diagramas.vencimientosObj || [],
-        usuarios: cache.usuarios || []
+        vencimientosObj: cache.diagramas.vencimientosObj || []
     };
 }
 
@@ -594,7 +593,6 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
         cacheDatosGlobales.habilitaciones = habsMap;
         cacheDatosGlobales.certificados = certsMap;
         cacheDatosGlobales.aptosMedicos = aptosMap;
-        if (rowsUsuarios.length > 0) cacheDatosGlobales.usuarios = rowsUsuarios;
         cacheDatosGlobales.ultimaActualizacion = new Date().toISOString();
 
         // 🛡️ Actualizar firma del Dirty Check tras sincronización exitosa
@@ -1566,18 +1564,6 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
         cacheDatosGlobales.marcasTractores = marcasTractores;
         cacheDatosGlobales.marcasSemis = marcasSemis;
         cacheDatosGlobales.ultimaActualizacion = new Date().toISOString();
-        
-        // Load users for mentions autocomplete
-        try {
-            const rowsUsuarios = await fetchRango(ID_SPREADSHEET_MASTER, "'DB_Usuarios'!A:C");
-            cacheDatosGlobales.usuarios = rowsUsuarios
-                .filter(row => row[0] && String(row[0]).trim().toLowerCase() !== 'usuario')
-                .map(row => String(row[0]).trim().toUpperCase());
-            console.log(`👥 Usuarios cargados para menciones: ${cacheDatosGlobales.usuarios.length}`);
-        } catch (eUsers) {
-            console.error('Error cargando usuarios:', eUsers);
-            if (!cacheDatosGlobales.usuarios) cacheDatosGlobales.usuarios = [];
-        }
         
         // 👉 Auto-enriquecer novedades con los tractores / n_ute de la flota recién ensamblada y persistir en Sheets
         try {

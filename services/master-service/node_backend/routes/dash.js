@@ -43,7 +43,6 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
                 semis: cacheDatosGlobales.semis || cacheDatosGlobales.diagramas?.semis || [],
                 servicios_unidades: cacheDatosGlobales.serviciosUnidades || cacheDatosGlobales.diagramas?.servicios_unidades || [],
                 servicios_choferes: cacheDatosGlobales.serviciosChoferes || cacheDatosGlobales.diagramas?.servicios_choferes || [],
-                usuarios: cacheDatosGlobales.usuarios || [],
                 timestamp: cacheDatosGlobales.ultimaActualizacion
             });
         }
@@ -128,18 +127,19 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
         });
     });
 
-    // GET /api/dash/usuarios — Lista de usuarios para @menciones
+    // GET /api/dash/usuarios — Lista de usuarios para @menciones (directo de la tabla relacional 'dash')
     router.get('/usuarios', async (req, res) => {
-        if (cacheDatosGlobales.usuarios && cacheDatosGlobales.usuarios.length > 0) {
-            return res.json({
-                success: true,
-                data: cacheDatosGlobales.usuarios
-            });
-        }
         try {
             if (db && db.isConfigured()) {
-                const { rows } = await db.query('SELECT * FROM public.view_dash_usuarios ORDER BY usuario ASC');
-                return res.json({ success: true, fuente: "POSTGRES", data: rows || [] });
+                const { rows } = await db.query('SELECT id, usuario, rol FROM public.view_dash_usuarios ORDER BY usuario ASC');
+                return res.json({ success: true, fuente: "POSTGRES_DASH", data: rows || [] });
+            }
+            const { supabase } = require('../utils/shared');
+            if (supabase) {
+                const { data, error } = await supabase.from('view_dash_usuarios').select('id, usuario, rol').order('usuario', { ascending: true });
+                if (!error && data) {
+                    return res.json({ success: true, fuente: "SUPABASE_VIEW", data });
+                }
             }
         } catch (e) {
             console.warn("⚠️ [DASH] Error consultando view_dash_usuarios:", e.message);
