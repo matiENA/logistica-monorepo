@@ -92,7 +92,7 @@ class VacioPoller:
         self.day_explicit = (day is not None)
         self.day = day or datetime.now().day
         self.window_explicit = (window is not None)
-        self.window = window or 1
+        self.window = window or 4
         self._creds = get_google_credentials(scopes=SCOPES)
         self._service = build("sheets", "v4", credentials=self._creds)
 
@@ -230,10 +230,9 @@ class VacioPoller:
             target_days = days
         elif self.day_explicit:
             target_days = [self.day]
-        elif self.window_explicit:
-            target_days = list(range(max(1, today - (self.window - 1)), today + 1))
         else:
-            target_days = [today]
+            # Ventana deslizante (default 4 días) para cubrir viajes iniciados en días previos que vacían hoy
+            target_days = list(range(max(1, today - (self.window - 1)), today + 1))
 
         print("\n" + "="*80)
         print(f"  FASE 2: EJECUTANDO SINCRONIZACIÓN EN CAPAS (MOTOR UNIFICADO)")
