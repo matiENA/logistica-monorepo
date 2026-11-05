@@ -16,6 +16,7 @@ interface LibresRowProps {
   onCambiarServicio?: (id: number | string, servicio: string) => void;
   onAgregarMencion?: (id: number | string, usuario: string) => void;
   onQuitarMencion?: (id: number | string, usuario: string) => void;
+  onNovedadPublicada?: (nueva?: Novedad | null) => void;
   onRecargar: () => void;
 }
 
@@ -36,6 +37,7 @@ export const LibresRow: React.FC<LibresRowProps> = ({
   onCambiarServicio,
   onAgregarMencion,
   onQuitarMencion,
+  onNovedadPublicada,
   onRecargar
 }) => {
   const { modoCartelera, terminales } = useDashStore();
@@ -99,7 +101,16 @@ export const LibresRow: React.FC<LibresRowProps> = ({
       {/* Contenedor principal sin clipping vertical: renderización de terminales dentro de class="flex items-center gap-3 w-full" */}
       <div ref={rowContainerRef} className="flex items-center gap-3 w-full relative">
         {/* Botón Quick Add Libre */}
-        <QuickAddLibre flota={flota} onNovedadPublicada={onRecargar} />
+        <QuickAddLibre
+          flota={flota}
+          onNovedadPublicada={(nueva) => {
+            if (onNovedadPublicada) {
+              onNovedadPublicada(nueva);
+            } else {
+              onRecargar();
+            }
+          }}
+        />
 
         {/* Carrusel Horizontal de Tarjetas Libres */}
         <div

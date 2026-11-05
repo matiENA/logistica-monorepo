@@ -195,58 +195,75 @@ async function sincronizarMovimientosDesdeSheets(cacheDatosGlobales = null, io =
         const activeUnitIds = validPareos.map(p => p.id_unidad);
         const activeChoferIds = validPareos.map(p => p.id_chofer);
 
-        // PASO 3: Ejecutar desuniones (eliminar de movimientos y liberar choferes)
-        if (desunirIds.length > 0) {
-            const delDes = await db.query(`DELETE FROM public.movimientos WHERE id_unidad = ANY($1::uuid[]) RETURNING id`, [desunirIds]);
-            desunidosDeleted = delDes.rowCount || 0;
+        // Diffing O(1) contra public.movimientos para evitar Write Amplification y rebuilds forzados cada 5 min
+        const currentMovsRes = await db.query(`SELECT id_unidad, id_chofer FROM public.movimientos`);
+        const currentByUnit = new Map();
+        const currentByChofer = new Map();
+        (currentMovsRes.rows || []).forEach(r => {
+            if (r.id_unidad) currentByUnit.set(r.id_unidad, r.id_chofer);
+            if (r.id_chofer) currentByChofer.set(r.id_chofer, r.id_unidad);
+        });
 
-            await db.query(`
-                UPDATE public.choferes
-                SET unidad_id = NULL,
-                    estado = CASE WHEN estado = 'circulando' THEN 'inactivo' ELSE estado END,
-                    actualizado_el = NOW()
-                WHERE unidad_id = ANY($1::uuid[])
-            `, [desunirIds]);
+        const desunirEfectivos = desunirIds.filter(uId => currentByUnit.has(uId));
+        const pareosModificados = validPareos.filter(
+            p => currentByUnit.get(p.id_unidad) !== p.id_chofer || currentByChofer.get(p.id_chofer) !== p.id_unidad
+        );
+        const huboCambiosMovimientos = desunirEfectivos.length > 0 || pareosModificados.length > 0;
 
-            await db.query(`
-                UPDATE public.unidades
-                SET estado = 'disponible'
-                WHERE id = ANY($1::uuid[])
-            `, [desunirIds]);
-        }
+        if (huboCambiosMovimientos) {
+            // PASO 3: Ejecutar desuniones efectivas (eliminar de movimientos y liberar choferes)
+            if (desunirEfectivos.length > 0) {
+                const delDes = await db.query(`DELETE FROM public.movimientos WHERE id_unidad = ANY($1::uuid[]) RETURNING id`, [desunirEfectivos]);
+                desunidosDeleted = delDes.rowCount || 0;
 
-        // PASO 4: Limpiar asignaciones previas de choferes o unidades activas
-        if (activeUnitIds.length > 0) {
-            await db.query(`DELETE FROM public.movimientos WHERE id_unidad = ANY($1::uuid[]) OR id_chofer = ANY($2::uuid[])`, [activeUnitIds, activeChoferIds]);
-        }
+                await db.query(`
+                    UPDATE public.choferes
+                    SET unidad_id = NULL,
+                        estado = CASE WHEN estado = 'circulando' THEN 'inactivo' ELSE estado END,
+                        actualizado_el = NOW()
+                    WHERE unidad_id = ANY($1::uuid[])
+                `, [desunirEfectivos]);
 
-        // PASO 5: Insertar pareos activos
-        if (validPareos.length > 0) {
-            const insRes = await db.query(`
-                INSERT INTO public.movimientos (id_unidad, id_chofer, actualizado_el)
-                SELECT id_unidad, id_chofer, NOW()
-                FROM jsonb_to_recordset($1::jsonb) AS x(id_unidad uuid, id_chofer uuid)
-                ON CONFLICT (id_unidad) DO UPDATE SET
-                  id_chofer = EXCLUDED.id_chofer,
-                  actualizado_el = NOW()
-                RETURNING id
-            `, [JSON.stringify(validPareos)]);
-            insertados = insRes.rowCount || 0;
+                await db.query(`
+                    UPDATE public.unidades
+                    SET estado = 'disponible'
+                    WHERE id = ANY($1::uuid[])
+                `, [desunirEfectivos]);
+            }
 
-            await db.query(`
-                UPDATE public.choferes
-                SET unidad_id = m.id_unidad,
-                    estado = 'circulando',
-                    actualizado_el = NOW()
-                FROM jsonb_to_recordset($1::jsonb) AS m(id_unidad uuid, id_chofer uuid)
-                WHERE choferes.id = m.id_chofer
-            `, [JSON.stringify(validPareos)]);
+            // PASO 4 y 5: Actualizar únicamente los pareos modificados o nuevos
+            if (pareosModificados.length > 0) {
+                const modUnitIds = pareosModificados.map(p => p.id_unidad);
+                const modChoferIds = pareosModificados.map(p => p.id_chofer);
 
-            await db.query(`
-                UPDATE public.unidades
-                SET estado = 'circulando'
-                WHERE id = ANY($1::uuid[])
-            `, [activeUnitIds]);
+                await db.query(`DELETE FROM public.movimientos WHERE id_unidad = ANY($1::uuid[]) OR id_chofer = ANY($2::uuid[])`, [modUnitIds, modChoferIds]);
+
+                const insRes = await db.query(`
+                    INSERT INTO public.movimientos (id_unidad, id_chofer, actualizado_el)
+                    SELECT id_unidad, id_chofer, NOW()
+                    FROM jsonb_to_recordset($1::jsonb) AS x(id_unidad uuid, id_chofer uuid)
+                    ON CONFLICT (id_unidad) DO UPDATE SET
+                      id_chofer = EXCLUDED.id_chofer,
+                      actualizado_el = NOW()
+                    RETURNING id
+                `, [JSON.stringify(pareosModificados)]);
+                insertados = insRes.rowCount || 0;
+
+                await db.query(`
+                    UPDATE public.choferes
+                    SET unidad_id = m.id_unidad,
+                        estado = 'circulando',
+                        actualizado_el = NOW()
+                    FROM jsonb_to_recordset($1::jsonb) AS m(id_unidad uuid, id_chofer uuid)
+                    WHERE choferes.id = m.id_chofer
+                `, [JSON.stringify(pareosModificados)]);
+
+                await db.query(`
+                    UPDATE public.unidades
+                    SET estado = 'circulando'
+                    WHERE id = ANY($1::uuid[])
+                `, [modUnitIds]);
+            }
         }
     } else if (supabase) {
         // Fallback vía cliente PostgREST
@@ -298,14 +315,19 @@ async function sincronizarMovimientosDesdeSheets(cacheDatosGlobales = null, io =
         }
     }
 
-    console.log(`✅ [Partición 6] Supabase actualizado en ${Date.now() - t0} ms (${insertados} pareos insertados/actualizados, ${desunidosDeleted} desuniones aplicadas).`);
+    const huboDelta = insertados > 0 || desunidosDeleted > 0;
+    if (huboDelta) {
+        console.log(`✅ [Partición 6] Supabase actualizado en ${Date.now() - t0} ms (${insertados} pareos modificados, ${desunidosDeleted} desuniones aplicadas).`);
+    } else {
+        console.log(`✅ [Partición 6] Sin cambios en pareos/desuniones (${pareos.length} pareos evaluados en ${Date.now() - t0} ms, Zero Write/Broadcast).`);
+    }
 
-    // PASO 6: Reensamblado instantáneo de la Hot RAM en memoria y broadcast WebSocket
-    if (cacheDatosGlobales) {
+    // PASO 6: Reensamblar Hot RAM únicamente si hubo cambios reales o si la RAM aún está fría en el arranque
+    if (cacheDatosGlobales && (huboDelta || !cacheDatosGlobales.diagramas)) {
         try {
             const { flujoEncoladoGlobal } = require('../cache/builder');
             await flujoEncoladoGlobal(cacheDatosGlobales, io, ioDash, { forceFull: true, recargarKm: false });
-            console.log("⚡ [Partición 6] Hot RAM reensamblada y broadcast emitido tras sincronización.");
+            console.log("⚡ [Partición 6] Hot RAM reensamblada tras cambio efectivo o arranque inicial.");
         } catch (eRam) {
             console.error("⚠️ [Partición 6] Error refrescando RAM:", eRam.message);
         }

@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Search } from 'lucide-react';
+import { toast } from 'sonner';
 import { useDashStore } from '../../store/useDashStore';
-import { FlotaItem } from '../../types/dash';
+import { FlotaItem, Novedad } from '../../types/dash';
 import { api } from '../../services/api';
 import { PatenteMercosur } from '../common/PatenteMercosur';
 
 interface QuickAddLibreProps {
   flota: FlotaItem[];
-  onNovedadPublicada: () => void;
+  onNovedadPublicada: (nueva?: Novedad | null) => void;
 }
 
 export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
@@ -35,7 +36,7 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
 
   const handleToggle = () => {
     if (!sesion || !sesion.usuario) {
-      alert('Debe iniciar sesión para agregar una novedad.');
+      toast.warning('Debe iniciar sesión para agregar una novedad.');
       return;
     }
     const nuevo = !abierto;
@@ -79,10 +80,10 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
         creador: sesion?.usuario || 'OPERADOR'
       };
 
-      await api.despacharNovedad({ action: 'nueva', payload });
-      onNovedadPublicada();
+      const res = await api.despacharNovedad({ action: 'nueva', payload });
+      onNovedadPublicada(res?.data || null);
     } catch (err: any) {
-      alert(`Error al liberar chofer: ${err.message}`);
+      toast.error(`Error al liberar chofer: ${err.message}`);
     } finally {
       setEnviando(false);
     }

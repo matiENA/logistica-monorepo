@@ -1,19 +1,58 @@
 const express = require('express');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { normalizar, serviceAccountAuth, fetchRango: sharedFetchRango, ID_SPREADSHEET_MASTER: SHARED_ID_MASTER, ID_SHEET_MOVIMIENTOS, getFechaArgentina } = require('./utils/shared');
+const db = require('./utils/db');
+const {
+    normalizar,
+    serviceAccountAuth: sharedServiceAccountAuth,
+    fetchRango: sharedFetchRango,
+    ID_SHEET_MOVIMIENTOS,
+    getFechaArgentina
+} = require('./utils/shared');
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUuid(val) {
+    return typeof val === 'string' && UUID_RE.test(val.trim());
+}
+
+function cleanPatenteSql(patenteRaw) {
+    if (!patenteRaw) return '';
+    const clean = String(patenteRaw).trim().toUpperCase();
+    if (clean === 'S/D' || clean === '-') return '';
+    return clean.replace(/[\s\-_.]/g, '');
+}
+
+const MAPA_SERVICIO_CANONICO = {
+    'CM': 'CAMPO',
+    'CAMPO': 'CAMPO',
+    'MET': 'METANOL',
+    'METANOL': 'METANOL',
+    'LIV': 'LIVIANO',
+    'LIV.': 'LIVIANO',
+    'LIVIANO': 'LIVIANO',
+    'PP': 'PRODUCTOS PRIMARIOS',
+    'PRODUCTOS PRIMARIOS': 'PRODUCTOS PRIMARIOS',
+    'EURO': 'ABAST',
+    'TDS': 'ABAST',
+    'ABAST': 'ABAST',
+    'GLP': 'GLP',
+    'GRALES': 'GRALES',
+    'GRALES.': 'GRALES.',
+    'PASIVO EN BASE': 'PASIVO EN BASE',
+    'SOCIO': 'SOCIO'
+};
 
 async function inyectarServicioEnSheetDispo(tractorPatente, choferNom, servicioDB, serviceAccountAuth, fetchRango) {
-    if (!servicioDB) return;
-    const tractor = (tractorPatente || '').trim().toUpperCase();
+    if (!servicioDB || !serviceAccountAuth || !fetchRango) return;
+    const tractor = cleanPatenteSql(tractorPatente);
     const nomNorm = choferNom ? normalizar(choferNom) : '';
 
     const spreadsheetId = process.env.MES_MOVIMIENTOS_ID || ID_SHEET_MOVIMIENTOS;
-    
+    if (!spreadsheetId) return;
+
     // Obtener la fecha actual en Argentina
     const hoyAr = (typeof getFechaArgentina === 'function') ? getFechaArgentina() : new Date();
     const diaActual = hoyAr.getDate();
     const mesActual = hoyAr.getMonth();
-    const anioActual = hoyAr.getFullYear();
 
     const mesesLargo = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
@@ -22,15 +61,15 @@ async function inyectarServicioEnSheetDispo(tractorPatente, choferNom, servicioD
         const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
         const metaRes = await serviceAccountAuth.request({ url: metaUrl });
         const sheetTitles = metaRes.data.sheets.map(s => s.properties.title);
-        
+
         // Pestaña dinámica del mes: ej: "AGOSTO 2026- Mov.Unidades y Choferes"
         const mesNombreUpper = mesesLargo[mesActual].toUpperCase();
         nombreHoja = sheetTitles.find(s => s.toUpperCase().includes(mesNombreUpper) && s.toLowerCase().includes('mov.unidades')) ||
                      sheetTitles.find(s => s.toLowerCase().includes('mov.unidades')) ||
                      sheetTitles.find(s => s.toLowerCase().includes('dispo')) ||
                      sheetTitles[0];
-    } catch(e) {
-        console.error("[Dispo] Error obteniendo pestañas:", e);
+    } catch (e) {
+        console.error("[Dispo] Error obteniendo pestañas:", e.message || e);
         return;
     }
 
@@ -86,7 +125,7 @@ async function inyectarServicioEnSheetDispo(tractorPatente, choferNom, servicioD
         // 2. Buscar fila por tractor o chofer
         let targetRowIdx = -1;
         for (let i = 0; i < rows.length; i++) {
-            const tVal = String(rows[i][tractorColIdx] || '').trim().toUpperCase();
+            const tVal = cleanPatenteSql(rows[i][tractorColIdx]);
             if (tractor && tVal === tractor) {
                 targetRowIdx = i + 1;
                 break;
@@ -126,441 +165,775 @@ async function inyectarServicioEnSheetDispo(tractorPatente, choferNom, servicioD
         });
 
         console.log(`✓ [Dispo] Servicio [${servicioDB}] inyectado en columna Dispo. (${rangeToUpdate}) para tractor ${tractor}`);
-    } catch(e) {
-        console.error("[Dispo] Error inyectando servicio:", e);
+    } catch (e) {
+        console.error("[Dispo] Error inyectando servicio:", e.message || e);
     }
 }
 
 // ==============================================================
-// 1. CARGA E INSPECCIÓN DE NOVEDADES EN RAM
+// HELPERS RELACIONALES POSTGRESQL (public.novedades + vistas)
 // ==============================================================
-async function cargarNovedades(fetchRango, ID_SPREADSHEET_MASTER, cacheDatosGlobales, mapaChoferesInput = null) {
+async function resolveTipoNovedad(payload) {
+    if (isValidUuid(payload?.tipo_novedad_id)) {
+        const byId = await db.query(
+            `SELECT id, codigo FROM public.tipos_novedad WHERE id = $1::uuid LIMIT 1`,
+            [payload.tipo_novedad_id.trim()]
+        );
+        if (byId.rows.length > 0) return byId.rows[0];
+    }
+
+    const codeCand = String(
+        payload?.tipo_novedad || payload?.tipo || payload?.tipo_novedad_titulo || 'LIBRES'
+    ).trim();
+
+    if (codeCand) {
+        const byCode = await db.query(
+            `SELECT id, codigo FROM public.tipos_novedad
+             WHERE UPPER(TRIM(codigo)) = UPPER(TRIM($1))
+                OR UPPER(TRIM(titulo)) = UPPER(TRIM($1))
+             LIMIT 1`,
+            [codeCand]
+        );
+        if (byCode.rows.length > 0) return byCode.rows[0];
+    }
+
+    const fallback = await db.query(
+        `SELECT id, codigo FROM public.tipos_novedad
+         ORDER BY (codigo = 'LIBRES') DESC, activo DESC, orden ASC
+         LIMIT 1`
+    );
+    return fallback.rows[0] || null;
+}
+
+async function resolveTerminalId(terminalIdRaw, terminalCodigoRaw, esLibre = true) {
+    if (!esLibre) return null;
+
+    const codeClean = String(terminalCodigoRaw || '').trim();
+    const idClean = String(terminalIdRaw || '').trim();
+
+    if (!idClean && !codeClean) return null;
+
+    if (isValidUuid(idClean)) {
+        const byId = await db.query(
+            `SELECT id FROM public.terminales WHERE id = $1::uuid LIMIT 1`,
+            [idClean]
+        );
+        if (byId.rows.length > 0) return byId.rows[0].id;
+    }
+
+    if (codeClean) {
+        const byCode = await db.query(
+            `SELECT id FROM public.terminales
+             WHERE UPPER(TRIM(codigo)) = UPPER(TRIM($1))
+                OR UPPER(TRIM(nombre)) = UPPER(TRIM($1))
+             LIMIT 1`,
+            [codeClean]
+        );
+        if (byCode.rows.length > 0) return byCode.rows[0].id;
+    }
+
+    return null;
+}
+
+async function resolveCreadoPorId(creadoPorIdRaw, creadorNombreRaw) {
+    // Validar estrictamente contra public.dash(id) para respetar FK novedades_creado_por_id_fkey
+    if (isValidUuid(creadoPorIdRaw)) {
+        const byId = await db.query(
+            `SELECT id FROM public.dash WHERE id = $1::uuid LIMIT 1`,
+            [creadoPorIdRaw.trim()]
+        );
+        if (byId.rows.length > 0) return byId.rows[0].id;
+    }
+
+    const nomClean = String(creadorNombreRaw || '').trim();
+    if (nomClean) {
+        const byName = await db.query(
+            `SELECT id FROM public.dash WHERE UPPER(TRIM(nombre)) = UPPER(TRIM($1)) LIMIT 1`,
+            [nomClean]
+        );
+        if (byName.rows.length > 0) return byName.rows[0].id;
+    }
+
+    return null;
+}
+
+async function resolveChoferYUnidad(payload, cacheDatosGlobales) {
+    let choferId = null;
+    let choferUnidadFallback = null;
+    let unidadId = null;
+
+    const rawChoferUuid = payload?.chofer_id || payload?.id_chofer || null;
+    const rawNom = String(payload?.nom || payload?.nombre || payload?.chofer || '').trim();
+    const patTractor = cleanPatenteSql(payload?.tractor);
+    const rawUte = String(payload?.n_ute || '').trim();
+
+    // 1. Resolver Chofer
+    if (isValidUuid(rawChoferUuid)) {
+        const chRes = await db.query(
+            `SELECT id, nombre, unidad_id FROM public.choferes WHERE id = $1::uuid LIMIT 1`,
+            [rawChoferUuid.trim()]
+        );
+        if (chRes.rows.length > 0) {
+            const dbNomNorm = normalizar(chRes.rows[0].nombre || '');
+            const inputNomNorm = rawNom ? normalizar(rawNom) : '';
+            // Si el operador escribió otro nombre distinto manualmente, priorizar el texto escrito
+            if (!inputNomNorm || dbNomNorm === inputNomNorm || dbNomNorm.includes(inputNomNorm) || inputNomNorm.includes(dbNomNorm)) {
+                choferId = chRes.rows[0].id;
+                choferUnidadFallback = chRes.rows[0].unidad_id || null;
+            }
+        }
+    }
+
+    if (!choferId && rawNom) {
+        const chByName = await db.query(
+            `SELECT id, unidad_id FROM public.choferes
+             WHERE TRANSLATE(UPPER(TRIM(REPLACE(nombre, ',', ''))), 'ÁÉÍÓÚÜÑ', 'AEIOUUN') =
+                   TRANSLATE(UPPER(TRIM(REPLACE($1, ',', ''))), 'ÁÉÍÓÚÜÑ', 'AEIOUUN')
+             ORDER BY (COALESCE(estado, '') = 'circulando') DESC, id ASC
+             LIMIT 1`,
+            [rawNom]
+        );
+        if (chByName.rows.length > 0) {
+            choferId = chByName.rows[0].id;
+            choferUnidadFallback = chByName.rows[0].unidad_id || null;
+        } else if (cacheDatosGlobales?.mapaNombreDiagramaAId) {
+            const mappedId = cacheDatosGlobales.mapaNombreDiagramaAId[normalizar(rawNom)];
+            if (isValidUuid(mappedId)) {
+                const verifyCh = await db.query(
+                    `SELECT id, unidad_id FROM public.choferes WHERE id = $1::uuid LIMIT 1`,
+                    [mappedId]
+                );
+                if (verifyCh.rows.length > 0) {
+                    choferId = verifyCh.rows[0].id;
+                    choferUnidadFallback = verifyCh.rows[0].unidad_id || null;
+                }
+            }
+        }
+    }
+
+    // 2. Resolver Unidad (respetando ediciones manuales de patente de tractor)
+    if (isValidUuid(payload?.unidad_id)) {
+        const uRes = await db.query(
+            `SELECT u.id, t.patente AS tractor_patente
+             FROM public.unidades u
+             LEFT JOIN public.tractores t ON u.tractor_id = t.id
+             WHERE u.id = $1::uuid
+             LIMIT 1`,
+            [payload.unidad_id.trim()]
+        );
+        if (uRes.rows.length > 0) {
+            const dbPat = cleanPatenteSql(uRes.rows[0].tractor_patente);
+            if (!patTractor || dbPat === patTractor) {
+                unidadId = uRes.rows[0].id;
+            }
+        }
+    }
+
+    if (!unidadId && patTractor) {
+        const uByTractor = await db.query(
+            `SELECT u.id
+             FROM public.unidades u
+             JOIN public.tractores t ON u.tractor_id = t.id
+             WHERE REGEXP_REPLACE(UPPER(COALESCE(t.patente, '')), '[\\s\\-_.]', '', 'g') = $1
+             ORDER BY (u.estado = 'circulando') DESC, u.n_ute ASC NULLS LAST
+             LIMIT 1`,
+            [patTractor]
+        );
+        if (uByTractor.rows.length > 0) {
+            unidadId = uByTractor.rows[0].id;
+        }
+    }
+
+    if (!unidadId && rawUte && rawUte.toUpperCase() !== 'S/D') {
+        const uByUte = await db.query(
+            `SELECT id FROM public.unidades WHERE UPPER(TRIM(n_ute)) = UPPER(TRIM($1)) LIMIT 1`,
+            [rawUte]
+        );
+        if (uByUte.rows.length > 0) {
+            unidadId = uByUte.rows[0].id;
+        }
+    }
+
+    if (!unidadId && choferId) {
+        const movRes = await db.query(
+            `SELECT id_unidad FROM public.movimientos WHERE id_chofer = $1::uuid LIMIT 1`,
+            [choferId]
+        );
+        if (movRes.rows.length > 0 && movRes.rows[0].id_unidad) {
+            unidadId = movRes.rows[0].id_unidad;
+        } else if (choferUnidadFallback) {
+            unidadId = choferUnidadFallback;
+        }
+    }
+
+    // 3. Caso especial: el operador escribió una patente en el campo Conductor/Patente sin elegir del dropdown
+    if (!choferId && !unidadId && rawNom) {
+        const patFromNom = cleanPatenteSql(rawNom);
+        if (patFromNom.length >= 5 && patFromNom.length <= 8) {
+            const uFromNom = await db.query(
+                `SELECT u.id AS unidad_id, m.id_chofer AS chofer_id
+                 FROM public.unidades u
+                 JOIN public.tractores t ON u.tractor_id = t.id
+                 LEFT JOIN public.movimientos m ON m.id_unidad = u.id
+                 WHERE REGEXP_REPLACE(UPPER(COALESCE(t.patente, '')), '[\\s\\-_.]', '', 'g') = $1
+                 ORDER BY (m.id_chofer IS NOT NULL) DESC
+                 LIMIT 1`,
+                [patFromNom]
+            );
+            if (uFromNom.rows.length > 0) {
+                unidadId = uFromNom.rows[0].unidad_id;
+                if (uFromNom.rows[0].chofer_id) choferId = uFromNom.rows[0].chofer_id;
+            }
+        }
+    }
+
+    return { choferId, unidadId };
+}
+
+async function actualizarServicioChoferSiCorresponde(choferId, rawServicio, cacheDatosGlobales = null) {
+    if (!choferId || !rawServicio) return false;
+    const sUpper = String(rawServicio).trim().toUpperCase();
+    if (!sUpper || sUpper === 'S/A') return false;
+
+    const targetDenom = MAPA_SERVICIO_CANONICO[sUpper] || sUpper;
+    const srvRes = await db.query(
+        `SELECT id, denominacion FROM public.servicios_choferes
+         WHERE UPPER(TRIM(denominacion)) = $1
+           AND denominacion !~ '^[0-9]+$'
+         LIMIT 1`,
+        [targetDenom]
+    );
+
+    if (srvRes.rows.length === 0) return false;
+    const srvRow = srvRes.rows[0];
+
+    await db.query(
+        `UPDATE public.choferes SET servicio_id = $1::uuid, actualizado_el = NOW() WHERE id = $2::uuid`,
+        [srvRow.id, choferId]
+    );
+
+    // Sincronizar también en RAM si está cargada para que /api/dash/flota refleje el cambio al instante
+    if (cacheDatosGlobales?.diagramas?.diagramas && Array.isArray(cacheDatosGlobales.diagramas.diagramas)) {
+        const chRam = cacheDatosGlobales.diagramas.diagramas.find(c => String(c.id) === String(choferId));
+        if (chRam) {
+            chRam.srv_chofer = srvRow.denominacion;
+            chRam.srv = srvRow.denominacion;
+        }
+    }
+    return true;
+}
+
+async function obtenerCardEnriquecida(idNovedad) {
+    const viewRes = await db.query(
+        `SELECT * FROM public.view_cards_diarias WHERE id = $1::bigint LIMIT 1`,
+        [idNovedad]
+    );
+    if (viewRes.rows.length > 0) return viewRes.rows[0];
+
+    // Fallback directo sin filtro de 14 días en caso de editar/consultar un registro histórico
+    const fallbackRes = await db.query(
+        `SELECT
+            n.id,
+            n.id AS card_id,
+            tn.codigo AS tipo_novedad,
+            tn.codigo AS tipo,
+            tn.id AS tipo_novedad_id,
+            tn.titulo AS tipo_novedad_titulo,
+            tn.bg_color AS tipo_bg_color,
+            tn.text_color AS tipo_text_color,
+            COALESCE(tn.requiere_fecha_objetivo, false) AS requiere_fecha_objetivo,
+            COALESCE(tn.imprime_nota_movimientos, false) AS imprime_nota_movimientos,
+            n.fecha_objetivo,
+            n.fecha_objetivo AS fecha,
+            n.fecha_resolucion,
+            n.detalle,
+            n.resuelto,
+            COALESCE(n.prioridad, 'media'::text) AS prioridad,
+            n.creado_el,
+            n.creado_el AS "timestamp",
+            n.creado_por_id,
+            COALESCE(d_user.nombre, 'DASH'::text) AS creador,
+            COALESCE(d_user.nombre, 'DASH'::text) AS usuario,
+            c.id AS chofer_id,
+            UPPER(TRIM(BOTH FROM COALESCE(c.nombre, ''::text))) AS nom,
+            UPPER(TRIM(BOTH FROM COALESCE(c.nombre, ''::text))) AS chofer_nombre,
+            COALESCE(c.estado, 'disponible'::text) AS chofer_estado,
+            cd.telefono AS chofer_telefono,
+            c.foto,
+            u.id AS unidad_id,
+            UPPER(TRIM(BOTH FROM COALESCE(t.patente, ''::text))) AS tractor,
+            UPPER(TRIM(BOTH FROM COALESCE(s.patente, ''::text))) AS semi,
+            s.cisternado,
+            COALESCE(u.n_ute, 'S/D'::text) AS n_ute,
+            UPPER(TRIM(BOTH FROM COALESCE(sc.denominacion, su.denominacion, 'S/A'::text))) AS srv,
+            UPPER(TRIM(BOTH FROM COALESCE(sc.denominacion, su.denominacion, 'S/A'::text))) AS servicio,
+            c.servicio_id AS servicio_chofer_id,
+            CASE WHEN tn.codigo = 'LIBRES' THEN COALESCE(term.codigo, '') ELSE '' END AS terminal,
+            CASE WHEN tn.codigo = 'LIBRES' THEN n.terminal_id ELSE NULL::uuid END AS terminal_id,
+            CASE WHEN tn.codigo = 'LIBRES' THEN term.nombre ELSE NULL::text END AS terminal_nombre,
+            COALESCE((
+                SELECT array_agg(m.usuario_nombre)
+                FROM public.dash_menciones m
+                WHERE m.novedad_id = n.id
+            ), ARRAY[]::text[]) AS menciones
+         FROM public.novedades n
+         JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
+         LEFT JOIN public.choferes c ON n.chofer_id = c.id
+         LEFT JOIN public.servicios_choferes sc ON c.servicio_id = sc.id
+         LEFT JOIN public.chofer_documentacion cd ON cd.chofer_id = c.id
+         LEFT JOIN public.unidades u ON n.unidad_id = u.id
+         LEFT JOIN public.tractores t ON u.tractor_id = t.id
+         LEFT JOIN public.semis s ON u.semi_id = s.id
+         LEFT JOIN public.servicios_unidades su ON u.servicio_id = su.id
+         LEFT JOIN public.terminales term ON n.terminal_id = term.id
+         LEFT JOIN public.dash d_user ON n.creado_por_id = d_user.id
+         WHERE n.id = $1::bigint
+         LIMIT 1`,
+        [idNovedad]
+    );
+    return fallbackRes.rows[0] || null;
+}
+
+function sincronizarEspejoRamLocal(cacheDatosGlobales, card) {
+    if (!cacheDatosGlobales || !card) return;
+    if (!Array.isArray(cacheDatosGlobales.novedades)) cacheDatosGlobales.novedades = [];
+    const idx = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(card.id));
+    if (idx > -1) {
+        cacheDatosGlobales.novedades[idx] = card;
+    } else {
+        cacheDatosGlobales.novedades.unshift(card);
+    }
+}
+
+// ==============================================================
+// 1. CARGA E INSPECCIÓN DE NOVEDADES (DESDE POSTGRESQL)
+// ==============================================================
+async function cargarNovedades(_fetchRango, _ID_SPREADSHEET_MASTER, cacheDatosGlobales) {
+    if (!db.isConfigured()) return false;
     try {
-        const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-        const mapaChoferes = mapaChoferesInput || cacheDatosGlobales.mapaNombreDiagramaAId || {};
-        
-        let temporalNovedades = [];
-        if (rowsNov.length > 0) {
-            rowsNov.forEach(row => {
-                let id = row[0];
-                let jsonStr = row[1];
-                
-                if(!id || id === 'id' || !jsonStr) return; 
-                
-                try {
-                    let novedadParseada = JSON.parse(jsonStr);
-                    
-                    // 👉 Purgar novedades resueltas con más de 2 semanas (14 días)
-                    // Las novedades NO resueltas se conservan siempre en RAM
-                    if (novedadParseada.resuelto) {
-                        const ahoraMs = Date.now();
-                        const ms14Dias = 14 * 24 * 3600 * 1000;
-                        const fRes = new Date(novedadParseada.fecha_resolucion || novedadParseada.timestamp || novedadParseada.fecha || 0).getTime();
-                        if (!isNaN(fRes) && (ahoraMs - fRes) > ms14Dias) {
-                            return; // Se descarta de la RAM activa (permanece en Google Sheets / Cold Storage)
-                        }
-                    }
-
-                    // 👉 Parsear con Col F (nombreDiagrama) de DB_CHOFERES para obtener id de Col A
-                    let nomChofer = novedadParseada.nom || novedadParseada.nombre || novedadParseada.chofer;
-                    if (nomChofer) {
-                        let norm = normalizar(nomChofer);
-                        if (mapaChoferes && mapaChoferes[norm]) {
-                            novedadParseada.chofer_id = mapaChoferes[norm];
-                            novedadParseada.id_chofer = mapaChoferes[norm];
-                        }
-                        // 👉 Auto-actualizar n_ute, tractor y srv desde la RAM de flota si están disponibles
-                        if (cacheDatosGlobales && cacheDatosGlobales.diagramas && cacheDatosGlobales.diagramas.flota && cacheDatosGlobales.diagramas.flota[norm]) {
-                            const infoF = cacheDatosGlobales.diagramas.flota[norm];
-                            if (infoF.n_ute) novedadParseada.n_ute = infoF.n_ute;
-                            if (infoF.tractor) novedadParseada.tractor = infoF.tractor;
-                            if (infoF.servicio) novedadParseada.srv = infoF.servicio;
-                        }
-                    }
-
-                    temporalNovedades.push(novedadParseada);
-                } catch(parseError) {
-                    console.error(`Error parseando el JSON del ID ${id}:`, parseError);
-                }
-            });
+        const { rows } = await db.query(
+            `SELECT * FROM public.view_cards_diarias
+             ORDER BY fecha DESC NULLS LAST, creado_el DESC
+             LIMIT 200`
+        );
+        if (cacheDatosGlobales) {
+            cacheDatosGlobales.novedades = rows || [];
         }
-
-        // Verificamos si cambió el contenido con respecto a la RAM previa
-        // Hash ligero: comparar IDs + timestamps en vez de serializar toda la RAM
-        const buildHash = (arr) => arr.map(n => n.id + ':' + (n.fecha_edicion || n.fecha_resolucion || n.timestamp || '')).join('|');
-        const huboCambio = buildHash(cacheDatosGlobales.novedades || []) !== buildHash(temporalNovedades);
-
-        cacheDatosGlobales.novedades = temporalNovedades;
-        return huboCambio;
-    } catch (e) { 
-        console.error("Error leyendo Novedades:", e); 
+        return true;
+    } catch (e) {
+        console.error("⚠️ [Novedades] Error cargando espejo desde PostgreSQL:", e.message);
         return false;
     }
 }
 
-// ==============================================================
-// 1.B AUTO-ENRIQUECIMIENTO EN RAM Y GOOGLE SHEETS
-// ==============================================================
-/**
- * Auto-enriquece en RAM (y opcionalmente en Google Sheets) las novedades
- * cruzándolas con los datos de flota vigentes (n_ute, tractor, srv).
- */
-async function enriquecerNovedadesConFlota(cacheDatosGlobales, serviceAccountAuth = null, ID_SPREADSHEET_MASTER = null, fetchRango = null) {
-    if (!cacheDatosGlobales || !cacheDatosGlobales.novedades || !cacheDatosGlobales.diagramas || !cacheDatosGlobales.diagramas.flota) {
-        return false;
-    }
+async function enriquecerNovedadesConFlota() {
+    // Las vistas relacionales view_dash_novedades / view_cards_diarias enriquecen por JOIN en tiempo real
+    return false;
+}
 
-    const flotaMap = cacheDatosGlobales.diagramas.flota;
-    const mapaChoferes = cacheDatosGlobales.mapaNombreDiagramaAId || {};
-    let novedadesModificadas = [];
-
-    cacheDatosGlobales.novedades.forEach(nov => {
-        let nomChofer = nov.nom || nov.nombre || nov.chofer;
-        if (!nomChofer) return;
-        let norm = normalizar(nomChofer);
-
-        let modificado = false;
-        
-        // Auto-asociar chofer_id e id_chofer si faltaban
-        if (!nov.chofer_id && mapaChoferes[norm]) {
-            nov.chofer_id = mapaChoferes[norm];
-            nov.id_chofer = mapaChoferes[norm];
-            modificado = true;
-        }
-
-        const infoF = flotaMap[norm];
-        if (infoF) {
-            if (infoF.n_ute && nov.n_ute !== infoF.n_ute) {
-                nov.n_ute = infoF.n_ute;
-                modificado = true;
-            }
-            if (infoF.tractor && nov.tractor !== infoF.tractor) {
-                nov.tractor = infoF.tractor;
-                modificado = true;
-            }
-            if (infoF.semi && nov.semi !== infoF.semi) {
-                nov.semi = infoF.semi;
-                modificado = true;
-            }
-            if (infoF.cisternado && nov.cisternado !== infoF.cisternado) {
-                nov.cisternado = infoF.cisternado;
-                modificado = true;
-            }
-            if (infoF.servicio && nov.srv !== infoF.servicio && infoF.servicio !== 'S/A') {
-                nov.srv = infoF.servicio;
-                modificado = true;
-            }
-        }
-
-        if (modificado) {
-            novedadesModificadas.push(nov);
-        }
-    });
-
-    // Si hubo novedades enriquecidas y tenemos credenciales para Sheets, persistimos en la hoja 'novedades'
-    if (novedadesModificadas.length > 0 && serviceAccountAuth && ID_SPREADSHEET_MASTER && fetchRango) {
-        try {
-            const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-            const batchUpdates = [];
-
-            novedadesModificadas.forEach(nov => {
-                for (let i = 0; i < rowsNov.length; i++) {
-                    if (String(rowsNov[i][0]) === String(nov.id)) {
-                        let rIdx = i + 1;
-                        batchUpdates.push(
-                            serviceAccountAuth.request({
-                                url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SPREADSHEET_MASTER}/values/'novedades'!B${rIdx}?valueInputOption=USER_ENTERED`,
-                                method: 'PUT',
-                                data: { values: [[JSON.stringify(nov)]] }
-                            })
-                        );
-                        break;
-                    }
-                }
-            });
-
-            if (batchUpdates.length > 0) {
-                await Promise.all(batchUpdates);
-                console.log(`✅ [RAM -> Sheets] Se persistieron ${batchUpdates.length} novedades con nuevo n_ute / tractor en Google Sheets.`);
-            }
-        } catch (err) {
-            console.error("Error persistiendo novedades enriquecidas en Google Sheets:", err.message);
-        }
-    }
-
-    return novedadesModificadas.length > 0;
+function iniciarPollingNovedades() {
+    // Polling legacy sobre Google Sheets deprecado: todo corre reactivamente sobre PostgreSQL + Socket.IO
+    return null;
 }
 
 // ==============================================================
-// 2. POLLING PERIÓDICO DE NOVEDADES
+// 2. ENDPOINTS DE LA API (Router 100% PostgreSQL)
 // ==============================================================
-function iniciarPollingNovedades(fetchRango, ID_SPREADSHEET_MASTER, cacheDatosGlobales, io, ioDash, intervaloMs = 30000) {
-    console.log(`⏱️ Polling de Novedades activado (frecuencia: ${Math.round(intervaloMs / 1000)}s)...`);
-    
-    return setInterval(async () => {
-        try {
-            const huboCambioNov = await cargarNovedades(fetchRango, ID_SPREADSHEET_MASTER, cacheDatosGlobales, cacheDatosGlobales.mapaNombreDiagramaAId);
-            const huboCambioEnrich = await enriquecerNovedadesConFlota(cacheDatosGlobales, serviceAccountAuth, SHARED_ID_MASTER, sharedFetchRango);
-
-            if (huboCambioNov || huboCambioEnrich) {
-                console.log("⚡ [Polling Novedades] Se detectaron cambios externos o nuevos datos de flota. Notificando a clientes...");
-                ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-            }
-        } catch (error) {
-            console.error("❌ Error en Polling Novedades:", error);
-        }
-    }, intervaloMs);
-}
-
-// ==============================================================
-// 3. ENDPOINTS DE LA API (Router)
-// ==============================================================
-function createNovedadesRouter(cacheDatosGlobales, io, ioDash, serviceAccountAuth, ID_SPREADSHEET_MASTER, fetchRango) {
+function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAuth, _ID_SPREADSHEET_MASTER, fetchRango) {
     const router = express.Router();
+    const authSheets = serviceAccountAuth || sharedServiceAccountAuth;
+    const rangoSheets = fetchRango || sharedFetchRango;
 
-    // GET: Leer novedades en vivo (RAM activa: pendientes + resueltas en los últimos 14 días)
-    // Parámetro opcional ?historico=true para leer archivo completo desde Google Sheets (Cold Storage)
+    // GET /api/novedades — Leer novedades desde PostgreSQL (view_cards_diarias o histórico completo)
     router.get('/', async (req, res) => {
-        if (req.query.historico === 'true') {
-            try {
-                const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-                const listaCompleta = [];
-                rowsNov.forEach(row => {
-                    if (row[0] && row[0] !== 'id' && row[1]) {
-                        try { listaCompleta.push(JSON.parse(row[1])); } catch (e) {}
-                    }
-                });
-                return res.json({ success: true, count: listaCompleta.length, data: listaCompleta });
-            } catch (eHist) {
-                return res.status(500).json({ success: false, error: eHist.message });
+        try {
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
             }
+
+            if (req.query.historico === 'true') {
+                const { rows } = await db.query(
+                    `SELECT
+                        n.id,
+                        tn.codigo AS tipo_novedad,
+                        tn.id AS tipo_novedad_id,
+                        tn.titulo AS tipo_novedad_titulo,
+                        n.fecha_objetivo,
+                        n.fecha_resolucion,
+                        n.detalle,
+                        n.resuelto,
+                        n.prioridad,
+                        n.creado_el,
+                        n.creado_el AS "timestamp",
+                        COALESCE(d_user.nombre, 'DASH') AS creador,
+                        c.id AS chofer_id,
+                        UPPER(TRIM(COALESCE(c.nombre, ''))) AS nom,
+                        u.id AS unidad_id,
+                        UPPER(TRIM(COALESCE(t.patente, ''))) AS tractor,
+                        COALESCE(u.n_ute, 'S/D') AS n_ute,
+                        UPPER(TRIM(COALESCE(sc.denominacion, su.denominacion, 'S/A'))) AS srv,
+                        CASE WHEN tn.codigo = 'LIBRES' THEN COALESCE(term.codigo, '') ELSE '' END AS terminal,
+                        CASE WHEN tn.codigo = 'LIBRES' THEN n.terminal_id ELSE NULL::uuid END AS terminal_id
+                     FROM public.novedades n
+                     JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
+                     LEFT JOIN public.choferes c ON n.chofer_id = c.id
+                     LEFT JOIN public.servicios_choferes sc ON c.servicio_id = sc.id
+                     LEFT JOIN public.unidades u ON n.unidad_id = u.id
+                     LEFT JOIN public.tractores t ON u.tractor_id = t.id
+                     LEFT JOIN public.servicios_unidades su ON u.servicio_id = su.id
+                     LEFT JOIN public.terminales term ON n.terminal_id = term.id
+                     LEFT JOIN public.dash d_user ON n.creado_por_id = d_user.id
+                     ORDER BY n.creado_el DESC
+                     LIMIT 500`
+                );
+                return res.json({ success: true, count: rows.length, data: rows });
+            }
+
+            const { rows } = await db.query(
+                `SELECT * FROM public.view_cards_diarias
+                 ORDER BY fecha DESC NULLS LAST, creado_el DESC
+                 LIMIT 200`
+            );
+            return res.json({ success: true, count: rows.length, data: rows });
+        } catch (err) {
+            console.error("❌ [Novedades] Error en GET /api/novedades:", err.message);
+            return res.status(500).json({ success: false, error: err.message });
         }
-        res.json({ success: true, count: (cacheDatosGlobales.novedades || []).length, data: cacheDatosGlobales.novedades || [] });
     });
 
-    // POST: Crear o Resolver novedades
+    // POST /api/novedades/actualizar — Crear, Editar o Resolver en PostgreSQL
     router.post('/actualizar', async (req, res) => {
         try {
-            const { action, id_novedad, payload } = req.body;
-            if (!cacheDatosGlobales.novedades) cacheDatosGlobales.novedades = [];
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
+            }
+
+            const { action, id_novedad, payload = {} } = req.body || {};
 
             if (action === 'nueva') {
-                let nomChofer = payload.nom || payload.nombre || payload.chofer;
-                let choferIdFound = null;
-                let norm = nomChofer ? normalizar(nomChofer) : null;
+                const tipoObj = await resolveTipoNovedad(payload);
+                if (!tipoObj || !tipoObj.id) {
+                    return res.status(400).json({ success: false, error: 'Clasificación de novedad inválida' });
+                }
 
-                if (norm) {
-                    if (cacheDatosGlobales.mapaNombreDiagramaAId) {
-                        choferIdFound = cacheDatosGlobales.mapaNombreDiagramaAId[norm] || null;
+                const esLibre = tipoObj.codigo === 'LIBRES';
+                const [terminalId, creadoPorId, { choferId, unidadId }] = await Promise.all([
+                    resolveTerminalId(payload.terminal_id, payload.terminal, esLibre),
+                    resolveCreadoPorId(payload.creado_por_id, payload.creador || payload.usuario),
+                    resolveChoferYUnidad(payload, cacheDatosGlobales)
+                ]);
+
+                const fechaObjClean = (payload.fecha_objetivo && String(payload.fecha_objetivo).trim() !== '')
+                    ? String(payload.fecha_objetivo).split('T')[0].trim()
+                    : null;
+                const detalleClean = payload.detalle != null ? String(payload.detalle) : '';
+                const prioridadClean = String(payload.prioridad || 'media').trim().toLowerCase();
+
+                const insRes = await db.query(
+                    `INSERT INTO public.novedades (
+                        unidad_id,
+                        chofer_id,
+                        fecha_objetivo,
+                        detalle,
+                        resuelto,
+                        prioridad,
+                        creado_por_id,
+                        terminal_id,
+                        tipo_novedad_id,
+                        creado_el,
+                        actualizado_el
+                    ) VALUES ($1, $2, $3::date, $4, false, $5, $6, $7, $8, NOW(), NOW())
+                    RETURNING id`,
+                    [
+                        unidadId,
+                        choferId,
+                        fechaObjClean,
+                        detalleClean,
+                        prioridadClean,
+                        creadoPorId,
+                        terminalId,
+                        tipoObj.id
+                    ]
+                );
+
+                const newId = insRes.rows[0].id;
+                const card = await obtenerCardEnriquecida(newId);
+                sincronizarEspejoRamLocal(cacheDatosGlobales, card);
+
+                if (ioDash) {
+                    ioDash.emit('novedad_cambiada', { id: newId, action: 'nueva' });
+                }
+
+                return res.json({ success: true, data: card });
+            }
+
+            if (action === 'editar') {
+                const idClean = String(id_novedad ?? '').trim();
+                if (!/^\d+$/.test(idClean)) {
+                    return res.status(400).json({ success: false, error: 'ID de novedad inválido' });
+                }
+
+                const existingRes = await db.query(
+                    `SELECT n.*, tn.codigo AS tipo_codigo
+                     FROM public.novedades n
+                     JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
+                     WHERE n.id = $1::bigint
+                     LIMIT 1`,
+                    [idClean]
+                );
+
+                if (existingRes.rows.length === 0) {
+                    return res.status(404).json({ success: false, error: 'No encontrada' });
+                }
+
+                const actual = existingRes.rows[0];
+                let targetChoferId = actual.chofer_id;
+                let targetUnidadId = actual.unidad_id;
+                let targetTipoId = actual.tipo_novedad_id;
+                let targetTipoCodigo = actual.tipo_codigo;
+                let targetTerminalId = actual.terminal_id;
+
+                const tieneCambioTipo = payload.tipo_novedad !== undefined || payload.tipo_novedad_id !== undefined || payload.tipo !== undefined;
+                if (tieneCambioTipo) {
+                    const resolvedTipo = await resolveTipoNovedad(payload);
+                    if (resolvedTipo?.id) {
+                        targetTipoId = resolvedTipo.id;
+                        targetTipoCodigo = resolvedTipo.codigo;
                     }
-                    if (cacheDatosGlobales.diagramas && cacheDatosGlobales.diagramas.flota && cacheDatosGlobales.diagramas.flota[norm]) {
-                        const infoF = cacheDatosGlobales.diagramas.flota[norm];
-                        if (infoF.n_ute && (!payload.n_ute || payload.n_ute === 'S/D')) payload.n_ute = infoF.n_ute;
-                        if (infoF.tractor && !payload.tractor) payload.tractor = infoF.tractor;
-                        if (infoF.servicio && (!payload.srv || payload.srv === 'S/A')) payload.srv = infoF.servicio;
-                    }
                 }
 
-                const choferIdFinal = choferIdFound || payload.chofer_id || payload.id_chofer || null;
-
-                const nuevaNovedad = { 
-                    id: String(Date.now()), 
-                    resuelto: false, 
-                    chofer_id: choferIdFinal,
-                    id_chofer: choferIdFinal,
-                    ...payload, 
-                    timestamp: new Date().toISOString() 
-                };
-                
-                // Optimistic Server RAM
-                cacheDatosGlobales.novedades.unshift(nuevaNovedad);
-                ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-                ioDash.emit('novedad_cambiada', { id: nuevaNovedad.id, action: 'nueva' });
-                res.json({ success: true, data: nuevaNovedad });
-
-                // Guardado en Sheets (como JSON)
-                try {
-                    const docNov = new GoogleSpreadsheet(ID_SPREADSHEET_MASTER, serviceAccountAuth);
-                    await docNov.loadInfo();
-                    let sheet = docNov.sheetsByTitle['novedades'];
-                    
-                    if (!sheet) sheet = await docNov.addSheet({ title: 'novedades', headerValues: ['id', 'json_data'] });
-                    await sheet.addRow([ nuevaNovedad.id, JSON.stringify(nuevaNovedad) ]);
-                } catch(e) { console.error("Error Escribiendo JSON Novedades:", e); }
-            }
-            else if (action === 'editar') {
-                let index = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(id_novedad));
-                if(index > -1) {
-                    cacheDatosGlobales.novedades[index] = {
-                        ...cacheDatosGlobales.novedades[index],
-                        ...payload,
-                        fecha_edicion: new Date().toISOString()
-                    };
-                    let novedadActualizada = cacheDatosGlobales.novedades[index];
-                    
-                    ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-                    ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'editar' });
-                    res.json({ success: true, data: novedadActualizada });
-
-                    try {
-                        const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-                        let rIdx = -1;
-                        for (let i = 0; i < rowsNov.length; i++) { 
-                            if (String(rowsNov[i][0]) === String(id_novedad)) { rIdx = i + 1; break; } 
-                        }
-                        
-                        if (rIdx !== -1) {
-                            await serviceAccountAuth.request({ 
-                                url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SPREADSHEET_MASTER}/values/'novedades'!B${rIdx}?valueInputOption=USER_ENTERED`, 
-                                method: 'PUT', 
-                                data: { values: [[JSON.stringify(novedadActualizada)]] } 
-                            });
-                        }
-                    } catch(e) { console.error("Error Editando Novedad en Sheets:", e); }
-                } else { 
-                    res.status(404).json({ success: false, error: "No encontrada" }); 
+                const esLibre = targetTipoCodigo === 'LIBRES';
+                if (!esLibre) {
+                    targetTerminalId = null;
+                } else if (payload.terminal !== undefined || payload.terminal_id !== undefined) {
+                    targetTerminalId = await resolveTerminalId(payload.terminal_id, payload.terminal, true);
                 }
-            }
-            else if (action === 'resolver') {
-                let index = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(id_novedad));
-                if(index > -1) {
-                    const fechaRes = new Date().toISOString();
 
-                    let rawServ = payload ? payload.servicio : null;
-                    let dbServicio = rawServ;
-                    if (rawServ === 'EURO') dbServicio = 'DOCK SUD';
-                    if (rawServ === 'LIVIANO' || rawServ === 'LIV') dbServicio = 'UTE';
+                const tieneCambioActivos =
+                    payload.chofer_id !== undefined ||
+                    payload.unidad_id !== undefined ||
+                    payload.nom !== undefined ||
+                    payload.tractor !== undefined;
 
-                    cacheDatosGlobales.novedades[index] = {
-                        ...cacheDatosGlobales.novedades[index],
-                        ...(payload || {}),
-                        ...(dbServicio ? { servicio: dbServicio } : {}),
-                        resuelto: true,
-                        fecha_resolucion: fechaRes
-                    };
-                    let novedadActualizada = cacheDatosGlobales.novedades[index];
-                    
-                    ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-                    ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'editar' });
-                    res.json({ success: true, data: novedadActualizada });
-
-                    // Re-escritura en Sheets 'novedades'
-                    try {
-                        const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-                        let rIdx = -1;
-                        for (let i = 0; i < rowsNov.length; i++) { 
-                            if (String(rowsNov[i][0]) === String(id_novedad)) { rIdx = i + 1; break; } 
-                        }
-                        
-                        if (rIdx !== -1) {
-                            await serviceAccountAuth.request({ 
-                                url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SPREADSHEET_MASTER}/values/'novedades'!B${rIdx}?valueInputOption=USER_ENTERED`, 
-                                method: 'PUT', 
-                                data: { values: [[JSON.stringify(novedadActualizada)]] } 
-                            });
-                        }
-                    } catch(e) { console.error("Error Resolviendo Novedad:", e); }
-
-                    // Inyección en la hoja 'Dispo' de spreadsheet 1vYw-Zm51m50PeJmvLqshW4lBDonI7KTvBD14uIJioAU
-                    if (dbServicio) {
-                        inyectarServicioEnSheetDispo(novedadActualizada.tractor, novedadActualizada.nom, dbServicio, serviceAccountAuth, fetchRango).catch(e => {
-                            console.error("Error inyectando en Dispo:", e);
-                        });
-                    }
-                } else { 
-                    res.status(404).json({ success: false, error: "No encontrada" }); 
+                if (tieneCambioActivos) {
+                    const resolvedActivos = await resolveChoferYUnidad(payload, cacheDatosGlobales);
+                    if (resolvedActivos.choferId) targetChoferId = resolvedActivos.choferId;
+                    if (resolvedActivos.unidadId) targetUnidadId = resolvedActivos.unidadId;
                 }
-            }
-        } catch (err) { res.status(500).json({ success: false, error: "Error en servidor" }); }
-    });
 
-    // POST: Add/Remove individual mention from a card
-    router.post('/mencion', async (req, res) => {
-        try {
-            const { id_novedad, usuario, accion } = req.body; // accion: 'agregar' | 'quitar'
-            if (!id_novedad || !usuario || !accion) {
-                return res.status(400).json({ success: false, error: 'Faltan campos requeridos' });
-            }
-            
-            let index = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(id_novedad));
-            if (index === -1) {
-                return res.status(404).json({ success: false, error: 'Novedad no encontrada' });
-            }
-            
-            let nov = cacheDatosGlobales.novedades[index];
-            if (!Array.isArray(nov.menciones)) nov.menciones = [];
-            
-            const uNorm = String(usuario).trim().toUpperCase();
-            
-            if (accion === 'agregar') {
-                if (!nov.menciones.includes(uNorm)) {
-                    nov.menciones.push(uNorm);
+                const targetFechaObjetivo = payload.fecha_objetivo !== undefined
+                    ? (payload.fecha_objetivo && String(payload.fecha_objetivo).trim() !== ''
+                        ? String(payload.fecha_objetivo).split('T')[0].trim()
+                        : null)
+                    : actual.fecha_objetivo;
+
+                const targetDetalle = payload.detalle !== undefined
+                    ? String(payload.detalle ?? '')
+                    : actual.detalle;
+
+                const targetPrioridad = payload.prioridad !== undefined
+                    ? String(payload.prioridad || 'media').trim().toLowerCase()
+                    : actual.prioridad;
+
+                await db.query(
+                    `UPDATE public.novedades
+                     SET unidad_id = $1,
+                         chofer_id = $2,
+                         tipo_novedad_id = $3,
+                         terminal_id = $4,
+                         fecha_objetivo = $5::date,
+                         detalle = $6,
+                         prioridad = $7,
+                         actualizado_el = NOW()
+                     WHERE id = $8::bigint`,
+                    [
+                        targetUnidadId,
+                        targetChoferId,
+                        targetTipoId,
+                        targetTerminalId,
+                        targetFechaObjetivo,
+                        targetDetalle,
+                        targetPrioridad,
+                        idClean
+                    ]
+                );
+
+                // Si se solicitó cambio rápido de servicio sobre la card (asignarServicio en NoveltyCard)
+                const rawSrv = payload.servicio || payload.srv;
+                if (rawSrv && targetChoferId && !tieneCambioTipo) {
+                    await actualizarServicioChoferSiCorresponde(targetChoferId, rawSrv, cacheDatosGlobales);
                 }
-            } else if (accion === 'quitar') {
-                nov.menciones = nov.menciones.filter(m => m !== uNorm);
-            }
-            
-            ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-            ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'mencion' });
-            res.json({ success: true, data: nov });
-            
-            // Persist to Sheets
-            try {
-                const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-                let rIdx = -1;
-                for (let i = 0; i < rowsNov.length; i++) {
-                    if (String(rowsNov[i][0]) === String(id_novedad)) { rIdx = i + 1; break; }
+
+                const card = await obtenerCardEnriquecida(idClean);
+                sincronizarEspejoRamLocal(cacheDatosGlobales, card);
+
+                if (ioDash) {
+                    ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'editar' });
                 }
-                if (rIdx !== -1) {
-                    await serviceAccountAuth.request({
-                        url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SPREADSHEET_MASTER}/values/'novedades'!B${rIdx}?valueInputOption=USER_ENTERED`,
-                        method: 'PUT',
-                        data: { values: [[JSON.stringify(nov)]] }
+
+                return res.json({ success: true, data: card });
+            }
+
+            if (action === 'resolver') {
+                const idClean = String(id_novedad ?? '').trim();
+                if (!/^\d+$/.test(idClean)) {
+                    return res.status(400).json({ success: false, error: 'ID de novedad inválido' });
+                }
+
+                const fechaResParam = (payload?.fecha_resolucion && String(payload.fecha_resolucion).trim() !== '')
+                    ? String(payload.fecha_resolucion).trim()
+                    : null;
+
+                const updRes = await db.query(
+                    `UPDATE public.novedades
+                     SET resuelto = true,
+                         fecha_resolucion = COALESCE($2::timestamptz, NOW()),
+                         actualizado_el = NOW()
+                     WHERE id = $1::bigint
+                     RETURNING id, chofer_id, unidad_id`,
+                    [idClean, fechaResParam]
+                );
+
+                if (updRes.rows.length === 0) {
+                    return res.status(404).json({ success: false, error: 'No encontrada' });
+                }
+
+                const rowUpdated = updRes.rows[0];
+                const rawServ = payload?.servicio ? String(payload.servicio).trim().toUpperCase() : null;
+
+                if (rawServ && rowUpdated.chofer_id) {
+                    await actualizarServicioChoferSiCorresponde(rowUpdated.chofer_id, rawServ, cacheDatosGlobales);
+                }
+
+                const card = await obtenerCardEnriquecida(idClean);
+                sincronizarEspejoRamLocal(cacheDatosGlobales, card);
+
+                if (ioDash) {
+                    ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'resolver' });
+                }
+
+                res.json({ success: true, data: card });
+
+                // Inyección asíncrona no bloqueante en planilla Dispo cuando se resuelve asignando servicio
+                if (rawServ && card) {
+                    let dispoServicio = rawServ;
+                    if (rawServ === 'EURO') dispoServicio = 'DOCK SUD';
+                    if (rawServ === 'LIVIANO' || rawServ === 'LIV') dispoServicio = 'UTE';
+
+                    inyectarServicioEnSheetDispo(card.tractor, card.nom, dispoServicio, authSheets, rangoSheets).catch(e => {
+                        console.error("⚠️ [Dispo] Error asíncrono inyectando servicio:", e.message || e);
                     });
                 }
-            } catch(e) { console.error('Error persistiendo mención en Sheets:', e); }
+                return;
+            }
+
+            return res.status(400).json({ success: false, error: `Acción no soportada: ${action}` });
         } catch (err) {
-            res.status(500).json({ success: false, error: 'Error en servidor' });
+            console.error("❌ [Novedades] Error en POST /api/novedades/actualizar:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
         }
     });
 
-    // POST: Quick update terminal for a novelty card
-    router.post('/terminal', async (req, res) => {
+    // POST /api/novedades/mencion — Agregar o quitar @mención en public.dash_menciones
+    router.post('/mencion', async (req, res) => {
         try {
-            const { id_novedad, terminal } = req.body;
-            if (!id_novedad) {
-                return res.status(400).json({ success: false, error: 'Id de novedad requerido' });
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
             }
-            
-            let index = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(id_novedad));
-            if (index === -1) {
+
+            const { id_novedad, usuario, accion } = req.body || {};
+            const idClean = String(id_novedad ?? '').trim();
+            const uNorm = String(usuario ?? '').trim().toUpperCase();
+
+            if (!/^\d+$/.test(idClean) || !uNorm || !accion) {
+                return res.status(400).json({ success: false, error: 'Faltan campos requeridos' });
+            }
+
+            const existsRes = await db.query(
+                `SELECT id FROM public.novedades WHERE id = $1::bigint LIMIT 1`,
+                [idClean]
+            );
+            if (existsRes.rows.length === 0) {
                 return res.status(404).json({ success: false, error: 'Novedad no encontrada' });
             }
-            
-            let nov = cacheDatosGlobales.novedades[index];
-            nov.terminal = String(terminal || '').toUpperCase().trim();
-            
-            ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-            ioDash.emit('novedad_cambiada', { id: id_novedad, action: 'terminal' });
-            res.json({ success: true, data: nov });
-            
-            // Persist to Sheets
-            try {
-                const rowsNov = await fetchRango(ID_SPREADSHEET_MASTER, "'novedades'!A:B");
-                let rIdx = -1;
-                for (let i = 0; i < rowsNov.length; i++) {
-                    if (String(rowsNov[i][0]) === String(id_novedad)) { rIdx = i + 1; break; }
-                }
-                if (rIdx !== -1) {
-                    await serviceAccountAuth.request({
-                        url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SPREADSHEET_MASTER}/values/'novedades'!B${rIdx}?valueInputOption=USER_ENTERED`,
-                        method: 'PUT',
-                        data: { values: [[JSON.stringify(nov)]] }
-                    });
-                }
-            } catch(e) { console.error('Error persistiendo terminal en Sheets:', e); }
+
+            if (accion === 'agregar') {
+                const usrRes = await db.query(
+                    `SELECT id FROM public.dash WHERE UPPER(TRIM(nombre)) = $1 LIMIT 1`,
+                    [uNorm]
+                );
+                const usuarioId = usrRes.rows[0]?.id || null;
+
+                await db.query(
+                    `INSERT INTO public.dash_menciones (novedad_id, usuario_id, usuario_nombre, mencionado_el)
+                     VALUES ($1::bigint, $2::uuid, $3, NOW())
+                     ON CONFLICT (novedad_id, usuario_nombre) DO NOTHING`,
+                    [idClean, usuarioId, uNorm]
+                );
+            } else if (accion === 'quitar') {
+                await db.query(
+                    `DELETE FROM public.dash_menciones
+                     WHERE novedad_id = $1::bigint
+                       AND UPPER(TRIM(usuario_nombre)) = $2`,
+                    [idClean, uNorm]
+                );
+            } else {
+                return res.status(400).json({ success: false, error: 'Acción de mención inválida' });
+            }
+
+            const card = await obtenerCardEnriquecida(idClean);
+            sincronizarEspejoRamLocal(cacheDatosGlobales, card);
+
+            if (ioDash) {
+                ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'mencion' });
+            }
+
+            return res.json({ success: true, data: card });
         } catch (err) {
-            res.status(500).json({ success: false, error: 'Error en servidor' });
+            console.error("❌ [Novedades] Error en POST /api/novedades/mencion:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
+        }
+    });
+
+    // POST /api/novedades/terminal — Asignar o limpiar terminal en public.novedades
+    router.post('/terminal', async (req, res) => {
+        try {
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
+            }
+
+            const { id_novedad, terminal, terminal_id } = req.body || {};
+            const idClean = String(id_novedad ?? '').trim();
+            if (!/^\d+$/.test(idClean)) {
+                return res.status(400).json({ success: false, error: 'Id de novedad requerido' });
+            }
+
+            const resolvedTermId = await resolveTerminalId(terminal_id, terminal, true);
+
+            const updRes = await db.query(
+                `UPDATE public.novedades
+                 SET terminal_id = $1::uuid,
+                     actualizado_el = NOW()
+                 WHERE id = $2::bigint
+                 RETURNING id`,
+                [resolvedTermId, idClean]
+            );
+
+            if (updRes.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Novedad no encontrada' });
+            }
+
+            const card = await obtenerCardEnriquecida(idClean);
+            sincronizarEspejoRamLocal(cacheDatosGlobales, card);
+
+            if (ioDash) {
+                ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'terminal' });
+            }
+
+            return res.json({ success: true, data: card });
+        } catch (err) {
+            console.error("❌ [Novedades] Error en POST /api/novedades/terminal:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
         }
     });
 

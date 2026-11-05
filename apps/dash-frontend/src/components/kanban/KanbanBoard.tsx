@@ -19,6 +19,7 @@ interface KanbanBoardProps {
   onCambiarServicio?: (id: number | string, servicio: string) => void;
   onAgregarMencion?: (id: number | string, usuario: string) => void;
   onQuitarMencion?: (id: number | string, usuario: string) => void;
+  onNovedadPublicada?: (nueva?: Novedad | null) => void;
   onRecargar: () => void;
 }
 
@@ -144,6 +145,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onCambiarServicio,
   onAgregarMencion,
   onQuitarMencion,
+  onNovedadPublicada,
   onRecargar
 }) => {
   const { vistaActual, sesion, busqueda, filtroTerminal, columnWidths, tiposNovedad } = useDashStore();
@@ -351,6 +353,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         onCambiarServicio={onCambiarServicio}
         onAgregarMencion={onAgregarMencion}
         onQuitarMencion={onQuitarMencion}
+        onNovedadPublicada={onNovedadPublicada}
         onRecargar={onRecargar}
       />
 

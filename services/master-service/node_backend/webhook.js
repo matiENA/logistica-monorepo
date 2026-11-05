@@ -86,42 +86,16 @@ module.exports = function(cacheDatosGlobales, io, ioDash, cargarNovedades, fetch
             }
 
             // ==============================================================
-            // 3. WEBHOOK: NOVEDAD INDIVIDUAL O BATCH DE NOVEDADES
+            // 3. WEBHOOK: NOVEDAD INDIVIDUAL O BATCH DE NOVEDADES (Deprecado -> PostgreSQL)
             // ==============================================================
-            if (body && (body.action === 'webhook_update_novedad' || body.action === 'webhook_novedades_batch')) {
-                if (!cacheDatosGlobales.novedades) cacheDatosGlobales.novedades = [];
-                
-                const lista = body.action === 'webhook_novedades_batch' ? (body.novedades || []) : [body.novedad || body.payload || body];
-                let actualizados = 0;
-
-                lista.forEach(nov => {
-                    if (!nov || !nov.id) return;
-                    let idx = cacheDatosGlobales.novedades.findIndex(n => String(n.id) === String(nov.id));
-                    if (idx > -1) {
-                        cacheDatosGlobales.novedades[idx] = { ...cacheDatosGlobales.novedades[idx], ...nov };
-                    } else {
-                        cacheDatosGlobales.novedades.unshift({ resuelto: false, timestamp: new Date().toISOString(), ...nov });
-                    }
-                    actualizados++;
-                });
-
-                if (actualizados > 0) {
-                    console.log(`⚡ [Webhook] ${actualizados} novedad(es) actualizada(s) en RAM.`);
-                    ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-                }
-                return res.status(200).json({ success: true, message: `${actualizados} novedad(es) inyectada(s) en RAM` });
-            }
-
-            // ==============================================================
-            // 4. WEBHOOK: RECARGA COMPLETA DE NOVEDADES DESDE GOOGLE SHEETS
-            // ==============================================================
-            if (body && body.action === 'webhook_reload_novedades') {
-                if (typeof cargarNovedades === 'function' && fetchRango && ID_SPREADSHEET_MASTER) {
+            if (body && (body.action === 'webhook_update_novedad' || body.action === 'webhook_novedades_batch' || body.action === 'webhook_reload_novedades')) {
+                if (typeof cargarNovedades === 'function') {
                     await cargarNovedades(fetchRango, ID_SPREADSHEET_MASTER, cacheDatosGlobales);
-                    ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-                    console.log("⚡ [Webhook] Novedades recargadas completamente desde Google Sheets.");
-                    return res.status(200).json({ success: true, message: "Novedades recargadas" });
                 }
+                if (ioDash) {
+                    ioDash.emit('datos_actualizados', { source: 'webhook_novedades', timestamp: new Date().toISOString() });
+                }
+                return res.status(200).json({ success: true, message: "Notificación procesada sobre PostgreSQL" });
             }
 
             // ==============================================================

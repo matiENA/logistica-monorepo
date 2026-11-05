@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { X, ArrowLeft, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { toast } from 'sonner';
 import { FlotaItem, Novedad, TipoNovedadItem } from '../../types/dash';
 import { api } from '../../services/api';
 import { useDashStore } from '../../store/useDashStore';
-import { formatearPatente, PatenteMercosur } from '../common/PatenteMercosur';
+import { formatearPatente, normalizarPatenteRaw, PatenteMercosur } from '../common/PatenteMercosur';
 
 interface NoveltyModalProps {
   abierto: boolean;
   flota: FlotaItem[];
   novedadEnEdicion: Novedad | null;
   onCerrar: () => void;
-  onGuardadoExitoso: () => void;
+  onGuardadoExitoso: (guardada?: Novedad | null) => void;
 }
 
 const CONFIG_CLASIFICACIONES_FALLBACK: Record<
@@ -190,6 +191,12 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (tipoItemActual.requiere_fecha_objetivo && (!fechaObjetivo || fechaObjetivo.trim() === '')) {
+      toast.warning(`Seleccione una Fecha Objetivo / Vencimiento para "${tipoItemActual.titulo}"`);
+      return;
+    }
+
     setEnviando(true);
 
     let detalleFinal = detalle.trim();
@@ -209,14 +216,47 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
       if (match) finalTipoId = match.id;
     }
 
+    // Revalidar coincidencias exactas en flota si el usuario tipeó manualmente sin hacer clic en el dropdown
+    const nomLimpio = nom.trim().toUpperCase();
+    const patLimpia = normalizarPatenteRaw(tractor);
+    let resolvedChoferId = choferId;
+    let resolvedUnidadId = unidadId;
+    let resolvedNUte = nUte;
+    let resolvedSrv = srv;
+
+    if (!resolvedChoferId && nomLimpio) {
+      const normNom = nomLimpio.replace(/,/g, '').trim();
+      const matchFlota = flota.find(
+        (f) =>
+          (f.nom && f.nom.trim().toUpperCase().replace(/,/g, '') === normNom) ||
+          (f.tractor && normalizarPatenteRaw(f.tractor) === normalizarPatenteRaw(nomLimpio))
+      );
+      if (matchFlota) {
+        resolvedChoferId = matchFlota.chofer_id || null;
+        if (!resolvedUnidadId && matchFlota.unidad_id) resolvedUnidadId = matchFlota.unidad_id;
+        if ((!resolvedNUte || resolvedNUte === 'S/D') && matchFlota.n_ute) resolvedNUte = matchFlota.n_ute;
+        if ((!resolvedSrv || resolvedSrv === 'S/A') && (matchFlota.srv || matchFlota.srv_chofer)) {
+          resolvedSrv = matchFlota.srv || matchFlota.srv_chofer || 'S/A';
+        }
+      }
+    }
+
+    if (!resolvedUnidadId && patLimpia) {
+      const matchTractor = flota.find((f) => f.tractor && normalizarPatenteRaw(f.tractor) === patLimpia);
+      if (matchTractor?.unidad_id) {
+        resolvedUnidadId = matchTractor.unidad_id;
+        if (!resolvedNUte || resolvedNUte === 'S/D') resolvedNUte = matchTractor.n_ute || 'S/D';
+      }
+    }
+
     const payload = {
-      chofer_id: choferId,
-      unidad_id: unidadId,
+      chofer_id: resolvedChoferId,
+      unidad_id: resolvedUnidadId,
       terminal_id: esLibre ? terminalId : null,
-      nom: nom.trim().toUpperCase(),
+      nom: nomLimpio,
       tractor: tractor.trim().toUpperCase(),
-      srv,
-      n_ute: nUte,
+      srv: resolvedSrv,
+      n_ute: resolvedNUte,
       tipo_novedad: tipo,
       tipo_novedad_id: finalTipoId || null,
       tipo_novedad_titulo: tipoItemActual.titulo,
@@ -228,22 +268,23 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
     };
 
     try {
+      let res;
       if (novedadEnEdicion) {
-        await api.despacharNovedad({
+        res = await api.despacharNovedad({
           action: 'editar',
           id_novedad: novedadEnEdicion.id,
           payload
         });
       } else {
-        await api.despacharNovedad({
+        res = await api.despacharNovedad({
           action: 'nueva',
           payload
         });
       }
-      onGuardadoExitoso();
+      onGuardadoExitoso(res?.data || null);
       onCerrar();
     } catch (err: any) {
-      alert(`Error al guardar novedad: ${err.message}`);
+      toast.error(`Error al guardar novedad: ${err.message}`);
     } finally {
       setEnviando(false);
     }
@@ -343,11 +384,14 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  value={nom || filtroChofer}
+                  value={nom}
                   onChange={(e) => {
-                    setNom(e.target.value);
-                    setFiltroChofer(e.target.value);
+                    const val = e.target.value;
+                    setNom(val);
+                    setFiltroChofer(val);
                     setMostrarDropFlota(true);
+                    // Limpiar choferId previo si el texto ya no coincide con el conductor previamente seleccionado
+                    setChoferId(null);
                   }}
                   onFocus={() => setMostrarDropFlota(true)}
                   placeholder="Escriba nombre o tractor..."
@@ -392,7 +436,10 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
                   <input
                     type="text"
                     value={tractor}
-                    onChange={(e) => setTractor(e.target.value)}
+                    onChange={(e) => {
+                      setTractor(e.target.value);
+                      setUnidadId(null);
+                    }}
                     placeholder="Dominio"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm font-bold text-slate-800 dark:text-slate-200 uppercase outline-none focus:ring-2 focus:ring-indigo-500"
                   />

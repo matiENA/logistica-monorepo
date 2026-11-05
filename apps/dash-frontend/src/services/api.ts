@@ -16,6 +16,16 @@ function resolveBackendUrl(url?: string): string {
 
 const API_BASE = resolveBackendUrl((import.meta as any).env?.VITE_API_URL);
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export function normalizarNovedad(n: any): Novedad {
   if (!n) return n;
   let fechaObj = n.fecha_objetivo;
@@ -25,7 +35,8 @@ export function normalizarNovedad(n: any): Novedad {
   }
   return {
     ...n,
-    fecha_objetivo: fechaObj || null
+    fecha_objetivo: fechaObj || null,
+    menciones: Array.isArray(n.menciones) ? n.menciones : []
   };
 }
 
@@ -33,7 +44,7 @@ export const api = {
   async fetchNovedades(): Promise<Novedad[]> {
     // ⚡ Priorizar vista relacional directa public.view_cards_diarias con Column Pruning
     try {
-      const res = await fetch(`${API_BASE}/api/views/cards?limit=150`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/views/cards?limit=150`);
       if (res.ok) {
         const json = await res.json();
         if (json.datos && Array.isArray(json.datos)) {
@@ -44,10 +55,10 @@ export const api = {
       console.warn('⚠️ [API] Fallback de cards a endpoint /api/dash/novedades:', e);
     }
 
-    const res = await fetch(`${API_BASE}/api/dash/novedades`);
+    const res = await fetchWithTimeout(`${API_BASE}/api/dash/novedades`);
     if (!res.ok) {
       // Fallback secundario
-      const fallbackRes = await fetch(`${API_BASE}/api/novedades`);
+      const fallbackRes = await fetchWithTimeout(`${API_BASE}/api/novedades`);
       if (!fallbackRes.ok) throw new Error('Error al cargar novedades');
       const json = await fallbackRes.json();
       return (json.data || []).map(normalizarNovedad);
@@ -59,7 +70,7 @@ export const api = {
   // 🎯 Patrón "Listen on Table, Fetch from View": Obtiene solo la fila modificada (< 1ms en Postgres)
   async fetchNovedadPorId(id: number | string): Promise<Novedad | null> {
     try {
-      const res = await fetch(`${API_BASE}/api/views/cards?id=${encodeURIComponent(id)}&limit=1`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/views/cards?id=${encodeURIComponent(id)}&limit=1`);
       if (res.ok) {
         const json = await res.json();
         const item = json.datos?.[0];
@@ -76,7 +87,7 @@ export const api = {
     if (!ids || ids.length === 0) return [];
     try {
       const idsParam = ids.map(id => encodeURIComponent(String(id))).join(',');
-      const res = await fetch(`${API_BASE}/api/views/cards?ids=${idsParam}&limit=${ids.length}`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/views/cards?ids=${idsParam}&limit=${ids.length}`);
       if (res.ok) {
         const json = await res.json();
         return (json.datos || []).map(normalizarNovedad);
@@ -88,7 +99,7 @@ export const api = {
   },
 
   async fetchFlota(): Promise<{ flota: FlotaItem[]; vencimientosObj: any[] }> {
-    const res = await fetch(`${API_BASE}/api/dash/flota`);
+    const res = await fetchWithTimeout(`${API_BASE}/api/dash/flota`);
     if (!res.ok) throw new Error('Error al cargar catálogo de flota');
     const json = await res.json();
     return {
@@ -99,7 +110,7 @@ export const api = {
 
   async fetchTiposNovedad(): Promise<TipoNovedadItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/api/dash/tipos-novedad`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/dash/tipos-novedad`);
       if (!res.ok) return [];
       const json = await res.json();
       const raw = json.data || [];
@@ -123,7 +134,7 @@ export const api = {
 
   async fetchTerminales(): Promise<TerminalItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/api/dash/terminales`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/dash/terminales`);
       if (!res.ok) return [];
       const json = await res.json();
       return json.data || [];
@@ -135,10 +146,14 @@ export const api = {
 
   async fetchServicios(): Promise<ServicioChoferItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/api/dash/servicios`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/dash/servicios`);
       if (!res.ok) return [];
       const json = await res.json();
-      return json.data || [];
+      const raw: ServicioChoferItem[] = json.data || [];
+      return raw.filter((s) => {
+        const den = String(s?.denominacion || '').trim().toUpperCase();
+        return den.length > 0 && !/^\d+$/.test(den) && den !== 'COUNTA DE SERVICIO';
+      });
     } catch (e) {
       console.warn('No se pudo cargar servicios de choferes:', e);
       return [];
@@ -147,7 +162,7 @@ export const api = {
 
   async fetchRetornos(): Promise<RetornoItem[]> {
     try {
-      const res = await fetch(`${API_BASE}/api/dash/retorno`);
+      const res = await fetchWithTimeout(`${API_BASE}/api/dash/retorno`);
       if (!res.ok) return [];
       const json = await res.json();
       return json.data || [];
@@ -158,7 +173,7 @@ export const api = {
   },
 
   async fetchUsuarios(): Promise<Usuario[]> {
-    const res = await fetch(`${API_BASE}/api/dash/usuarios`);
+    const res = await fetchWithTimeout(`${API_BASE}/api/dash/usuarios`);
     if (!res.ok) throw new Error('Error al cargar usuarios');
     const json = await res.json();
     const raw = json.data || [];
@@ -189,7 +204,7 @@ export const api = {
       }
     }
 
-    const res = await fetch(`${API_BASE}/api/novedades/actualizar`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/novedades/actualizar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -199,31 +214,49 @@ export const api = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Error HTTP ${res.status}`);
     }
-    return await res.json();
+    const json = await res.json();
+    return {
+      ...json,
+      data: json?.data ? normalizarNovedad(json.data) : null
+    };
   },
 
   async gestionarMencion(idNovedad: number | string, usuario: string, accion: 'agregar' | 'quitar') {
-    const res = await fetch(`${API_BASE}/api/novedades/mencion`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/novedades/mencion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id_novedad: Number(idNovedad), usuario, accion })
+      body: JSON.stringify({ id_novedad: idNovedad, usuario, accion })
     });
-    if (!res.ok) throw new Error('Error gestionando mención');
-    return await res.json();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error gestionando mención');
+    }
+    const json = await res.json();
+    return {
+      ...json,
+      data: json?.data ? normalizarNovedad(json.data) : null
+    };
   },
 
   async asignarTerminal(idNovedad: number | string, terminal: string, terminal_id?: string | null) {
-    const res = await fetch(`${API_BASE}/api/novedades/terminal`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/novedades/terminal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id_novedad: Number(idNovedad), terminal, terminal_id })
+      body: JSON.stringify({ id_novedad: idNovedad, terminal, terminal_id })
     });
-    if (!res.ok) throw new Error('Error asignando terminal');
-    return await res.json();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Error asignando terminal');
+    }
+    const json = await res.json();
+    return {
+      ...json,
+      data: json?.data ? normalizarNovedad(json.data) : null
+    };
   },
 
   async login(usuario: string, password: string): Promise<SesionUsuario> {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    const res = await fetchWithTimeout(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ usuario, password })

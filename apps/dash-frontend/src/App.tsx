@@ -18,6 +18,7 @@ export const App: React.FC = () => {
     cargando,
     error,
     recargar,
+    sincronizarNovedad,
     resolverNovedad,
     asignarTerminal,
     asignarServicio,
@@ -43,12 +44,16 @@ export const App: React.FC = () => {
     }
   }, [modoCartelera]);
 
-  const handleResolverConServicio = (id: number | string, nuevoServicio?: string) => {
-    resolverNovedad(id, nuevoServicio);
-    if (nuevoServicio) {
-      toast.success(`Novedad resuelta asignando servicio ${nuevoServicio}`);
-    } else {
-      toast.success('Novedad marcada como resuelta');
+  const handleResolverConServicio = async (id: number | string, nuevoServicio?: string) => {
+    try {
+      await resolverNovedad(id, nuevoServicio);
+      if (nuevoServicio) {
+        toast.success(`Novedad resuelta asignando servicio ${nuevoServicio}`);
+      } else {
+        toast.success('Novedad marcada como resuelta');
+      }
+    } catch (err: any) {
+      toast.error(`No se pudo resolver la novedad: ${err?.message || 'Error de conexión'}`);
     }
   };
 
@@ -57,7 +62,7 @@ export const App: React.FC = () => {
     return (
       <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-950 text-slate-200">
         <Toaster position="bottom-left" richColors theme={darkMode ? 'dark' : 'light'} />
-        <LoginWall onLoginExitoso={recargar} />
+        <LoginWall onLoginExitoso={() => recargar(true)} />
       </div>
     );
   }
@@ -84,7 +89,7 @@ export const App: React.FC = () => {
             <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto mb-2 stroke-[1.8]" />
             <p className="text-xs font-bold text-rose-600 dark:text-rose-400 mb-4">{error}</p>
             <button
-              onClick={recargar}
+              onClick={() => recargar(false)}
               className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all shadow-md cursor-pointer"
             >
               Reintentar Conexión
@@ -102,7 +107,15 @@ export const App: React.FC = () => {
             onCambiarServicio={asignarServicio}
             onAgregarMencion={(id, u) => gestionarMencion(id, u, 'agregar')}
             onQuitarMencion={(id, u) => gestionarMencion(id, u, 'quitar')}
-            onRecargar={recargar}
+            onNovedadPublicada={(nueva) => {
+              if (nueva) {
+                sincronizarNovedad(nueva);
+              } else {
+                recargar(true);
+              }
+              toast.success('Unidad liberada');
+            }}
+            onRecargar={() => recargar(true)}
           />
         )}
       </main>
@@ -116,9 +129,14 @@ export const App: React.FC = () => {
           setModalNuevaAbierto(false);
           setNovedadEnEdicion(null);
         }}
-        onGuardadoExitoso={() => {
-          recargar();
-          toast.success(novedadEnEdicion ? 'Novedad modificada correctamente' : 'Nueva novedad publicada');
+        onGuardadoExitoso={(guardada) => {
+          const eraEdicion = Boolean(novedadEnEdicion);
+          if (guardada) {
+            sincronizarNovedad(guardada);
+          } else {
+            recargar(true);
+          }
+          toast.success(eraEdicion ? 'Novedad modificada correctamente' : 'Nueva novedad publicada');
         }}
       />
 

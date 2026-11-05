@@ -61,16 +61,19 @@ function emitirDatosSiCambiaron(io, cacheDatosGlobales, ioDash = null) {
     const payload = buildSocketPayload(cacheDatosGlobales);
     if (!payload || !payload.diagramas) return false;
 
-    const payloadStr = JSON.stringify(payload);
-    const hash = crypto.createHash('md5').update(payloadStr).digest('hex');
+    // Excluir timestamp dinámico del cálculo MD5 para evitar falsos positivos en cada corrida
+    const { timestamp, ...hashablePayload } = payload;
+    const hashStr = JSON.stringify(hashablePayload);
+    const hash = crypto.createHash('md5').update(hashStr).digest('hex');
 
     if (hash === lastBroadcastHash) {
         return false;
     }
 
     lastBroadcastHash = hash;
+    const payloadStr = JSON.stringify(payload);
     if (io) io.emit('datos_actualizados', payload);
-    if (ioDash) ioDash.emit('datos_actualizados', payload);
+    if (ioDash) ioDash.emit('datos_actualizados', { timestamp, hash: hash.substring(0, 8) });
     console.log(`📡 [Socket.io] Broadcast emitido (cambio detectado, hash: ${hash.substring(0, 8)}, ${(Buffer.byteLength(payloadStr) / 1024).toFixed(1)} KB raw).`);
     return true;
 }
@@ -612,9 +615,6 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
 
         // Emitir WebSocket a clientes conectados (solo si hubo cambio real en los datos)
         if (io || ioDash) emitirDatosSiCambiaron(io, cacheDatosGlobales, ioDash);
-        if (ioDash && cacheDatosGlobales.novedades && cacheDatosGlobales.novedades.length > 0) {
-            ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
-        }
 
         return true;
     } catch (err) {
@@ -1582,10 +1582,7 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
             console.error("Error al enriquecer novedades con la flota:", eEnrich);
         }
 
-        if (io) emitirDatosSiCambiaron(io, cacheDatosGlobales);
-        
-        // 👉 SE EMITE AL NUEVO DASHBOARD CADA VEZ QUE LA RAM SE RE-ENSAMBLA
-        if(cacheDatosGlobales.novedades && cacheDatosGlobales.novedades.length > 0) ioDash.emit('novedades_actualizadas', cacheDatosGlobales.novedades);
+        if (io || ioDash) emitirDatosSiCambiaron(io, cacheDatosGlobales, ioDash);
         
         console.log(`✅ RAM Ensamblada Completa.`);
         

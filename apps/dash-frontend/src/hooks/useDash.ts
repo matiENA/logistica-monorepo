@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { toast } from 'sonner';
 import { Novedad, FlotaItem, Usuario, RetornoItem, TerminalItem, TipoNovedadItem } from '../types/dash';
 import { api } from '../services/api';
 import { useDashStore } from '../store/useDashStore';
@@ -34,38 +35,84 @@ export function useDash() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const cargarDatos = useCallback(async () => {
+  // Evita desmontar el tablero con pantalla negra durante refrescos silenciosos o reconexiones
+  const cargaInicialCompletadaRef = useRef(false);
+
+  const sincronizarNovedad = useCallback((novServidor?: Novedad | null) => {
+    if (!novServidor || novServidor.id === undefined || novServidor.id === null) return;
+    const idBuscado = String(novServidor.id);
+    setNovedades((prev) => {
+      const existe = prev.some((n) => String(n.id) === idBuscado);
+      if (existe) {
+        return prev.map((n) => (String(n.id) === idBuscado ? novServidor : n));
+      }
+      return [novServidor, ...prev];
+    });
+  }, []);
+
+  const cargarDatos = useCallback(async (silencioso = false) => {
+    const esCargaInicial = !cargaInicialCompletadaRef.current && !silencioso;
     try {
-      setCargando(true);
-      const [novs, flotaRes, usrs, rets, terms, servs, tipos] = await Promise.all([
-        api.fetchNovedades().catch(() => []),
-        api.fetchFlota().catch(() => ({ flota: [], vencimientosObj: [] })),
-        api.fetchUsuarios().catch(() => []),
-        api.fetchRetornos().catch(() => []),
-        api.fetchTerminales().catch(() => []),
-        api.fetchServicios().catch(() => []),
-        api.fetchTiposNovedad().catch(() => [])
+      if (esCargaInicial) {
+        setCargando(true);
+      }
+
+      const [novsRes, flotaRes, usrsRes, retsRes, termsRes, servsRes, tiposRes] = await Promise.allSettled([
+        api.fetchNovedades(),
+        api.fetchFlota(),
+        api.fetchUsuarios(),
+        api.fetchRetornos(),
+        api.fetchTerminales(),
+        api.fetchServicios(),
+        api.fetchTiposNovedad()
       ]);
-      setNovedades(novs);
-      setFlota(flotaRes.flota);
-      setVencimientos(flotaRes.vencimientosObj);
-      setUsuarios(usrs);
-      setRetornos(rets);
-      setTerminalesLocales(terms);
-      setTerminales(terms);
-      setServicios(servs);
-      setTiposNovedadLocales(tipos);
-      setTiposNovedad(tipos);
+
+      if (esCargaInicial && novsRes.status === 'rejected' && flotaRes.status === 'rejected') {
+        throw new Error(novsRes.reason?.message || 'No se pudo conectar con el servidor');
+      }
+
+      if (novsRes.status === 'fulfilled') {
+        setNovedades(novsRes.value);
+      }
+      if (flotaRes.status === 'fulfilled') {
+        setFlota(flotaRes.value.flota);
+        setVencimientos(flotaRes.value.vencimientosObj);
+      }
+      if (usrsRes.status === 'fulfilled') {
+        setUsuarios(usrsRes.value);
+      }
+      if (retsRes.status === 'fulfilled') {
+        setRetornos(retsRes.value);
+      }
+      if (termsRes.status === 'fulfilled' && termsRes.value.length > 0) {
+        setTerminalesLocales(termsRes.value);
+        setTerminales(termsRes.value);
+      }
+      if (servsRes.status === 'fulfilled' && servsRes.value.length > 0) {
+        setServicios(servsRes.value);
+      }
+      if (tiposRes.status === 'fulfilled' && tiposRes.value.length > 0) {
+        setTiposNovedadLocales(tiposRes.value);
+        setTiposNovedad(tiposRes.value);
+      }
+
+      cargaInicialCompletadaRef.current = true;
       setError(null);
     } catch (err: any) {
-      setError(err.message || 'Error cargando datos');
+      if (esCargaInicial) {
+        setError(err.message || 'Error cargando datos');
+      } else {
+        console.warn('⚠️ [useDash] Error en refresco silencioso:', err?.message || err);
+      }
     } finally {
-      setCargando(false);
+      if (esCargaInicial) {
+        setCargando(false);
+      }
     }
   }, [setTerminales, setServicios, setTiposNovedad]);
 
   useEffect(() => {
-    cargarDatos();
+    cargarDatos(false);
 
     // 🎯 Socket.IO para tiempo real reactivo (Patrón: Listen on Table/Event -> Fetch from View, SIN POLLING)
     const socket: Socket = io(`${SOCKET_URL}/dash`, {
@@ -104,32 +151,23 @@ export function useDash() {
     };
 
     socket.on('connect', () => {
-      console.log('⚡ [Socket] Conectado reactivamente a /dash (Tiempo Real activo sin Polling)');
+      console.log('⚡ [Socket] Conectado reactivamente a /dash (Tiempo Real PostgreSQL activo)');
     });
 
-    // Evento granular por ID (Listen on Table -> Fetch from View)
+    // Evento granular por ID en PostgreSQL (Listen on Table -> Fetch from View)
     socket.on('novedad_cambiada', (payload: { id: string | number }) => {
-      if (payload?.id) {
+      if (payload?.id !== undefined && payload?.id !== null) {
         agendarActualizacionFila(payload.id);
       }
     });
 
-    // Evento de lote completo
-    socket.on('novedades_actualizadas', (nuevasNovedades: Novedad[]) => {
-      if (Array.isArray(nuevasNovedades)) {
-        console.log('🔔 [Socket] Novedades actualizadas en vivo:', nuevasNovedades.length);
-        setNovedades(nuevasNovedades);
-      }
-    });
-
-    // Evento de dirty-check global (con throttle para proteger la red)
+    // Evento de dirty-check global de flota/retornos (refresco 100% silencioso con throttle de 15s)
     let lastRefresh = 0;
     socket.on('datos_actualizados', (_payload: any) => {
       const now = Date.now();
-      if (now - lastRefresh > 5000) {
+      if (now - lastRefresh > 15000) {
         lastRefresh = now;
-        console.log('⚡ [Socket] Cambios detectados en datos de flota/novedades. Refrescando vistas...');
-        cargarDatos();
+        cargarDatos(true);
       }
     });
 
@@ -159,7 +197,7 @@ export function useDash() {
     );
 
     try {
-      await api.despacharNovedad({
+      const res = await api.despacharNovedad({
         action: 'resolver',
         id_novedad: idStr,
         payload: {
@@ -168,9 +206,13 @@ export function useDash() {
           ...(nuevoServicio ? { servicio: nuevoServicio } : {})
         }
       });
+      if (res?.data) {
+        sincronizarNovedad(res.data);
+      }
     } catch (e: any) {
       console.error('Error resolviendo novedad:', e);
-      cargarDatos(); // Revertir en falla
+      await cargarDatos(true); // Revertir silenciosamente sin desmontar el tablero
+      throw e;
     }
   };
 
@@ -179,10 +221,14 @@ export function useDash() {
     const idStr = String(id);
     setNovedades(prev => prev.map(n => String(n.id) === idStr ? { ...n, terminal, terminal_id: terminal_id || null } : n));
     try {
-      await api.asignarTerminal(idStr, terminal, terminal_id || null);
-    } catch (e) {
+      const res = await api.asignarTerminal(idStr, terminal, terminal_id || null);
+      if (res?.data) {
+        sincronizarNovedad(res.data);
+      }
+    } catch (e: any) {
       console.error('Error cambiando terminal:', e);
-      cargarDatos();
+      toast.error(`Error al cambiar terminal: ${e?.message || 'Error de red'}`);
+      cargarDatos(true);
     }
   };
 
@@ -191,14 +237,18 @@ export function useDash() {
     const idStr = String(id);
     setNovedades(prev => prev.map(n => String(n.id) === idStr ? { ...n, servicio, srv: servicio } : n));
     try {
-      await api.despacharNovedad({
+      const res = await api.despacharNovedad({
         action: 'editar',
         id_novedad: idStr,
         payload: { servicio, srv: servicio }
       });
-    } catch (e) {
+      if (res?.data) {
+        sincronizarNovedad(res.data);
+      }
+    } catch (e: any) {
       console.error('Error cambiando servicio:', e);
-      cargarDatos();
+      toast.error(`Error al cambiar servicio: ${e?.message || 'Error de red'}`);
+      cargarDatos(true);
     }
   };
 
@@ -219,10 +269,14 @@ export function useDash() {
     );
 
     try {
-      await api.gestionarMencion(idStr, usuario, accion);
-    } catch (e) {
+      const res = await api.gestionarMencion(idStr, usuario, accion);
+      if (res?.data) {
+        sincronizarNovedad(res.data);
+      }
+    } catch (e: any) {
       console.error('Error gestionando mención:', e);
-      cargarDatos();
+      toast.error(`Error al actualizar mención: ${e?.message || 'Error de red'}`);
+      cargarDatos(true);
     }
   };
 
@@ -237,6 +291,7 @@ export function useDash() {
     cargando,
     error,
     recargar: cargarDatos,
+    sincronizarNovedad,
     resolverNovedad,
     asignarTerminal,
     asignarServicio,
