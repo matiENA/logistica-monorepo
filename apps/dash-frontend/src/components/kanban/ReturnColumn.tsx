@@ -101,6 +101,46 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
   // Autoscroll para modo cartelera (TV)
   useAutoScroll('carrusel-cat-vuelve', [vuelvenHoy.length, vuelvenManana.length]);
 
+  // Ancho óptimo y fijo para el área de copia (DriverNameBadge):
+  // Límite con margen del nombre más largo visible, que no cambia de dimensiones ante resize de columna
+  const copyAreaWidth = useMemo(() => {
+    let maxLen = 0;
+    const todos = [...vuelvenHoy, ...vuelvenManana];
+    for (const item of todos) {
+      const name = (item.nom || item.nombre || '').trim();
+      if (name.length > maxLen) {
+        maxLen = name.length;
+      }
+    }
+    if (maxLen === 0) return '260px';
+
+    // Estimación exacta con canvas en navegador para Plus Jakarta Sans / Inter
+    let measuredWidth = 0;
+    if (typeof document !== 'undefined') {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.font = '900 12px "Plus Jakarta Sans", "Inter", sans-serif';
+          for (const item of todos) {
+            const name = (item.nom || item.nombre || '').trim().toUpperCase();
+            const w = ctx.measureText(name).width;
+            if (w > measuredWidth) measuredWidth = w;
+          }
+        }
+      } catch {
+        // Fallback si canvas no está disponible
+      }
+    }
+
+    // Margen de respiración: padding (16px) + gap (6px) + icon (10px) + margen (18px) = 50px
+    const pxFinal = measuredWidth > 0 
+      ? Math.ceil(measuredWidth + 50) 
+      : Math.ceil(maxLen * 8.2) + 48;
+
+    return `${Math.max(200, pxFinal)}px`;
+  }, [vuelvenHoy, vuelvenManana]);
+
   if (vuelvenHoy.length === 0 && vuelvenManana.length === 0) {
     return null;
   }
@@ -150,8 +190,14 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
                 key={`hoy-${ch.nom || ch.nombre}-${idx}`}
                 className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 gap-2 shrink-0 shadow-xs"
               >
-                <div className="flex flex-col truncate flex-1 min-w-0 pr-1 gap-1">
-                  <DriverNameBadge nombre={ch.nom || ch.nombre} />
+                <div
+                  className="flex flex-col truncate shrink-0 gap-1"
+                  style={{ width: copyAreaWidth, maxWidth: 'calc(100% - 100px)' }}
+                >
+                  <DriverNameBadge
+                    nombre={ch.nom || ch.nombre}
+                    className="w-full"
+                  />
                   {ch.tractor && (
                     <div className="flex items-center">
                       <PatenteMercosur patente={ch.tractor} />
@@ -183,8 +229,14 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
                 key={`manana-${ch.nom || ch.nombre}-${idx}`}
                 className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200/60 dark:border-slate-700/60 gap-2 shrink-0 shadow-xs"
               >
-                <div className="flex flex-col truncate flex-1 min-w-0 pr-1 gap-1">
-                  <DriverNameBadge nombre={ch.nom || ch.nombre} />
+                <div
+                  className="flex flex-col truncate shrink-0 gap-1"
+                  style={{ width: copyAreaWidth, maxWidth: 'calc(100% - 100px)' }}
+                >
+                  <DriverNameBadge
+                    nombre={ch.nom || ch.nombre}
+                    className="w-full"
+                  />
                   {ch.tractor && (
                     <div className="flex items-center">
                       <PatenteMercosur patente={ch.tractor} />

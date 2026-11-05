@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "node --watch server.js",
     "normalizar:mes": "node scripts/normalizar_diagramas_mes.js --overwrite",
     "normalizar:mes:dry": "node scripts/normalizar_diagramas_mes.js --dry-run"
   },

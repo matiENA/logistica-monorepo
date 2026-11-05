@@ -4,6 +4,7 @@ import { Toaster } from 'sonner';
 import { Login } from './pages/Login';
 import { TerminalTaller } from './pages/TerminalTaller';
 import { MonitorPanol } from './pages/MonitorPanol';
+import { MonitorCoordinacion } from './pages/MonitorCoordinacion';
 import { AppMobile } from './pages/AppMobile';
 
 export const App: React.FC = () => {
@@ -15,6 +16,8 @@ export const App: React.FC = () => {
         <Route path="/" element={<TerminalTaller />} />
         <Route path="/terminal" element={<Navigate to="/" replace />} />
         <Route path="/panol" element={<MonitorPanol />} />
+        <Route path="/coordinacion" element={<MonitorCoordinacion />} />
+        <Route path="/wireframe" element={<Navigate to="/coordinacion" replace />} />
         <Route path="/mobile" element={<AppMobile />} />
         <Route path="/m" element={<Navigate to="/mobile" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -65,6 +65,9 @@ async function extraerPareosYDesunionesDesdeSheets(diaParam = null) {
             continue;
         }
 
+        // Exclusión estricta de flota de prestadores externos (SOCIO)
+        if (currentSrv === 'SOCIO') continue;
+
         const tractor = col4.toUpperCase().replace(/\s+/g, '');
         const semi = col5.toUpperCase().replace(/\s+/g, '');
         const nUte = col2.replace(/[^0-9]/g, '');

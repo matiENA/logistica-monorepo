@@ -8,6 +8,7 @@ interface DriverNameBadgeProps {
   textClassName?: string;
   mostrarToast?: boolean;
   maxWidthClass?: string;
+  style?: React.CSSProperties;
 }
 
 /**
@@ -22,7 +23,8 @@ export const DriverNameBadge: React.FC<DriverNameBadgeProps> = ({
   className = '',
   textClassName = 'text-xs font-black',
   mostrarToast = true,
-  maxWidthClass = 'max-w-full'
+  maxWidthClass = 'max-w-full',
+  style
 }) => {
   const [copiado, setCopiado] = useState(false);
 
@@ -95,6 +97,7 @@ export const DriverNameBadge: React.FC<DriverNameBadgeProps> = ({
         if (e.key === 'Enter' || e.key === ' ') handleCopy(e as any);
       }}
       title="Clic para copiar nombre completo"
+      style={style}
       className={`group/name inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-dashed transition-all duration-150 cursor-pointer select-none shrink-0 ${maxWidthClass} ${
         copiado
           ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-xs'

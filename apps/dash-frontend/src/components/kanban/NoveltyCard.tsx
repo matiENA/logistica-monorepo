@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pencil, Clock, Check, X, User, Calendar } from 'lucide-react';
+import { Pencil, Clock, Check, X, User } from 'lucide-react';
 import { Novedad, Usuario } from '../../types/dash';
 import { useDashStore } from '../../store/useDashStore';
 import { PatenteMercosur } from '../common/PatenteMercosur';
@@ -638,10 +638,9 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
           {/* Fecha Objetivo */}
           {novedad.fecha_objetivo && (
             <span
-              className={`px-1.5 py-0.5 text-[9px] font-black ${cfg.text} whitespace-nowrap rounded border ${cfg.border} inline-flex items-center gap-1`}
+              className={`px-1.5 py-0.5 text-[9px] font-black ${cfg.text} whitespace-nowrap rounded border ${cfg.border} inline-flex items-center`}
               title={`Fecha Objetivo: ${formatearFechaObjetivo(novedad.fecha_objetivo)}`}
             >
-              <Calendar className="w-2.5 h-2.5 shrink-0 stroke-[2.2]" />
               {formatearFechaObjetivo(novedad.fecha_objetivo)}
             </span>
           )}
