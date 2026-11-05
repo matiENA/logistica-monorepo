@@ -14,8 +14,8 @@ export const useIndividualChofer = (choferId) => {
       return await apiClient.getIndividualChofer(choferId);
     },
     enabled: Boolean(choferId),
-    staleTime: 1000 * 30, // 30 seg de frescura
-    refetchOnMount: true,
+    staleTime: 1000 * 60 * 10, // 10 min de frescura (datos estáticos de documentación y contacto)
+    refetchOnMount: false,
     gcTime: 1000 * 60 * 30,
   });
 };

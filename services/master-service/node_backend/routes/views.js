@@ -106,7 +106,7 @@ module.exports = function createViewsRouter() {
 
             const cols = req.query.select 
                 ? req.query.select.split(',').map(c => c.trim()).filter(c => /^[a-zA-Z0-9_]+$/.test(c)).join(', ') || '*'
-                : 'chofer_id, nombre, dni, telefono, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el';
+                : 'chofer_id, nombre, dni, telefono, telef_corp, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el';
 
             const dataQuery = `
                 SELECT ${cols} FROM public.view_diaria_operativa 
@@ -531,7 +531,7 @@ module.exports = function createViewsRouter() {
             }
 
             const dataRes = await db.query(`
-                SELECT chofer_id, nombre, dni, servicio, foto, telefono, estado_chofer
+                SELECT chofer_id, nombre, dni, servicio, foto, telefono, telef_corp, estado_chofer
                 FROM public.view_individual_chofer
                 ORDER BY nombre ASC
             `);
@@ -565,7 +565,7 @@ module.exports = function createViewsRouter() {
             }
 
             const dataRes = await db.query(`
-                SELECT chofer_id, nombre, legajo, dni, cuil, telefono, email, domicilio, localidad, 
+                SELECT chofer_id, nombre, legajo, dni, cuil, telefono, telef_corp, email, domicilio, localidad, 
                        telefono_emergencia, empresa, foto, servicio, estado_chofer, doc_id, 
                        venc_licencia_nacional, venc_psicofisico, venc_cargas_peligrosas, venc_periodico, 
                        venc_curso_shell, venc_manejo_def, apto_medico_venc, apto_medico_estado, 
@@ -899,7 +899,7 @@ module.exports = function createViewsRouter() {
             }
 
             const allowedCols = [
-                'drv_codigo', 'cuil', 'dni', 'telefono', 'email', 'empresa', 'area',
+                'drv_codigo', 'cuil', 'dni', 'telefono', 'telef_corp', 'email', 'empresa', 'area',
                 'domicilio', 'localidad', 'telefono_emergencia', 'fecha_alta', 'estudios_nivel',
                 'experiencia_anios', 'fecha_nacimiento', 'edad', 'venc_licencia_nacional',
                 'venc_psicofisico', 'venc_cargas_peligrosas', 'venc_periodico', 'venc_curso_shell',

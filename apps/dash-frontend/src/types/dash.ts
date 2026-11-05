@@ -75,6 +75,7 @@ export interface Novedad {
   chofer_id?: string | null;
   chofer_estado?: string;
   chofer_telefono?: string;
+  chofer_telef_corp?: string;
   foto?: string;
   tractor: string;
   semi?: string;

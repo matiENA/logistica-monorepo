@@ -311,7 +311,7 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
                 'venc_licencia_nacional', 'venc_psicofisico', 'venc_cargas_peligrosas', 'venc_periodico',
                 'venc_curso_shell', 'venc_manejo_def', 'curso_pae', 'apto_medico_venc', 'apto_medico_estado',
                 'avalado_contratos', 'vacuna_antitetanica', 'metabolitos_7', 'vacuna_covid', 'dosis_covid',
-                'obs_documentacion', 'telefono', 'email', 'domicilio', 'localidad', 'telefono_emergencia'
+                'obs_documentacion', 'telefono', 'telef_corp', 'email', 'domicilio', 'localidad', 'telefono_emergencia'
             ];
 
             const dbPayload = { actualizado_el: new Date().toISOString() };

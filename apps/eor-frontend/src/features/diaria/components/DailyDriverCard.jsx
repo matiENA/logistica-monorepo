@@ -36,7 +36,10 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
     if (!clean.startsWith('54')) clean = '549' + clean;
     return `https://wa.me/${clean}`;
   };
-  const wspLink = formatWhatsApp(driver.telefono);
+  const wspCorpLink = formatWhatsApp(driver.telef_corp);
+  const wspPersonalLink = formatWhatsApp(driver.telefono);
+  const hasPersonalPhone = Boolean(wspPersonalLink && (!wspCorpLink || driver.telefono !== driver.telef_corp));
+  const hasPhones = Boolean(wspCorpLink || hasPersonalPhone);
 
   // 3. Copiar al portapapeles con feedback
   const handleCopy = async (text, fieldName, e) => {
@@ -143,21 +146,42 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
                 </div>
               </div>
 
-              {/* Slot de Comunicación: Botón Chat WhatsApp (separado del bloque de unidad) */}
-              <div className="daily-card-chat-slot">
-                {wspLink && (
+              {/* Slot de Comunicación: Cuadrícula fija de 88px con filas dedicadas por tipo (WCAG cross-cards alignment) */}
+              <div className={`daily-card-chat-slot ${!hasPhones ? 'empty-slot' : ''}`} aria-label="Canales de comunicación">
+                {/* Fila 1: Corporativo */}
+                {wspCorpLink ? (
                   <a
-                    href={wspLink}
+                    href={wspCorpLink}
                     target="_blank"
                     rel="noreferrer"
                     className="btn-whatsapp-mini"
-                    title={`WhatsApp: ${driver.telefono}`}
-                    aria-label={`Enviar WhatsApp a ${driver.nombre}`}
+                    title={`WhatsApp Corp: ${driver.telef_corp}`}
+                    aria-label={`Enviar WhatsApp a ${driver.nombre} (Corporativo)`}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <MessageCircle size={12} />
-                    <span>Chat</span>
+                    <MessageCircle size={11} />
+                    <span>Chat Corp</span>
                   </a>
+                ) : (
+                  <div className="chat-slot-placeholder" aria-hidden="true" />
+                )}
+
+                {/* Fila 2: Personal */}
+                {hasPersonalPhone ? (
+                  <a
+                    href={wspPersonalLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-whatsapp-mini"
+                    title={`WhatsApp Personal: ${driver.telefono}`}
+                    aria-label={`Enviar WhatsApp a ${driver.nombre} (Personal)`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MessageCircle size={11} />
+                    <span>Chat Pers</span>
+                  </a>
+                ) : (
+                  <div className="chat-slot-placeholder" aria-hidden="true" />
                 )}
               </div>
 

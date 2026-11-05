@@ -500,8 +500,13 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
                 if (dniClean) aptosMap[dniClean] = docApto;
                 if (norm.includes('ñ')) aptosMap[norm.replace(/ñ/g, 'n')] = docApto;
             }
-            if (doc?.telefono) {
-                const telObj = { telefono: doc.telefono, email: doc?.email || '', fechaAlta: doc?.fecha_alta || '' };
+            if (doc?.telefono || doc?.telef_corp) {
+                const telObj = { 
+                    telefono: doc?.telefono || '', 
+                    telef_corp: doc?.telef_corp || '', 
+                    email: doc?.email || '', 
+                    fechaAlta: doc?.fecha_alta || '' 
+                };
                 telefonosMap[norm] = telObj;
                 if (dniClean) telefonosMap[dniClean] = telObj;
                 if (norm.includes('ñ')) telefonosMap[norm.replace(/ñ/g, 'n')] = telObj;
@@ -518,7 +523,9 @@ async function actualizarCacheDesdeSupabase(cacheDatosGlobales, io, ioDash, opci
                 nom: ch.nombre,
                 dni: doc?.dni || '',
                 legajo: ch.legajo || '',
-                contacto: doc?.telefono || '',
+                contacto: doc?.telef_corp || doc?.telefono || '',
+                telefono: doc?.telefono || '',
+                telef_corp: doc?.telef_corp || '',
                 email: doc?.email || '',
                 srv: srvNombre,
                 srv_chofer: srvNombre,

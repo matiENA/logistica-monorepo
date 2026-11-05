@@ -125,11 +125,17 @@ export const DriverProfileCard = ({ chofer, tripsMap }) => {
     }
   };
 
-  // Limpieza de teléfono para WhatsApp
-  const rawTel = chofer.telefono || '';
-  const numLimpio = rawTel.replace(/\D/g, '');
-  const wspNum = numLimpio.startsWith('54') ? numLimpio : `549${numLimpio}`;
-  const wspLink = numLimpio.length >= 8 ? `https://wa.me/${wspNum}` : null;
+  // Limpieza de teléfonos para WhatsApp (Argentina: +54 9 ...)
+  const getWspLink = (tel) => {
+    if (!tel) return null;
+    const num = String(tel).replace(/\D/g, '');
+    if (num.length < 6) return null;
+    const wsp = num.startsWith('54') ? num : `549${num}`;
+    return `https://wa.me/${wsp}`;
+  };
+
+  const wspPersonalLink = getWspLink(chofer.telefono);
+  const wspCorpLink = getWspLink(chofer.telef_corp);
   const totalKm = parseFloat(chofer.total_km) || 0;
 
   // Cálculo reactivo de ciclos de liquidación (período actual y ciclo anterior sep 26 - oct 25)
@@ -347,25 +353,70 @@ export const DriverProfileCard = ({ chofer, tripsMap }) => {
               </>
             )}
 
+            {/* TELÉFONO PERSONAL */}
             {chofer.telefono && (
               <>
                 <span style={{ opacity: 0.4 }}>•</span>
-                <span>TEL: <strong>{chofer.telefono}</strong></span>
+                <span
+                  className={`badge-easycopy ${copiedField === 'telefono' ? 'copied' : ''}`}
+                  onClick={(e) => handleCopy(chofer.telefono, 'telefono', e)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') handleCopy(chofer.telefono, 'telefono', e);
+                  }}
+                  title="Clic para copiar TEL"
+                  aria-label={`Copiar TEL: ${chofer.telefono}`}
+                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  <span>TEL: <strong>{chofer.telefono}</strong></span>
+                  {copiedField === 'telefono' ? <Check size={11} color="currentColor" /> : <Copy size={11} className="easycopy-icon" />}
+                </span>
+                {wspPersonalLink && (
+                  <a
+                    href={wspPersonalLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-whatsapp-chat"
+                    title={`Abrir WhatsApp con ${chofer.telefono}`}
+                    aria-label={`Abrir WhatsApp con ${chofer.telefono}`}
+                  >
+                    <MessageCircle size={14} />
+                    <span>CHAT</span>
+                  </a>
+                )}
               </>
             )}
 
-            {wspLink && (
-              <a
-                href={wspLink}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-whatsapp-chat"
-                title={`Abrir WhatsApp con ${chofer.telefono}`}
-                aria-label={`Abrir WhatsApp con ${chofer.telefono}`}
-              >
-                <MessageCircle size={14} />
-                <span>CHAT</span>
-              </a>
+            {/* TELÉFONO CORPORATIVO */}
+            {chofer.telef_corp && (
+              <>
+                <span style={{ opacity: 0.4 }}>•</span>
+                <span
+                  className={`badge-easycopy ${copiedField === 'telef_corp' ? 'copied' : ''}`}
+                  onClick={(e) => handleCopy(chofer.telef_corp, 'telef_corp', e)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') handleCopy(chofer.telef_corp, 'telef_corp', e);
+                  }}
+                  title="Clic para copiar CORP"
+                  aria-label={`Copiar CORP: ${chofer.telef_corp}`}
+                  style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  <span>CORP: <strong>{chofer.telef_corp}</strong></span>
+                  {copiedField === 'telef_corp' ? <Check size={11} color="currentColor" /> : <Copy size={11} className="easycopy-icon" />}
+                </span>
+                {wspCorpLink && (
+                  <a
+                    href={wspCorpLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-whatsapp-chat"
+                    title={`Abrir WhatsApp con ${chofer.telef_corp}`}
+                    aria-label={`Abrir WhatsApp con ${chofer.telef_corp}`}
+                  >
+                    <MessageCircle size={14} />
+                    <span>CHAT</span>
+                  </a>
+                )}
+              </>
             )}
           </div>
 

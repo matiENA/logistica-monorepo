@@ -102,7 +102,7 @@ class ApiClient {
     // Fallback Supabase protegido con Column Pruning estricto
     try {
       let query = supabase.from('view_diaria_operativa').select(
-        'chofer_id, nombre, dni, telefono, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el',
+        'chofer_id, nombre, dni, telefono, telef_corp, servicio, estado_chofer, foto, unidad_id, n_ute, tractor, semi, vtv_tr, mas_tr, vtv_semi, mas_semi, venc_periodico, venc_licencia_nacional, venc_cargas_peligrosas, apto_medico_venc, apto_medico_estado, alerta_docs_chofer, alerta_docs_unidad, dia_codigo, dia_fecha, diagrama_tipo, actualizado_el',
         { count: 'exact' }
       );
       if (servicio && servicio !== 'TODOS') query = query.eq('servicio', servicio);
@@ -212,7 +212,7 @@ class ApiClient {
     try {
       const { data, error } = await supabase
         .from('view_individual_chofer')
-        .select('chofer_id, nombre, dni, servicio, foto, telefono, estado_chofer')
+        .select('chofer_id, nombre, dni, servicio, foto, telefono, telef_corp, estado_chofer')
         .order('nombre');
 
       if (error) throw error;
@@ -243,7 +243,7 @@ class ApiClient {
       const { data, error } = await supabase
         .from('view_individual_chofer')
         .select(
-          'chofer_id, nombre, legajo, dni, cuil, telefono, email, domicilio, localidad, telefono_emergencia, empresa, foto, servicio, estado_chofer, doc_id, venc_licencia_nacional, venc_psicofisico, venc_cargas_peligrosas, venc_periodico, venc_curso_shell, venc_manejo_def, apto_medico_venc, apto_medico_estado, avalado_contratos, obs_documentacion, unidad_id, n_ute, estado_unidad, tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi, marca_semi, cisternado, esp_es, vi, ve, vtv_semi, mas_semi, actualizado_el'
+          'chofer_id, nombre, legajo, dni, cuil, telefono, telef_corp, email, domicilio, localidad, telefono_emergencia, empresa, foto, servicio, estado_chofer, doc_id, venc_licencia_nacional, venc_psicofisico, venc_cargas_peligrosas, venc_periodico, venc_curso_shell, venc_manejo_def, apto_medico_venc, apto_medico_estado, avalado_contratos, obs_documentacion, unidad_id, n_ute, estado_unidad, tractor, marca_tr, modelo_tr, vtv_tr, mas_tr, semi, marca_semi, cisternado, esp_es, vi, ve, vtv_semi, mas_semi, actualizado_el'
         )
         .eq('chofer_id', choferId)
         .maybeSingle();
