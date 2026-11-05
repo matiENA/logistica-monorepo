@@ -67,6 +67,7 @@ EXECUTION_STATE: Dict[str, Any] = {
     "limpiar": {"last_run": None, "status": "idle", "duration": 0, "output": ""},
     "poll_vacio": {"last_run": None, "status": "idle", "duration": 0, "output": ""},
     "unified": {"last_run": None, "status": "idle", "duration": 0, "output": ""},
+    "bajas": {"last_run": None, "status": "idle", "duration": 0, "output": ""},
     "all": {"last_run": None, "status": "idle", "duration": 0, "output": ""}
 }
 
@@ -84,6 +85,7 @@ DEFAULT_TIMEOUTS: Dict[str, int] = {
     "vacio": 300,
     "seguimiento": 300,
     "dispo": 180,
+    "bajas": 180,
     "limpiar": 300
 }
 
@@ -468,6 +470,13 @@ def trigger_limpiar_vacio(day: Optional[int] = Query(None)):
     if day:
         args += ["--day", str(day)]
     return run_command(args, "limpiar")
+
+@app.post("/sync/bajas")
+def trigger_bajas(dry_run: bool = Query(False)):
+    args = [PYTHON_EXE, "sync_bajas_movimientos.py"]
+    if dry_run:
+        args.append("--dry-run")
+    return run_command(args, "bajas")
 
 @app.post("/sync/all")
 def trigger_all(day: Optional[int] = Query(None)):

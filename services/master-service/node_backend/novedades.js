@@ -7,6 +7,25 @@ const {
     ID_SHEET_MOVIMIENTOS,
     getFechaArgentina
 } = require('./utils/shared');
+const {
+    syncBajasGoogleSheets,
+    queueSyncBajas,
+    limpiarTrackingNovedad,
+    obtenerEstadoTrackingBajas
+} = require('./utils/googleSheetsSync');
+
+function sumarUnDiaIso(isoDateStr) {
+    if (!isoDateStr) return null;
+    const clean = String(isoDateStr).split('T')[0].trim();
+    const [y, m, d] = clean.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() + 1);
+    const ny = dt.getFullYear();
+    const nm = String(dt.getMonth() + 1).padStart(2, '0');
+    const nd = String(dt.getDate()).padStart(2, '0');
+    return `${ny}-${nm}-${nd}`;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -176,7 +195,10 @@ async function inyectarServicioEnSheetDispo(tractorPatente, choferNom, servicioD
 async function resolveTipoNovedad(payload) {
     if (isValidUuid(payload?.tipo_novedad_id)) {
         const byId = await db.query(
-            `SELECT id, codigo FROM public.tipos_novedad WHERE id = $1::uuid LIMIT 1`,
+            `SELECT id, codigo, titulo, COALESCE(imprime_nota_movimientos, false) AS imprime_nota_movimientos
+             FROM public.tipos_novedad
+             WHERE id = $1::uuid
+             LIMIT 1`,
             [payload.tipo_novedad_id.trim()]
         );
         if (byId.rows.length > 0) return byId.rows[0];
@@ -188,7 +210,8 @@ async function resolveTipoNovedad(payload) {
 
     if (codeCand) {
         const byCode = await db.query(
-            `SELECT id, codigo FROM public.tipos_novedad
+            `SELECT id, codigo, titulo, COALESCE(imprime_nota_movimientos, false) AS imprime_nota_movimientos
+             FROM public.tipos_novedad
              WHERE UPPER(TRIM(codigo)) = UPPER(TRIM($1))
                 OR UPPER(TRIM(titulo)) = UPPER(TRIM($1))
              LIMIT 1`,
@@ -198,7 +221,8 @@ async function resolveTipoNovedad(payload) {
     }
 
     const fallback = await db.query(
-        `SELECT id, codigo FROM public.tipos_novedad
+        `SELECT id, codigo, titulo, COALESCE(imprime_nota_movimientos, false) AS imprime_nota_movimientos
+         FROM public.tipos_novedad
          ORDER BY (codigo = 'LIBRES') DESC, activo DESC, orden ASC
          LIMIT 1`
     );
@@ -664,6 +688,22 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ioDash.emit('novedad_cambiada', { id: newId, action: 'nueva' });
                 }
 
+                // Disparador asíncrono de Notas Hover en Google Sheets Movimientos (por UUID -> imprime_nota_movimientos)
+                const debeImprimirNota = Boolean(card?.imprime_nota_movimientos ?? tipoObj.imprime_nota_movimientos);
+                if (debeImprimirNota && (card?.chofer_id || choferId) && (card?.fecha_objetivo || fechaObjClean)) {
+                    queueSyncBajas({
+                        action: 'crear',
+                        id: newId,
+                        tipo_novedad_id: card?.tipo_novedad_id || tipoObj.id,
+                        tipo_novedad: card?.tipo_novedad || tipoObj.codigo,
+                        tipo_novedad_titulo: card?.tipo_novedad_titulo || tipoObj.titulo,
+                        chofer_id: card?.chofer_id || choferId,
+                        chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        fecha_objetivo: fechaObjClean || card?.fecha_objetivo,
+                        detalle: detalleClean
+                    });
+                }
+
                 return res.json({ success: true, data: card });
             }
 
@@ -674,9 +714,15 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                 }
 
                 const existingRes = await db.query(
-                    `SELECT n.*, tn.codigo AS tipo_codigo
+                    `SELECT n.*,
+                            tn.codigo AS tipo_codigo,
+                            tn.titulo AS tipo_titulo,
+                            COALESCE(tn.imprime_nota_movimientos, false) AS prev_imprime_nota,
+                            UPPER(TRIM(COALESCE(c_prev.nombre, ''))) AS prev_chofer_nombre,
+                            TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS prev_fecha_iso
                      FROM public.novedades n
                      JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
+                     LEFT JOIN public.choferes c_prev ON n.chofer_id = c_prev.id
                      WHERE n.id = $1::bigint
                      LIMIT 1`,
                     [idClean]
@@ -691,6 +737,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                 let targetUnidadId = actual.unidad_id;
                 let targetTipoId = actual.tipo_novedad_id;
                 let targetTipoCodigo = actual.tipo_codigo;
+                let targetTipoTitulo = actual.tipo_titulo;
+                let targetImprimeNota = Boolean(actual.prev_imprime_nota);
                 let targetTerminalId = actual.terminal_id;
 
                 const tieneCambioTipo = payload.tipo_novedad !== undefined || payload.tipo_novedad_id !== undefined || payload.tipo !== undefined;
@@ -699,6 +747,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     if (resolvedTipo?.id) {
                         targetTipoId = resolvedTipo.id;
                         targetTipoCodigo = resolvedTipo.codigo;
+                        targetTipoTitulo = resolvedTipo.titulo;
+                        targetImprimeNota = Boolean(resolvedTipo.imprime_nota_movimientos);
                     }
                 }
 
@@ -725,7 +775,7 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ? (payload.fecha_objetivo && String(payload.fecha_objetivo).trim() !== ''
                         ? String(payload.fecha_objetivo).split('T')[0].trim()
                         : null)
-                    : actual.fecha_objetivo;
+                    : actual.prev_fecha_iso;
 
                 const targetDetalle = payload.detalle !== undefined
                     ? String(payload.detalle ?? '')
@@ -771,6 +821,48 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'editar' });
                 }
 
+                // Sincronización diferencial de Notas Hover (UUID tipos_novedad.imprime_nota_movimientos)
+                const prevImprimia = Boolean(actual.prev_imprime_nota) && !actual.resuelto && Boolean(actual.chofer_id) && Boolean(actual.prev_fecha_iso);
+                const nuevoImprime = Boolean(card?.imprime_nota_movimientos ?? targetImprimeNota) && !Boolean(card?.resuelto ?? actual.resuelto) && Boolean(targetChoferId) && Boolean(targetFechaObjetivo);
+
+                if (prevImprimia && (!nuevoImprime || String(actual.chofer_id) !== String(targetChoferId))) {
+                    limpiarTrackingNovedad(idClean);
+                    queueSyncBajas({
+                        action: 'limpiar',
+                        id: Number(idClean),
+                        chofer_id: actual.chofer_id,
+                        chofer_nombre: actual.prev_chofer_nombre,
+                        fecha_objetivo: actual.prev_fecha_iso
+                    });
+                } else if (prevImprimia && nuevoImprime && targetFechaObjetivo < actual.prev_fecha_iso) {
+                    const desdeRecorte = sumarUnDiaIso(targetFechaObjetivo);
+                    if (desdeRecorte && desdeRecorte <= actual.prev_fecha_iso) {
+                        queueSyncBajas({
+                            action: 'limpiar',
+                            id: null,
+                            chofer_id: actual.chofer_id,
+                            chofer_nombre: actual.prev_chofer_nombre,
+                            desde_fecha: desdeRecorte,
+                            fecha_objetivo: actual.prev_fecha_iso
+                        });
+                    }
+                }
+
+                if (nuevoImprime) {
+                    limpiarTrackingNovedad(idClean);
+                    queueSyncBajas({
+                        action: 'crear',
+                        id: Number(idClean),
+                        tipo_novedad_id: card?.tipo_novedad_id || targetTipoId,
+                        tipo_novedad: card?.tipo_novedad || targetTipoCodigo,
+                        tipo_novedad_titulo: card?.tipo_novedad_titulo || targetTipoTitulo,
+                        chofer_id: targetChoferId,
+                        chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        fecha_objetivo: targetFechaObjetivo,
+                        detalle: targetDetalle
+                    });
+                }
+
                 return res.json({ success: true, data: card });
             }
 
@@ -785,12 +877,18 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     : null;
 
                 const updRes = await db.query(
-                    `UPDATE public.novedades
+                    `UPDATE public.novedades n
                      SET resuelto = true,
                          fecha_resolucion = COALESCE($2::timestamptz, NOW()),
                          actualizado_el = NOW()
-                     WHERE id = $1::bigint
-                     RETURNING id, chofer_id, unidad_id`,
+                     FROM public.tipos_novedad tn
+                     WHERE n.id = $1::bigint
+                       AND n.tipo_novedad_id = tn.id
+                     RETURNING n.id,
+                               n.chofer_id,
+                               n.unidad_id,
+                               TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS fecha_objetivo_iso,
+                               COALESCE(tn.imprime_nota_movimientos, false) AS imprime_nota_movimientos`,
                     [idClean, fechaResParam]
                 );
 
@@ -813,6 +911,18 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                 }
 
                 res.json({ success: true, data: card });
+
+                // Limpieza asíncrona de Notas Hover si la novedad resuelta tenía imprime_nota_movimientos = true
+                if (rowUpdated.imprime_nota_movimientos && rowUpdated.chofer_id && rowUpdated.fecha_objetivo_iso) {
+                    limpiarTrackingNovedad(rowUpdated.id);
+                    queueSyncBajas({
+                        action: 'limpiar',
+                        id: rowUpdated.id,
+                        chofer_id: rowUpdated.chofer_id,
+                        chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        fecha_objetivo: rowUpdated.fecha_objetivo_iso
+                    });
+                }
 
                 // Inyección asíncrona no bloqueante en planilla Dispo cuando se resuelve asignando servicio
                 if (rawServ && card) {
@@ -933,6 +1043,47 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
             return res.json({ success: true, data: card });
         } catch (err) {
             console.error("❌ [Novedades] Error en POST /api/novedades/terminal:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
+        }
+    });
+
+    // POST /api/novedades/sync-bajas — Sincronización manual / programada de notas hover (BAJA_DIAGRAMA / UUID)
+    router.post('/sync-bajas', async (req, res) => {
+        try {
+            const wait = req.query.wait === 'true' || req.body?.wait === true;
+            const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+            const forceRefresh = req.query.force === 'true' || req.body?.force === true;
+
+            if (wait || dryRun) {
+                const result = await syncBajasGoogleSheets(null, { dryRun, forceRefresh });
+                return res.json({
+                    ...result,
+                    tracking: obtenerEstadoTrackingBajas()
+                });
+            }
+
+            queueSyncBajas(null);
+            return res.json({
+                success: true,
+                message: 'Sincronización de notas hover disparada en segundo plano',
+                tracking: obtenerEstadoTrackingBajas()
+            });
+        } catch (err) {
+            console.error("❌ [Novedades] Error en POST /api/novedades/sync-bajas:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
+        }
+    });
+
+    // GET /api/novedades/sync-bajas/estado — Estado en vivo del Pending Days Watcher (SINCRONIZADO vs PENDIENTE_TIPEO)
+    router.get('/sync-bajas/estado', (_req, res) => {
+        try {
+            const estado = obtenerEstadoTrackingBajas();
+            return res.json({
+                success: true,
+                count: estado.length,
+                data: estado
+            });
+        } catch (err) {
             return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
         }
     });

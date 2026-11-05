@@ -78,76 +78,81 @@ def log(msg: str, tag: str = "INFO"):
 # 1. ACTUALIZAR CONFIG_OPERATIVAS.JSON Y CONFIG.JSON
 # ==============================================================================
 def update_operativas_configs(apply_changes: bool):
-    oper_dir = DOCS / "server_local" / "operativas_diarias"
-    cfg_oper_path = oper_dir / "config_operativas.json"
-    cfg_dispo_path = oper_dir / "config.json"
-    cache_prev = oper_dir / "cache_mes_anterior.json"
+    monorepo_oper_dir = DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine"
+    legacy_oper_dir = DOCS / "server_local" / "operativas_diarias"
+    oper_dirs = [d for d in (monorepo_oper_dir, legacy_oper_dir) if d.exists()]
 
     log("--- 1. Actualizando configuraciones locales de operativas ---")
-    if cfg_oper_path.exists():
-        with open(cfg_oper_path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
+    for oper_dir in oper_dirs:
+        cfg_oper_path = oper_dir / "config_operativas.json"
+        cfg_dispo_path = oper_dir / "config.json"
+        cache_prev = oper_dir / "cache_mes_anterior.json"
 
-        old_actual = dict(cfg.get("mes_actual", {}))
-        # Archivar mes actual a anterior
-        cfg["mes_anterior"] = old_actual
-        cfg["mes_actual"] = {
-            "nombre": NUEVO_MES_NOMBRE,
-            "ruteos_id": RUTEOS_ID_ACTUAL,
-            "tab_ruteos": RUTEOS_TAB,
-            "movimientos_id": NOVIEMBRE_MOV_ID,
-            "tab_movimientos": NOVIEMBRE_MOV_TAB,
-            "conf_viaje_id": CONF_VIAJE_ID,
-            "tab_conf_source": NOV_CONF_SOURCE,
-            "tab_conf_target": NOV_CONF_TARGET
-        }
-        cfg["dias_transicion_lectura_dual"] = 7
+        if cfg_oper_path.exists():
+            with open(cfg_oper_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
 
-        log(f"config_operativas.json: Nuevo mes actual = {NUEVO_MES_NOMBRE} (ID: {NOVIEMBRE_MOV_ID})")
-        log(f"config_operativas.json: Mes anterior archivado = {old_actual.get('nombre')} (ID: {old_actual.get('movimientos_id')})")
+            old_actual = dict(cfg.get("mes_actual", {}))
+            if old_actual.get("movimientos_id") and old_actual.get("movimientos_id") != NOVIEMBRE_MOV_ID:
+                cfg["mes_anterior"] = old_actual
+            cfg["mes_actual"] = {
+                "nombre": NUEVO_MES_NOMBRE,
+                "ruteos_id": RUTEOS_ID_ACTUAL,
+                "tab_ruteos": RUTEOS_TAB,
+                "movimientos_id": NOVIEMBRE_MOV_ID,
+                "tab_movimientos": NOVIEMBRE_MOV_TAB,
+                "conf_viaje_id": CONF_VIAJE_ID,
+                "tab_conf_source": NOV_CONF_SOURCE,
+                "tab_conf_target": NOV_CONF_TARGET
+            }
+            cfg["dias_transicion_lectura_dual"] = 7
 
-        if apply_changes:
-            with open(cfg_oper_path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=2, ensure_ascii=False)
-            log("config_operativas.json guardado exitosamente.", "OK")
+            log(f"config_operativas.json ({oper_dir.name}): Nuevo mes actual = {NUEVO_MES_NOMBRE} (ID: {NOVIEMBRE_MOV_ID})")
 
-            if cache_prev.exists():
-                cache_prev.unlink()
-                log(f"Caché previa purgada: {cache_prev.name}", "OK")
+            if apply_changes:
+                with open(cfg_oper_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2, ensure_ascii=False)
+                log(f"{cfg_oper_path} guardado exitosamente.", "OK")
 
-    if cfg_dispo_path.exists():
-        with open(cfg_dispo_path, "r", encoding="utf-8") as f:
-            cdisp = json.load(f)
+                if cache_prev.exists():
+                    cache_prev.unlink()
+                    log(f"Caché previa purgada: {cache_prev.name}", "OK")
 
-        cdisp["spreadsheetId"] = NOVIEMBRE_MOV_ID
-        guardadas = cdisp.get("planillasGuardadas", [])
-        # Actualizar nombres en lista guardadas
-        for g in guardadas:
-            if g.get("id") == OCTUBRE_MOV_ID:
-                g["nombre"] = "Octubre 2026"
-            elif g.get("id") == NOVIEMBRE_MOV_ID:
-                g["nombre"] = f"{NUEVO_MES_NOMBRE} (Activa)"
-                g["pestaña"] = NOVIEMBRE_MOV_TAB
+        if cfg_dispo_path.exists():
+            with open(cfg_dispo_path, "r", encoding="utf-8") as f:
+                cdisp = json.load(f)
 
-        if not any(g.get("id") == NOVIEMBRE_MOV_ID for g in guardadas):
-            guardadas.insert(0, {
-                "id": NOVIEMBRE_MOV_ID,
-                "nombre": f"{NUEVO_MES_NOMBRE} (Activa)",
-                "pestaña": NOVIEMBRE_MOV_TAB
-            })
-        cdisp["planillasGuardadas"] = guardadas
+            cdisp["spreadsheetId"] = NOVIEMBRE_MOV_ID
+            guardadas = cdisp.get("planillasGuardadas", [])
+            for g in guardadas:
+                if g.get("id") == OCTUBRE_MOV_ID:
+                    g["nombre"] = "Octubre 2026"
+                elif g.get("id") == NOVIEMBRE_MOV_ID:
+                    g["nombre"] = f"{NUEVO_MES_NOMBRE} (Activa)"
+                    g["pestaña"] = NOVIEMBRE_MOV_TAB
 
-        log(f"config.json: spreadsheetId principal establecido a {NOVIEMBRE_MOV_ID}")
-        if apply_changes:
-            with open(cfg_dispo_path, "w", encoding="utf-8") as f:
-                json.dump(cdisp, f, indent=2, ensure_ascii=False)
-            log("config.json guardado exitosamente.", "OK")
+            if not any(g.get("id") == NOVIEMBRE_MOV_ID for g in guardadas):
+                guardadas.insert(0, {
+                    "id": NOVIEMBRE_MOV_ID,
+                    "nombre": f"{NUEVO_MES_NOMBRE} (Activa)",
+                    "pestaña": NOVIEMBRE_MOV_TAB
+                })
+            cdisp["planillasGuardadas"] = guardadas
+
+            log(f"config.json ({oper_dir.name}): spreadsheetId principal establecido a {NOVIEMBRE_MOV_ID}")
+            if apply_changes:
+                with open(cfg_dispo_path, "w", encoding="utf-8") as f:
+                    json.dump(cdisp, f, indent=2, ensure_ascii=False)
+                log(f"{cfg_dispo_path} guardado exitosamente.", "OK")
 
 
 # ==============================================================================
 # 2. ACTUALIZAR ARCHIVOS .ENV
 # ==============================================================================
 ENV_FILES = [
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "node_backend" / ".env",
+    DOCS / "logistica-monorepo" / "apps" / "panol" / ".env",
+    DOCS / "logistica-monorepo" / "apps" / "panol" / "backend" / ".env",
     DOCS / "eor_v1" / ".env",
     DOCS / "server_local" / ".env",
     DOCS / "server_local" / "extractor_local" / ".env",
@@ -203,6 +208,7 @@ def update_env_files(apply_changes: bool):
 # 3. ACTUALIZAR ARCHIVOS RENDER.YAML
 # ==============================================================================
 RENDER_FILES = [
+    DOCS / "logistica-monorepo" / "render.yaml",
     DOCS / "eor_v1" / "render.yaml",
     DOCS / "eor_v1" / "deploy" / "render.yaml",
     DOCS / "server_local" / "operativas_diarias" / "render.yaml",
@@ -226,7 +232,8 @@ def update_render_yamls(apply_changes: bool):
         new_content = new_content.replace(OCTUBRE_MOV_ID, NOVIEMBRE_MOV_ID)
         new_content = new_content.replace(SEPTIEMBRE_MOV_ID, NOVIEMBRE_MOV_ID)
 
-        # Reemplazar nombres de pestañas de CONF. DE VIAJE en operativas_diarias
+        # Reemplazar nombres de pestañas de Movimientos y CONF. DE VIAJE en blueprints Render
+        new_content = new_content.replace(OCTUBRE_MOV_TAB, NOVIEMBRE_MOV_TAB)
         new_content = new_content.replace(OCT_CONF_SOURCE, NOV_CONF_SOURCE)
         new_content = new_content.replace(OCT_CONF_TARGET, NOV_CONF_TARGET)
 
@@ -337,8 +344,14 @@ def update_n8n_database(apply_changes: bool):
 # 5. ACTUALIZAR DEFAULTS Y FALLBACKS EN SCRIPTS PYTHON Y NODE.JS
 # ==============================================================================
 SCRIPT_FALLBACK_FILES = [
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine" / "sync_ruteos_movimientos.py",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine" / "sync_vacio.py",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine" / "sync_seguimiento_vacio.py",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine" / "config_operativas.py",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "python_engine" / "core.js",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "node_backend" / "utils" / "shared.js",
+    DOCS / "logistica-monorepo" / "services" / "master-service" / "node_backend" / "utils" / "sheets.js",
     DOCS / "server_local" / "operativas_diarias" / "sync_ruteos_movimientos.py",
-    DOCS / "server_local" / "operativas_diarias" / "sync_bajas_movimientos.py",
     DOCS / "server_local" / "operativas_diarias" / "sync_vacio.py",
     DOCS / "server_local" / "operativas_diarias" / "sync_seguimiento_vacio.py",
     DOCS / "server_local" / "operativas_diarias" / "config_operativas.py",
@@ -408,6 +421,11 @@ def update_obsidian_note(apply_changes: bool):
   - **Origen:** `{NOV_CONF_SOURCE}`
   - **Destino:** `{NOV_CONF_TARGET}`
 - **Diagramas (Choferes / Días):** `{NUEVO_DIAGRAMA_TAB}` en `14jgQZF0gkbT7k3mps1k3dM3qtoaseoCOUfK4PFRozKU`
+- **Monorepo Unificado (`logistica-monorepo` — DASH & Sincronización Bajas Hover):**
+  - **Blueprint Render:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\render.yaml` (`ID_SHEET_MOVIMIENTOS`, `MES_MOVIMIENTOS_ID`, `TAB_MOVIMIENTOS`)
+  - **Variables Locales:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\node_backend\\.env`
+  - **Motor Nativo Node.js:** `services/master-service/node_backend/utils/googleSheetsSync.js` (Inyección y limpieza de notas hover por UUID `tipos_novedad.imprime_nota_movimientos`)
+  - **Motor CLI / FastAPI Python:** `services/master-service/python_engine/sync_bajas_movimientos.py` (`POST /sync/bajas`)
 
 ---
 
@@ -422,7 +440,7 @@ def update_obsidian_note(apply_changes: bool):
 
 ## 🛠️ Herramientas de Ejecución
 - **Documentación y Roadmap de Automatización:** [[procesos cambio mensual.]]
-- **Script Unificado:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias\\rotar_mes_global.py`
+- **Script Unificado (Monorepo):** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine\\rotar_mes_global.py`
 - **Lanzador por Lotes:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias\\ejecutar_rotacion_noviembre.bat`
 - **Tarea Programada Windows:** `RotacionMesNoviembre` (Programada para domingo 01/11/2026 a las 00:00:00)
 - **Última actualización:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}

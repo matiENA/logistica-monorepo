@@ -5,10 +5,11 @@
   SINCRONIZACIÓN DE NOTAS EN HOVER (BAJAS DE DIAGRAMA) HACIA MOVIMIENTOS
 ================================================================================
 Propósito:
-  Consulta las novedades activas de 'BAJA_DIAGRAMA' (o con flag imprime_nota_movimientos)
-  desde Supabase (public.view_dash_novedades) e inyecta notas emergentes (hover notes)
-  en las celdas del encabezado 'Chofer' de la planilla mensual de Movimientos para cada
-  día comprendido entre la fecha actual y la fecha objetivo (fecha_objetivo).
+  Consulta las novedades activas cuya relación UUID hacia public.tipos_novedad
+  tenga imprime_nota_movimientos = true (ej. BAJA_DIAGRAMA) desde Supabase /
+  PostgreSQL (public.view_dash_novedades) e inyecta notas emergentes (hover notes)
+  en las celdas del encabezado 'Chofer' de la planilla mensual de Movimientos para
+  cada día comprendido entre la fecha actual y la fecha objetivo (fecha_objetivo).
 
 Reglas Operativas:
   1. Detección estricta: Solo se inyecta la nota si el nombre del chofer se encuentra
@@ -21,11 +22,11 @@ Reglas Operativas:
      los valores, fórmulas y formatos de celda.
   4. Optimización de Lectura: Lee exclusivamente la columna del día operativo correspondiente
      (ej. 'AB1:AB250'), evitando descargar toda la planilla para máxima velocidad (< 1s).
-  5. Transición de mes: Soporta fechas que cruzan de Octubre a Noviembre 2026
-     utilizando config_operativas.json e IDs oficiales de rotación.
+  5. Transición mensual (#idmensual): Soporta fechas multi-mes/año dinámicamente mediante
+     config_operativas.json y variables de entorno (ID_SHEET_MOVIMIENTOS / TAB_MOVIMIENTOS).
 
 Uso:
-  py -3.13 sync_bajas_movimientos.py [--dry-run]
+  python sync_bajas_movimientos.py [--dry-run]
 ================================================================================
 """
 
@@ -51,27 +52,58 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-import requests
-from google.oauth2.service_account import Credentials
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-
 BASE_DIR = Path(__file__).resolve().parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+
+def _load_monorepo_dotenv_if_needed() -> None:
+    """Carga variables faltantes desde ../node_backend/.env en ejecución CLI local."""
+    env_candidates = [
+        BASE_DIR / ".env",
+        BASE_DIR.parent / "node_backend" / ".env",
+    ]
+    for env_file in env_candidates:
+        if not env_file.exists():
+            continue
+        try:
+            for raw_line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1]
+                if k and k not in os.environ:
+                    os.environ[k] = v
+        except Exception:
+            pass
+
+
+_load_monorepo_dotenv_if_needed()
+
+import requests
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 from credentials_helper import get_google_credentials
 
 # Parámetros y Constantes
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://rsvajuxihvmpmrmlcbul.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R")
 
-# IDs oficiales y pestañas de respaldo (rotación)
-OCTUBRE_MOV_ID = "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc"
-OCTUBRE_TAB_NAME = "NOVIEMBRE 2026- Mov.Unidades y Choferes"
+# IDs oficiales y pestañas de respaldo (rotación #idmensual)
+OCTUBRE_MOV_ID = "14Mb5rD853zxDkaLDS-IrW-OBDTDBjuJxn_3olXeWlkc"
+OCTUBRE_TAB_NAME = "OCTUBRE 2026- Mov.Unidades y Choferes"
 
 NOVIEMBRE_MOV_ID = "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc"
 NOVIEMBRE_TAB_NAME = "NOVIEMBRE 2026- Mov.Unidades y Choferes"
+
+MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -121,29 +153,63 @@ def cargar_config_operativas() -> Dict[str, Any]:
     return {}
 
 
+def _parse_mes_anio(texto: Optional[str]) -> Optional[Tuple[int, int]]:
+    """Extrae (anio, mes) desde textos como 'Noviembre 2026' o 'NOVIEMBRE 2026- Mov.Unidades y Choferes'."""
+    if not texto:
+        return None
+    low = str(texto).lower()
+    mes_encontrado = None
+    for idx, m_nom in enumerate(MESES_ES, start=1):
+        if m_nom in low:
+            mes_encontrado = idx
+            break
+    if not mes_encontrado:
+        return None
+    m_anio = re.search(r"\b(20\d{2})\b", low)
+    if not m_anio:
+        return None
+    return int(m_anio.group(1)), mes_encontrado
+
+
 def resolver_hoja_para_fecha(dt: date, config: Dict[str, Any]) -> Tuple[str, str]:
-    """Resuelve el (spreadsheetId, tabName) de Movimientos para la fecha dada."""
-    mes_actual = config.get("mes_actual", {})
-    mes_anterior = config.get("mes_anterior", {})
+    """Resuelve dinámicamente el (spreadsheetId, tabName) de Movimientos para cualquier mes/año (#idmensual)."""
+    mes_actual = (config or {}).get("mes_actual", {}) or {}
+    mes_anterior = (config or {}).get("mes_anterior", {}) or {}
+    default_tab_for_dt = f"{MESES_ES[dt.month - 1].upper()} {dt.year}- Mov.Unidades y Choferes"
 
+    # 1. Coincidencia explícita en config (mes_actual / mes_anterior) para cualquier año
+    ym_actual = _parse_mes_anio(mes_actual.get("nombre") or mes_actual.get("tab_movimientos"))
+    if ym_actual == (dt.year, dt.month) and mes_actual.get("movimientos_id"):
+        return mes_actual["movimientos_id"], mes_actual.get("tab_movimientos", default_tab_for_dt)
+
+    ym_anterior = _parse_mes_anio(mes_anterior.get("nombre") or mes_anterior.get("tab_movimientos"))
+    if ym_anterior == (dt.year, dt.month) and mes_anterior.get("movimientos_id"):
+        return mes_anterior["movimientos_id"], mes_anterior.get("tab_movimientos", default_tab_for_dt)
+
+    # 2. Variables de entorno del contenedor (ID_SHEET_MOVIMIENTOS / MES_MOVIMIENTOS_ID / TAB_MOVIMIENTOS)
+    env_mov_id = os.getenv("ID_SHEET_MOVIMIENTOS") or os.getenv("MES_MOVIMIENTOS_ID")
+    env_tab_name = os.getenv("TAB_MOVIMIENTOS")
+    if env_mov_id and env_tab_name:
+        ym_env = _parse_mes_anio(env_tab_name)
+        if ym_env == (dt.year, dt.month):
+            return env_mov_id, env_tab_name
+
+    # 3. Fallbacks estáticos históricos
     if dt.year == 2026 and dt.month == 11:
-        if mes_actual.get("nombre") == "Noviembre 2026":
-            return mes_actual.get("movimientos_id", NOVIEMBRE_MOV_ID), mes_actual.get("tab_movimientos", NOVIEMBRE_TAB_NAME)
         return NOVIEMBRE_MOV_ID, NOVIEMBRE_TAB_NAME
-
     if dt.year == 2026 and dt.month == 10:
-        if mes_actual.get("nombre") == "Octubre 2026":
-            return mes_actual.get("movimientos_id", OCTUBRE_MOV_ID), mes_actual.get("tab_movimientos", OCTUBRE_TAB_NAME)
-        if mes_anterior.get("nombre") == "Octubre 2026":
-            return mes_anterior.get("movimientos_id", OCTUBRE_MOV_ID), mes_anterior.get("tab_movimientos", OCTUBRE_TAB_NAME)
         return OCTUBRE_MOV_ID, OCTUBRE_TAB_NAME
 
-    return mes_actual.get("movimientos_id", OCTUBRE_MOV_ID), mes_actual.get("tab_movimientos", OCTUBRE_TAB_NAME)
+    # 4. Fallback general a planilla activa vigente
+    if env_mov_id:
+        return env_mov_id, env_tab_name or mes_actual.get("tab_movimientos", default_tab_for_dt)
+
+    return mes_actual.get("movimientos_id", NOVIEMBRE_MOV_ID), mes_actual.get("tab_movimientos", NOVIEMBRE_TAB_NAME)
 
 
 def format_baja_note(tipo_titulo: str, fecha_obj_str: str, detalle: str) -> str:
     """Formatea la nota para inyección en la celda."""
-    f_parts = str(fecha_obj_str).strip().split("-")
+    f_parts = str(fecha_obj_str).strip().split("T")[0].split("-")
     if len(f_parts) == 3:
         f_display = f"{f_parts[2]}/{f_parts[1]}/{f_parts[0]}"
     else:
@@ -172,7 +238,7 @@ class BajasDiagramaSync:
             self._creds.refresh(Request())
 
     def fetch_novedades_bajas(self) -> List[Dict[str, Any]]:
-        """Consulta novedades con imprime_nota_movimientos=true desde Supabase."""
+        """Consulta novedades con imprime_nota_movimientos=true (por relación UUID tipos_novedad) desde Supabase."""
         url = f"{SUPABASE_URL}/rest/v1/view_dash_novedades"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -181,7 +247,7 @@ class BajasDiagramaSync:
         }
         params = {
             "select": "*",
-            "or": "(imprime_nota_movimientos.eq.true,tipo_novedad.eq.BAJA_DIAGRAMA)",
+            "imprime_nota_movimientos": "eq.true",
             "resuelto": "eq.false",
             "chofer_id": "not.is.null",
             "fecha_objetivo": "not.is.null",
@@ -192,7 +258,7 @@ class BajasDiagramaSync:
             print(f"❌ [Supabase] Error en consulta de novedades: {res.status_code} - {res.text}")
             return []
         data = res.json()
-        print(f"📥 [Supabase] Se recuperaron {len(data)} novedades activas con advertencia de baja.")
+        print(f"📥 [Supabase] Se recuperaron {len(data)} novedades activas con imprime_nota_movimientos=true.")
         return data
 
     def get_sheet_id_num(self, spreadsheet_id: str, tab_name: str) -> int:
@@ -244,14 +310,17 @@ class BajasDiagramaSync:
                     v = str(val).strip()
                     if "chofer" in v.lower():
                         current_chofer_col = c_idx
-                    m = re.search(r'\b0?([1-9]|[12][0-9]|3[01])\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b', v, re.IGNORECASE)
+                    m = re.search(
+                        r'\b0?([1-9]|[12][0-9]|3[01])\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b',
+                        v,
+                        re.IGNORECASE
+                    )
                     if m and current_chofer_col is not None:
                         day_num = int(m.group(1))
                         day_map[day_num] = current_chofer_col
         except Exception as e:
             print(f"⚠️ No se pudo leer Fila 1 de {tab_name} ({e}), usando cálculo stride 13.")
 
-        # Completar cualquier día faltante con la fórmula estándar
         for d in range(1, 32):
             if d not in day_map:
                 day_map[d] = get_col_chofer(d)
@@ -260,10 +329,7 @@ class BajasDiagramaSync:
         return day_map
 
     def fetch_day_column_values(self, spreadsheet_id: str, tab_name: str, col_letter: str) -> List[str]:
-        """
-        Lee exclusivamente la columna del día operativo (ej. 'AB1:AB250').
-        Es ultra veloz (< 1s) comparado con leer toda la matriz.
-        """
+        """Lee exclusivamente la columna del día operativo (ej. 'AB1:AB250')."""
         cache_key = f"{spreadsheet_id}_{tab_name}_{col_letter}"
         if cache_key in self._cached_day_cols:
             return self._cached_day_cols[cache_key]
@@ -329,21 +395,22 @@ class BajasDiagramaSync:
                 sheet_id, tab_name = resolver_hoja_para_fecha(cur_date, self.config)
                 sheet_id_num = self.get_sheet_id_num(sheet_id, tab_name)
 
-                # Obtener la columna exacta para este día (mapeo Fila 1 o cálculo stride)
-                day_map = self.get_day_to_chofer_col_map(sheet_id, tab_name)
-                col_chofer_idx = day_map.get(dia_num, get_col_chofer(dia_num))
+                col_chofer_idx = get_col_chofer(dia_num)
                 col_letter = index_to_col_letter(col_chofer_idx)
 
-                # Leer la columna específica del día operativo
                 col_vals = self.fetch_day_column_values(sheet_id, tab_name, col_letter)
 
-                # REGLA ESTRICTA: Buscar al chofer estrictamente en la columna de Chofer del día
+                # REGLA ESTRICTA: Buscar al chofer estrictamente en la columna de Chofer del día (sin fallback a tractor)
                 encontrado_en_fila = None
                 for r_idx in range(2, len(col_vals)):
                     cell_val = col_vals[r_idx]
                     if cell_val and len(cell_val) >= 3:
                         norm_cell = normalizar_texto(cell_val)
-                        if norm_chofer == norm_cell or (norm_chofer in norm_cell and len(norm_chofer) >= 6) or (norm_cell in norm_chofer and len(norm_cell) >= 6):
+                        if (
+                            norm_chofer == norm_cell
+                            or (norm_chofer in norm_cell and len(norm_chofer) >= 6)
+                            or (norm_cell in norm_chofer and len(norm_cell) >= 6)
+                        ):
                             encontrado_en_fila = r_idx + 1  # 1-based
                             break
 
@@ -371,7 +438,7 @@ class BajasDiagramaSync:
         return updates_by_sheet
 
     def apply_updates(self, updates_by_sheet: Dict[str, List[Dict[str, Any]]]):
-        """Aplica las notas por lotes mediante Google Sheets batchUpdate."""
+        """Aplica las notas por lotes mediante Google Sheets batchUpdate (fields='note')."""
         total_aplicadas = 0
 
         for sheet_id, items in updates_by_sheet.items():

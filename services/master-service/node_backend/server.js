@@ -24,6 +24,7 @@ const { fetchRango, serviceAccountAuth, ID_SPREADSHEET_MASTER } = require('./uti
 const { cargarNovedades, createNovedadesRouter } = require('./novedades');
 const webhookRouter = require('./webhook');
 const { iniciarCachePolling, iniciarParticionesAutoSync } = require('./cache/builder');
+const { iniciarReconciliadorBajas } = require('./utils/googleSheetsSync');
 const createAuthRouter = require('./routes/auth');
 const createProxyRouter = require('./routes/proxy');
 const createFotosRouter = require('./routes/fotos');
@@ -105,6 +106,9 @@ if (ENABLE_RAM_CACHE_POLLING) {
 // Se ejecuta de forma independiente a la RAM para mantener Supabase actualizado continuamente en Render Cloud
 iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash);
 
+// 🛰️ Reconciliador auto-reparable de Notas Hover en Google Sheets Movimientos (UUID imprime_nota_movimientos = true)
+iniciarReconciliadorBajas(10 * 60 * 1000);
+
 // ==============================================================
 // 🛣️ RUTAS
 // ==============================================================
@@ -118,7 +122,7 @@ app.get(['/health', '/ping'], (req, res) => res.status(200).send('OK'));
 app.use(['/sync', '/status'], (req, res, next) => {
     // Si la llamada es a /sync raíz o contiene el parámetro 'p' (particiones Node: p=5, p=6, p=7, etc.)
     // o no es un sub-endpoint específico de Python, delegar al orquestador de Node (línea 390)
-    const pythonEndpoints = ['tracking', 'vacio', 'poll-vacio', 'unified', 'seguimiento-vacio', 'dispo', 'cordillera', 'conf-viaje', 'limpiar-vacio', 'all'];
+    const pythonEndpoints = ['tracking', 'vacio', 'poll-vacio', 'unified', 'seguimiento-vacio', 'dispo', 'cordillera', 'conf-viaje', 'limpiar-vacio', 'bajas', 'all'];
     const subPath = (req.path || '').replace(/^\//, '').split('/')[0].split('?')[0];
 
     if (req.baseUrl === '/sync' && (!subPath || req.query?.p || req.query?.particion || !pythonEndpoints.includes(subPath))) {

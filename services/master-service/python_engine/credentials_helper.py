@@ -55,6 +55,23 @@ def get_google_credentials(scopes: Optional[List[str]] = None) -> Credentials:
                 info["private_key"] = info["private_key"].replace("\\n", "\n")
             return Credentials.from_service_account_info(info, scopes=scopes)
 
+    # 1.b Variables separadas GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY (compartidas con Node.js en monorepo)
+    sa_email = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL", "").strip()
+    sa_key = os.getenv("GOOGLE_PRIVATE_KEY", "").strip()
+    if sa_email and sa_key:
+        if (sa_key.startswith("'") and sa_key.endswith("'")) or (sa_key.startswith('"') and sa_key.endswith('"')):
+            sa_key = sa_key[1:-1]
+        sa_key = sa_key.replace("\\n", "\n")
+        return Credentials.from_service_account_info(
+            {
+                "type": "service_account",
+                "client_email": sa_email,
+                "private_key": sa_key,
+                "token_uri": "https://oauth2.googleapis.com/token",
+            },
+            scopes=scopes,
+        )
+
     # 2. Variable de entorno con ruta de archivo
     file_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if file_env and Path(file_env).exists():
