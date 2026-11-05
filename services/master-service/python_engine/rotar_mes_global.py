@@ -189,6 +189,12 @@ def update_env_files(apply_changes: bool):
                 if line_str != new_val:
                     line_str = new_val
                     changed = True
+            # Actualizar TAB_MOVIMIENTOS (#idmensual Hover Notes & Movimientos)
+            elif line.startswith("TAB_MOVIMIENTOS="):
+                new_val = f"TAB_MOVIMIENTOS={NOVIEMBRE_MOV_TAB}\n"
+                if line_str != new_val:
+                    line_str = new_val
+                    changed = True
             new_lines.append(line_str)
 
         if changed:
@@ -438,11 +444,15 @@ def update_obsidian_note(apply_changes: bool):
 
 ---
 
-## 🛠️ Herramientas de Ejecución
+## 🛠️ Herramientas y Protocolo de Acople para Siguientes Meses
 - **Documentación y Roadmap de Automatización:** [[procesos cambio mensual.]]
-- **Script Unificado (Monorepo):** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine\\rotar_mes_global.py`
-- **Lanzador por Lotes:** `C:\\Users\\Matias Rodriguez\\Documents\\server_local\\operativas_diarias\\ejecutar_rotacion_noviembre.bat`
-- **Tarea Programada Windows:** `RotacionMesNoviembre` (Programada para domingo 01/11/2026 a las 00:00:00)
+- **Documentación Notas Hover Bajas (UUID):** [[baja diagrama]]
+- **Script Maestro (Monorepo):** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine\\rotar_mes_global.py`
+  1. Actualizar constantes de cabecera en `rotar_mes_global.py` (`NUEVO_MES_NOMBRE`, `NUEVO_MES_CORTO`, `NUEVO_DIAGRAMA_TAB`, IDs/pestañas de mes saliente y entrante).
+  2. Simular: `python services/master-service/python_engine/rotar_mes_global.py --dry-run`
+  3. Aplicar: `python services/master-service/python_engine/rotar_mes_global.py --apply` (archiva `mes_actual` en `mes_anterior` dentro de `config_operativas.json`, permitiendo que bajas con `fecha_objetivo` que cruzan de mes sincronicen ambas planillas sin intervención manual).
+  4. Publicar a Render (`diaria-operativas`): `git add render.yaml services/master-service/ && git commit -m "chore(idmensual): rotacion mes operativo" && git push origin main`
+  5. Verificar notas hover post-corte: `POST /api/novedades/sync-bajas?wait=true` y `GET /api/novedades/sync-bajas/estado`.
 - **Última actualización:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 #idmensual
