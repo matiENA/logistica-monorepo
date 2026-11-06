@@ -189,7 +189,7 @@ app.get(['/api/viajes/historial', '/api/km/historial'], async (req, res) => {
         const { chofer, desde, hasta } = req.query;
         if (!chofer) return res.status(400).json({ error: "Falta parámetro 'chofer'" });
         
-        const { normalizar, fetchRango, ID_SHEET_KILOMETROS, getFechaArgentina } = require('./utils/shared');
+        const { normalizar, fetchRango, ID_SHEET_KILOMETROS, TAB_SHEET_KILOMETROS, getFechaArgentina } = require('./utils/shared');
         const { isMicroservicioActivo, obtenerHistorialMicroservicio } = require('./utils/kmClient');
         const db = require('./utils/db');
         const nBuscado = normalizar(chofer);
@@ -266,8 +266,17 @@ app.get(['/api/viajes/historial', '/api/km/historial'], async (req, res) => {
 
         // 4. Fallback de resiliencia final: Si no hay Postgres ni microservicio, consultar Sheets directamente
         console.warn("⚠️ [Server] Consultando Cold Storage directamente en Google Sheets (fallback)...");
-        const rows = await fetchRango(ID_SHEET_KILOMETROS, "'KM'!A2:T");
-        const parseNum = (val) => parseFloat(String(val || '').replace(/,/g, '.').replace(/[^0-9.-]/g, '')) || 0;
+        let rows = await fetchRango(ID_SHEET_KILOMETROS, `'${TAB_SHEET_KILOMETROS}'!A2:AF`);
+        if (!rows || rows.length === 0) {
+            rows = await fetchRango(ID_SHEET_KILOMETROS, "'KM'!A2:T");
+        }
+        const parseNum = (val) => {
+            if (!val) return 0;
+            let s = String(val).trim();
+            if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+            else s = s.replace(/,/g, '.');
+            return parseFloat(s.replace(/[^0-9.-]/g, '')) || 0;
+        };
         let resultado = {};
 
         rows.forEach(row => {
@@ -281,7 +290,7 @@ app.get(['/api/viajes/historial', '/api/km/historial'], async (req, res) => {
             let isoDate = dObj.toISOString().split('T')[0];
 
             if ((!desde || isoDate >= desde) && (!hasta || isoDate <= hasta)) {
-                let km = parseNum(row[16]) > 0 ? parseNum(row[16]) : parseNum(row[8]);
+                let km = parseNum(row[30]) > 0 ? parseNum(row[30]) : (parseNum(row[17]) > 0 ? parseNum(row[17]) : (parseNum(row[16]) > 0 ? parseNum(row[16]) : parseNum(row[7])));
                 let campo = parseNum(row[5]);
                 let hojaStr = String(row[19] || "").trim();
                 if (!resultado[isoDate]) resultado[isoDate] = { dominio: String(row[0] || '').trim(), km: 0, campo: 0, hoja_ruta: [] };

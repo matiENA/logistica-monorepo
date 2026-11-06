@@ -7,7 +7,7 @@
  */
 
 require('dotenv').config({ path: 'c:/Users/Matias Rodriguez/Documents/eor_v1/.env', override: true });
-const { fetchRango, ID_SHEET_KILOMETROS } = require('../utils/shared');
+const { fetchRango, ID_SHEET_KILOMETROS, TAB_SHEET_KILOMETROS } = require('../utils/shared');
 const { Pool } = require('pg');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -50,7 +50,13 @@ function parseFecha(val) {
 
 function parseNum(val) {
     if (!val) return 0;
-    const clean = String(val).replace(/,/g, '.').replace(/[^0-9.-]/g, '');
+    let s = String(val).trim();
+    if (s.includes(',') && s.includes('.')) {
+        s = s.replace(/,/g, '');
+    } else {
+        s = s.replace(/,/g, '.');
+    }
+    const clean = s.replace(/[^0-9.-]/g, '');
     const n = parseFloat(clean);
     return isNaN(n) ? 0 : n;
 }
@@ -86,10 +92,18 @@ async function run() {
         if (u.semi) semiMap.set(u.semi.replace(/[^A-Z0-9]/g, ''), u);
     });
 
-    // 2. Descargar hoja 'KM'
-    const spreadsheetId = process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS;
-    console.log(`📥 Descargando planilla de Kilómetros (${spreadsheetId})...`);
-    const rawRows = await fetchRango(spreadsheetId, "'KM'!A:V");
+    // 2. Descargar hoja de Kilómetros
+    const spreadsheetId = process.env.ID_SHEET_KM || process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS || '1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U';
+    const tabName = process.env.TAB_SHEET_KM || process.env.SHEET_KM_TAB || TAB_SHEET_KILOMETROS || 'Reporte Novedades';
+    console.log(`📥 Descargando planilla de Kilómetros (${spreadsheetId} - ${tabName})...`);
+    let rawRows = await fetchRango(spreadsheetId, `'${tabName}'!A:AF`);
+    if (!rawRows || rawRows.length < 2) {
+        console.warn(`⚠️ Pestaña '${tabName}' vacía o inaccesible, intentando fallback 'KM'...`);
+        rawRows = await fetchRango(spreadsheetId, "'KM'!A:AF");
+        if (!rawRows || rawRows.length < 2) {
+            rawRows = await fetchRango(spreadsheetId, "'KM'!A:V");
+        }
+    }
     if (!rawRows || rawRows.length < 2) {
         console.error("❌ No se pudieron descargar filas de la planilla KM");
         await pool.end();
@@ -108,12 +122,14 @@ async function run() {
 
     const colFecha = colMap['fecha'] ?? 1;
     const colChofer = colMap['chofer'] ?? 2;
-    const colDominio = colMap['dominio'] ?? colMap['tractor'] ?? 0;
-    const colKm = colMap['kmtotales'] ?? colMap['kilometros'] ?? 17;
-    const colHr = colMap['nhojaderuta'] ?? colMap['hojaderuta'] ?? 20;
+    const colDominio = colMap['dominio'] ?? colMap['tractor'] ?? colMap['patente'] ?? 0;
+    const colKmAe = colMap['verif'] ?? 30;
+    const colKmTot = colMap['totalrecorrido'] ?? colMap['kmtotales'] ?? (colMap['cargas'] !== undefined && colMap['cargas'] === 16 ? 17 : 17);
+    const colKmAlt = colMap['km'] ?? colMap['kilometros'] ?? 7;
+    const colHr = colMap['nhojaderuta'] ?? colMap['hojaderuta'] ?? colMap['hr'] ?? (headers.length > 20 ? 18 : 20);
     const colSemi = colMap['semi'] ?? 19;
 
-    console.log(`Columnas detectadas: Fecha=${colFecha}, Chofer=${colChofer}, Tractor=${colDominio}, Km=${colKm}, HR=${colHr}`);
+    console.log(`Columnas detectadas: Fecha=${colFecha}, Chofer=${colChofer}, Tractor=${colDominio}, KmAe=${colKmAe}, KmTot=${colKmTot}, KmAlt=${colKmAlt}, HR=${colHr}`);
 
     // 3. Procesar y agrupar en buckets por chofer y mes
     const buckets = new Map();
@@ -138,9 +154,11 @@ async function run() {
         const yy = String(anio).slice(-2);
         const mesTab = `${mesAbrev}-${yy}`;
 
-        const rawKm = row[colKm];
-        const km = parseNum(rawKm);
-        const hr = row[colHr] !== undefined ? String(row[colHr]).trim() : '';
+        const kmAe = parseNum(row[colKmAe]);
+        const kmTot = parseNum(row[colKmTot]);
+        const kmAlt = parseNum(row[colKmAlt]);
+        const km = kmAe > 0 ? kmAe : (kmTot > 0 ? kmTot : kmAlt);
+        const hr = colHr !== undefined && row[colHr] !== undefined ? String(row[colHr]).trim() : '';
 
         // Si no hay KM ni HR, saltar
         if (km <= 0 && !hr) continue;

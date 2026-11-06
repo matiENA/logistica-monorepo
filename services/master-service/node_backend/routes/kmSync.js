@@ -11,7 +11,8 @@ const express = require('express');
 const db = require('../utils/db');
 const { 
     fetchRango, 
-    ID_SHEET_KILOMETROS 
+    ID_SHEET_KILOMETROS,
+    TAB_SHEET_KILOMETROS 
 } = require('../utils/shared');
 
 // ==============================================================
@@ -112,7 +113,13 @@ function parseFecha(val) {
 
 function parseNum(val) {
     if (!val) return 0;
-    const clean = String(val).replace(/,/g, '.').replace(/[^0-9.-]/g, '');
+    let s = String(val).trim();
+    if (s.includes(',') && s.includes('.')) {
+        s = s.replace(/,/g, '');
+    } else {
+        s = s.replace(/,/g, '.');
+    }
+    const clean = s.replace(/[^0-9.-]/g, '');
     const n = parseFloat(clean);
     return isNaN(n) ? 0 : n;
 }
@@ -128,9 +135,10 @@ const mesesMap = {
  */
 async function sincronizarKmDesdeSheets(cacheDatosGlobales = null, io = null, ioDash = null) {
     const t0 = Date.now();
-    const spreadsheetId = process.env.ID_SHEET_KM || process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS || '1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw';
+    const spreadsheetId = process.env.ID_SHEET_KM || process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS || '1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U';
+    const tabName = process.env.TAB_SHEET_KM || process.env.SHEET_KM_TAB || TAB_SHEET_KILOMETROS || 'Reporte Novedades';
     
-    console.log(`🔄 [Partición 7 Auto-Sync] Sincronizando Kilómetros desde Google Sheets (${spreadsheetId})...`);
+    console.log(`🔄 [Partición 7 Auto-Sync] Sincronizando Kilómetros desde Google Sheets (${spreadsheetId} - ${tabName})...`);
 
     if (!db.isConfigured()) {
         console.warn("⚠️ [Partición 7] Base de datos no configurada en db.js");
@@ -256,10 +264,17 @@ async function sincronizarKmDesdeSheets(cacheDatosGlobales = null, io = null, io
         }
     });
 
-    // 2. Leer Google Sheet (Rango A1:V dinámico para cubrir todas las columnas)
-    const rawRows = await fetchRango(spreadsheetId, "'KM'!A1:V");
+    // 2. Leer Google Sheet (Prioridad: tabName / Reporte Novedades A1:AF, fallback KM A1:AF / A1:V)
+    let rawRows = await fetchRango(spreadsheetId, `'${tabName}'!A1:AF`);
     if (!rawRows || rawRows.length < 2) {
-        console.warn(`⚠️ [Partición 7] Hoja 'KM' vacía o inaccesible.`);
+        console.warn(`⚠️ [Partición 7] Pestaña '${tabName}' vacía o inaccesible, intentando fallback 'KM'...`);
+        rawRows = await fetchRango(spreadsheetId, "'KM'!A1:AF");
+        if (!rawRows || rawRows.length < 2) {
+            rawRows = await fetchRango(spreadsheetId, "'KM'!A1:V");
+        }
+    }
+    if (!rawRows || rawRows.length < 2) {
+        console.warn(`⚠️ [Partición 7] Hoja de Kilómetros vacía o inaccesible.`);
         return { success: true, message: "Sin datos en planilla KM", totalBuckets: 0, modificados: 0 };
     }
 
@@ -273,13 +288,14 @@ async function sincronizarKmDesdeSheets(cacheDatosGlobales = null, io = null, io
 
     const colFecha = colMap['fecha'] ?? 1;
     const colChofer = colMap['chofer'] ?? 2;
-    const colDominio = colMap['dominio'] ?? colMap['tractor'] ?? 0;
-    const colKmTot = colMap['kmtotales'] ?? (colMap['cargas'] !== undefined && colMap['cargas'] === 16 ? 17 : 17);
-    const colKmAlt = colMap['kilometros'] ?? colMap['km'] ?? 10;
-    const colHr = colMap['nhojaderuta'] ?? colMap['hojaderuta'] ?? colMap['hr'] ?? 20;
+    const colDominio = colMap['dominio'] ?? colMap['tractor'] ?? colMap['patente'] ?? 0;
+    const colKmAe = colMap['verif'] ?? 30;
+    const colKmTot = colMap['totalrecorrido'] ?? colMap['kmtotales'] ?? (colMap['cargas'] !== undefined && colMap['cargas'] === 16 ? 17 : 17);
+    const colKmAlt = colMap['km'] ?? colMap['kilometros'] ?? 7;
+    const colHr = colMap['nhojaderuta'] ?? colMap['hojaderuta'] ?? colMap['hr'] ?? (headers.length > 20 ? 18 : 20);
     const colSemi = colMap['semi'] ?? 19;
 
-    console.log(`   📊 [KM Mapeo] Columnas: Fecha=${colFecha}, Chofer=${colChofer}, Dominio=${colDominio}, KmTot=${colKmTot}, KmAlt=${colKmAlt}, HR=${colHr}, Semi=${colSemi}`);
+    console.log(`   📊 [KM Mapeo] Columnas: Fecha=${colFecha}, Chofer=${colChofer}, Dominio=${colDominio}, KmAe=${colKmAe}, KmTot=${colKmTot}, KmAlt=${colKmAlt}, HR=${colHr}, Semi=${colSemi}`);
 
     const buckets = new Map();
     const inconsistencias = [];
@@ -307,10 +323,11 @@ async function sincronizarKmDesdeSheets(cacheDatosGlobales = null, io = null, io
         const yy = String(anio).slice(-2);
         const mesTab = `${mesAbrev}-${yy}`;
 
-        // Prioridad Km Totales (col 17) -> Fallback Kilómetros (col 10)
+        // Prioridad Km AE / Verif (col 30) -> Km Totales / Total recorrido (col 17) -> Fallback KM (col 7 / 10)
+        const kmAe = parseNum(row[colKmAe]);
         const kmTot = parseNum(row[colKmTot]);
         const kmAlt = parseNum(row[colKmAlt]);
-        const km = kmTot > 0 ? kmTot : kmAlt;
+        const km = kmAe > 0 ? kmAe : (kmTot > 0 ? kmTot : kmAlt);
         const hr = colHr !== undefined && row[colHr] !== undefined ? String(row[colHr]).trim() : '';
 
         // Descartar filas vacías sin KM ni Hoja de Ruta
@@ -568,7 +585,8 @@ module.exports = function(cacheDatosGlobales, io, ioDash) {
         res.json({
             servicio: 'Partición 7: Sincronizador de Kilómetros y Viajes (Google Sheets -> Supabase)',
             estado: 'activo',
-            spreadsheetId: process.env.ID_SHEET_KM || process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS || '1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw'
+            spreadsheetId: process.env.ID_SHEET_KM || process.env.SHEET_KM_ID || ID_SHEET_KILOMETROS || '1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U',
+            tabName: process.env.TAB_SHEET_KM || process.env.SHEET_KM_TAB || TAB_SHEET_KILOMETROS || 'Reporte Novedades'
         });
     });
 

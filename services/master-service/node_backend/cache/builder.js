@@ -11,6 +11,7 @@ const {
     ID_SHEET_OBSERVACIONES,
     ID_SHEET_APTOS_MEDICOS,
     ID_SHEET_KILOMETROS,
+    TAB_SHEET_KILOMETROS,
     ID_SHEET_HABILITACIONES,
     ID_SHEET_DOCUMENTOS,
     ID_SHEET_MOVIMIENTOS
@@ -1071,9 +1072,20 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
                     console.log(`ℹ️ [RAM] Microservicio no configurado (KM_SERVICE_URL vacío). Ejecutando extracción local para KM (${KM_RAM_DIAS} días)...`);
                 }
 
-                const parseNum = (val) => parseFloat(String(val || '').replace(/,/g, '.').replace(/[^0-9.-]/g, '')) || 0;
+                const parseNum = (val) => {
+                    if (!val) return 0;
+                    let s = String(val).trim();
+                    if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+                    else s = s.replace(/,/g, '.');
+                    return parseFloat(s.replace(/[^0-9.-]/g, '')) || 0;
+                };
 
-                (await fetchRango(ID_SHEET_KILOMETROS, "'KM'!A2:T")).forEach(row => {
+                let rowsKm = await fetchRango(ID_SHEET_KILOMETROS, `'${TAB_SHEET_KILOMETROS}'!A2:AF`);
+                if (!rowsKm || rowsKm.length === 0) {
+                    rowsKm = await fetchRango(ID_SHEET_KILOMETROS, "'KM'!A2:T");
+                }
+
+                rowsKm.forEach(row => {
                     let fRaw = row[1], nRaw = row[2]; if (!fRaw || !nRaw) return;
                     let dObj, parts = String(fRaw).split(' ')[0].split(/[\/\-]/);
                     if (parts.length >= 3) { let aa = parts[2].length === 2 ? "20" + parts[2] : parts[2]; dObj = new Date(aa, parseInt(parts[1], 10) - 1, parts[0]); } else { dObj = new Date(fRaw); }
@@ -1083,7 +1095,9 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
                     if (dObj.getTime() < limiteRamKmMs) return;
 
                     let choferNorm = normalizar(nRaw); let isoDate = dObj.toISOString().split('T')[0];
-                    let km = parseNum(row[16]) > 0 ? parseNum(row[16]) : parseNum(row[8]); let campo = parseNum(row[5]); let hojaStr = String(row[19] || "").trim();
+                    let km = parseNum(row[30]) > 0 ? parseNum(row[30]) : (parseNum(row[17]) > 0 ? parseNum(row[17]) : (parseNum(row[16]) > 0 ? parseNum(row[16]) : parseNum(row[7])));
+                    let campo = parseNum(row[5]);
+                    let hojaStr = String(row[18] || row[19] || "").trim();
                     if (km > 0 || campo > 0 || hojaStr !== "") {
                         if (!nuevaSeccionViajes[choferNorm]) nuevaSeccionViajes[choferNorm] = {};
                         if (!nuevaSeccionViajes[choferNorm][isoDate]) nuevaSeccionViajes[choferNorm][isoDate] = { dominio: String(row[0] || '').trim(), km: 0, campo: 0, hoja_ruta: [] };

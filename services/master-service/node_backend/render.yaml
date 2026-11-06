@@ -40,9 +40,11 @@ services:
       - key: ID_SPREADSHEET_DIAGRAMAS
         value: 14jgQZF0gkbT7k3mps1k3dM3qtoaseoCOUfK4PFRozKU
       - key: SHEET_KM_ID
-        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+        value: 1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U
       - key: ID_SHEET_KM
-        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+        value: 1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U
+      - key: TAB_SHEET_KM
+        value: "Reporte Novedades"
       - key: IMGBB_API_KEY
         value: 30fdf72c3d5272a8c3e804f3db258673
       - key: GOOGLE_SERVICE_ACCOUNT_EMAIL

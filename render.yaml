@@ -55,7 +55,11 @@ services:
       - key: TAB_MOVIMIENTOS
         value: "NOVIEMBRE 2026- Mov.Unidades y Choferes"
       - key: SHEET_KM_ID
-        value: 1d5dIS1rbOg3q7D0A4eDA_mcdSy1Yfwfx6M6sZ8Aenzw
+        value: 1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U
+      - key: ID_SHEET_KM
+        value: 1TccPqkhXUa7W1uvd0xfKUinEEX_3_mgEgAhGQUwaT5U
+      - key: TAB_SHEET_KM
+        value: "Reporte Novedades"
       - key: DEFAULT_RUTEOS_ID
         value: 1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE
       - key: CONF_SPREADSHEET_ID
