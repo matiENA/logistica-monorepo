@@ -893,7 +893,7 @@ module.exports = function createViewsRouter() {
             if (!db.isConfigured()) {
                 return res.status(503).json({ success: false, error: "PostgreSQL no configurado" });
             }
-            const { choferId, docId, fields } = req.body || {};
+            const { choferId, docId, fields, usuario } = req.body || {};
             if (!choferId && !docId) {
                 return res.status(400).json({ success: false, error: "choferId o docId requerido" });
             }
@@ -903,7 +903,8 @@ module.exports = function createViewsRouter() {
                 'domicilio', 'localidad', 'telefono_emergencia', 'fecha_alta', 'estudios_nivel',
                 'experiencia_anios', 'fecha_nacimiento', 'edad', 'venc_licencia_nacional',
                 'venc_psicofisico', 'venc_cargas_peligrosas', 'venc_periodico', 'venc_curso_shell',
-                'venc_manejo_def', 'curso_pae', 'apto_medico_venc', 'apto_medico_estado'
+                'venc_manejo_def', 'curso_pae', 'apto_medico_venc', 'apto_medico_estado',
+                'obs_documentacion'
             ];
 
             const entries = Object.entries(fields || {}).filter(([k]) => allowedCols.includes(k));
@@ -911,21 +912,26 @@ module.exports = function createViewsRouter() {
                 return res.status(400).json({ success: false, error: "No se proporcionaron campos válidos" });
             }
 
+            const usuarioActivo = usuario || req.body?.actualizado_por || 'OPERADOR';
+
             if (docId) {
                 const setClauses = entries.map(([k], i) => `"${k}" = $${i + 1}`);
                 const values = entries.map(([, v]) => v || null);
                 values.push(new Date().toISOString());
                 setClauses.push(`actualizado_el = $${values.length}`);
+                values.push(usuarioActivo);
+                setClauses.push(`actualizado_por = $${values.length}`);
                 values.push(docId);
                 const sql = `UPDATE public.chofer_documentacion SET ${setClauses.join(', ')} WHERE id = $${values.length} RETURNING *`;
                 const r = await db.query(sql, values);
                 return res.json({ success: true, dato: r.rows[0] });
             } else {
-                const cols = ['chofer_id', ...entries.map(([k]) => `"${k}"`), 'actualizado_el'];
+                const cols = ['chofer_id', ...entries.map(([k]) => `"${k}"`), 'actualizado_el', 'actualizado_por'];
                 const valPlaceholders = cols.map((_, i) => `$${i + 1}`);
-                const values = [choferId, ...entries.map(([, v]) => v || null), new Date().toISOString()];
+                const values = [choferId, ...entries.map(([, v]) => v || null), new Date().toISOString(), usuarioActivo];
                 const updateSets = entries.map(([k]) => `"${k}" = EXCLUDED."${k}"`);
                 updateSets.push('actualizado_el = EXCLUDED.actualizado_el');
+                updateSets.push('actualizado_por = EXCLUDED.actualizado_por');
                 const sql = `
                     INSERT INTO public.chofer_documentacion (${cols.join(', ')})
                     VALUES (${valPlaceholders.join(', ')})

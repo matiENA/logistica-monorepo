@@ -49,7 +49,8 @@ export const useUpdateDocField = (choferParam) => {
         await apiClient.updateChoferDocs({
           choferId,
           docId,
-          fields: { [field]: value }
+          fields: { [field]: value },
+          usuario: usuarioActivo,
         });
       } catch (err) {
         console.warn('⚠️ [useUpdateDocField] Fallback directo a Supabase:', err.message);
@@ -174,10 +175,11 @@ export const useSaveAllDocs = (choferParam) => {
         await apiClient.updateChoferDocs({
           choferId,
           docId,
-          fields: { [field]: value }
+          fields,
+          usuario: usuarioActivo,
         });
       } catch (err) {
-        console.warn('⚠️ [useUpdateDocField] Fallback directo a Supabase:', err.message);
+        console.warn('⚠️ [useSaveAllDocs] Fallback directo a Supabase:', err.message);
         if (docId) {
           const { error } = await supabase
             .from('chofer_documentacion')

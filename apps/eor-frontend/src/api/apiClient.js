@@ -511,10 +511,11 @@ class ApiClient {
   }
 
   // 11.5 Guardar Documentación de Chofer (vía backend PostgreSQL directo)
-  async updateChoferDocs({ choferId, docId, fields }) {
+  async updateChoferDocs({ choferId, docId, fields, usuario }) {
+    const usuarioActivo = usuario || (typeof localStorage !== 'undefined' ? localStorage.getItem('usuarioActivo') : null) || 'OPERADOR';
     return await this.fetchJson('/api/views/chofer-docs', {
       method: 'POST',
-      body: JSON.stringify({ choferId, docId, fields }),
+      body: JSON.stringify({ choferId, docId, fields, usuario: usuarioActivo }),
     });
   }
 
