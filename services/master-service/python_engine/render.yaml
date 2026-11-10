@@ -35,3 +35,22 @@ services:
         sync: false # Chat ID del receptor en Telegram
       - key: TELEGRAM_NOTIFY_ALL
         value: "false" # false = solo errores; true = todas las tareas
+      # --- Configuración de Márgenes de Timeout y Calendarización ---
+      - key: DEFAULT_TASK_TIMEOUT
+        value: "1800" # Timeout general por defecto: 1800s (30 minutos)
+      - key: TIMEOUT_POLL_VACIO
+        value: "1800" # Timeout para Polling Inteligente Multi-Día: 1800s (30 minutos)
+      - key: TIMEOUT_UNIFIED
+        value: "1800" # Timeout para sincronización unificada: 1800s (30 minutos)
+      - key: TIMEOUT_CORDILLERA
+        value: "600" # Timeout para Cordillera: 600s (10 minutos)
+      - key: TIMEOUT_CONF_VIAJE
+        value: "600" # Timeout para CONF. DE VIAJE: 600s (10 minutos)
+      - key: SOCKET_TIMEOUT
+        value: "600" # Timeout de sockets para Google API / llamadas pesadas: 600s (10 minutos)
+      - key: INTERVAL_POLL_VACIO_MINUTES
+        value: "15" # Intervalo entre rondas de Polling de Vacío (minutos)
+      - key: INTERVAL_CORDILLERA_MINUTES
+        value: "10" # Intervalo de viajes Cordillera (minutos)
+      - key: INTERVAL_CONF_VIAJE_MINUTES
+        value: "10" # Intervalo de CONF. DE VIAJE (minutos)

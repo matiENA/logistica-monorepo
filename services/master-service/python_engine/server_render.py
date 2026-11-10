@@ -75,40 +75,61 @@ EXECUTION_STATE: Dict[str, Any] = {
 # Previene que dos subprocesos pesados de Google Sheets compitan o saturen la memoria a la vez.
 EXECUTION_LOCK = threading.Lock()
 
-DEFAULT_TIMEOUTS: Dict[str, int] = {
-    "poll_vacio": 900,     # 15 min máximo para escaneo y merge multi-día
-    "unified": 900,
-    "all": 900,
-    "cordillera": 300,     # 5 min
-    "conf_viaje": 300,     # 5 min
-    "tracking": 300,
-    "vacio": 300,
-    "seguimiento": 300,
-    "dispo": 180,
-    "bajas": 180,
-    "limpiar": 300
+# ==============================================================================
+# CONFIGURACIÓN RESILIENTE DE TIMEOUTS Y MÁRGENES (CONFIGURABLE POR ENV VARS)
+# ==============================================================================
+# Margen general ampliado por defecto a 1800s (30 min) para evitar cortes prematuros
+# en planillas extensas (ej. análisis multi-día, rotaciones de fin de mes o cuellos de botella).
+DEFAULT_TASK_TIMEOUT = int(os.getenv("DEFAULT_TASK_TIMEOUT", "1800"))
+
+BASE_TIMEOUTS: Dict[str, int] = {
+    "poll_vacio": int(os.getenv("TIMEOUT_POLL_VACIO", "1800")),     # 30 min (cubre holgadamente escaneos pesados de ~880s)
+    "unified": int(os.getenv("TIMEOUT_UNIFIED", "1800")),           # 30 min
+    "all": int(os.getenv("TIMEOUT_ALL", "1800")),                   # 30 min
+    "cordillera": int(os.getenv("TIMEOUT_CORDILLERA", "600")),      # 10 min (antes 5 min)
+    "conf_viaje": int(os.getenv("TIMEOUT_CONF_VIAJE", "600")),      # 10 min (antes 5 min)
+    "tracking": int(os.getenv("TIMEOUT_TRACKING", "600")),          # 10 min (antes 5 min)
+    "vacio": int(os.getenv("TIMEOUT_VACIO", "600")),                # 10 min (antes 5 min)
+    "seguimiento": int(os.getenv("TIMEOUT_SEGUIMIENTO", "600")),    # 10 min (antes 5 min)
+    "dispo": int(os.getenv("TIMEOUT_DISPO", "600")),                # 10 min (antes 3 min)
+    "bajas": int(os.getenv("TIMEOUT_BAJAS", "600")),                # 10 min (antes 3 min)
+    "limpiar": int(os.getenv("TIMEOUT_LIMPIAR", "600"))             # 10 min (antes 5 min)
 }
+
+def get_timeout_for_task(key: str, override_timeout: Optional[int] = None) -> int:
+    """Devuelve el timeout en segundos aplicando override explícito, variable de entorno o base con amplio margen."""
+    if override_timeout and override_timeout > 0:
+        return override_timeout
+    env_key = f"TIMEOUT_{key.upper()}"
+    if env_key in os.environ:
+        try:
+            return int(os.environ[env_key])
+        except ValueError:
+            pass
+    return BASE_TIMEOUTS.get(key, DEFAULT_TASK_TIMEOUT)
 
 
 def run_command(cmd: list, key: str, timeout: Optional[int] = None) -> Dict[str, Any]:
     """Ejecuta un comando transmitiendo la salida en vivo a consola y actualizando el estado de forma serializada."""
-    t0 = datetime.now()
+    t_enqueued = datetime.now()
     if EXECUTION_LOCK.locked():
         EXECUTION_STATE[key]["status"] = "waiting (en cola)"
+        print(f"⏳ [{t_enqueued.strftime('%H:%M:%S')}] Tarea '{key}' esperando turno en cola (lock bloqueado)...", flush=True)
 
     with EXECUTION_LOCK:
+        t0 = datetime.now()  # Momento real en el que arranca la ejecución del proceso hijo
         EXECUTION_STATE[key]["status"] = "running"
         EXECUTION_STATE[key]["last_run"] = t0.isoformat()
         EXECUTION_STATE[key]["duration"] = 0
 
-        max_sec = timeout or DEFAULT_TIMEOUTS.get(key, 600)
+        max_sec = get_timeout_for_task(key, timeout)
         output_lines = []
         error_lines = []
         returncode = -1
         timed_out = False
 
         print(f"\n==================================================================", flush=True)
-        print(f"▶ [{datetime.now().strftime('%H:%M:%S')}] INICIANDO TAREA: {key} (Timeout máx: {max_sec}s)", flush=True)
+        print(f"▶ [{t0.strftime('%H:%M:%S')}] INICIANDO TAREA: {key} (Timeout máx: {max_sec}s / {max_sec//60} min)", flush=True)
         print(f"  Comando: {' '.join(str(c) for c in cmd)}", flush=True)
         print(f"==================================================================", flush=True)
 
@@ -239,6 +260,31 @@ def run_command(cmd: list, key: str, timeout: Optional[int] = None) -> Dict[str,
             return res_err
 
 
+def execute_or_background(
+    cmd: list,
+    key: str,
+    timeout: Optional[int] = None,
+    background: bool = False,
+    bg_tasks: Optional[BackgroundTasks] = None
+) -> Dict[str, Any]:
+    """
+    Ejecuta el comando en primer plano o lo despacha a BackgroundTasks (para evitar
+    el timeout HTTP de 100s de Render cuando se invoca vía Webhook, n8n o cURL).
+    """
+    if background and bg_tasks is not None:
+        eff_timeout = get_timeout_for_task(key, timeout)
+        bg_tasks.add_task(run_command, cmd, key, eff_timeout)
+        return {
+            "status": "enqueued",
+            "task": key,
+            "mode": "background",
+            "timeout_seconds": eff_timeout,
+            "message": f"Tarea '{key}' iniciada en segundo plano con margen de {eff_timeout}s ({eff_timeout//60} min). Monitorea el progreso en /status.",
+            "timestamp": datetime.now().isoformat()
+        }
+    return run_command(cmd, key, timeout=timeout)
+
+
 # ==============================================================================
 # ENDPOINTS REST
 # ==============================================================================
@@ -252,6 +298,15 @@ def root_dashboard():
     tg_ok = bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"))
     tg_color = "#10b981" if tg_ok else "#64748b"
     tg_text = "🔔 TELEGRAM ACTIVO" if tg_ok else "🔕 TELEGRAM INACTIVO"
+
+    int_cord = os.getenv("INTERVAL_CORDILLERA_MINUTES", "10")
+    int_conf = os.getenv("INTERVAL_CONF_VIAJE_MINUTES", "10")
+    int_poll = os.getenv("INTERVAL_POLL_VACIO_MINUTES", "15")
+    to_poll_m = get_timeout_for_task("poll_vacio") // 60
+    to_cord_m = get_timeout_for_task("cordillera") // 60
+    to_conf_m = get_timeout_for_task("conf_viaje") // 60
+    to_dispo_m = get_timeout_for_task("dispo") // 60
+
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -354,14 +409,12 @@ def root_dashboard():
         <p>Motor de sincronización y automatización en la nube (Render Cloud) para planillas operativas, tracking, vacíos y disponibilidades.</p>
         
         <div class="tasks-list">
-            <strong>Tareas programadas:</strong>
+            <strong>Tareas programadas y márgenes de ejecución:</strong>
             <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-                <li>Tracking Hover (Col H) — Cada 15 min</li>
-                <li>VACÍO (Col X) — Cada 20 min</li>
-                <li>Seguimiento Vacío — Cada 15 min</li>
-                <li>Viajes Cordillera — Cada 10 min</li>
-                <li>CONF. DE VIAJE (Filtro ⚠️ Col F) — Cada 10 min</li>
-                <li>Disponibilidad VTV — Diario 06:00 AM</li>
+                <li>Polling Inteligente (Tracking + Vacío + Seguimiento) — Cada {int_poll} min (Margen máx: {to_poll_m} min)</li>
+                <li>Viajes Cordillera — Cada {int_cord} min (Margen máx: {to_cord_m} min)</li>
+                <li>CONF. DE VIAJE — Cada {int_conf} min (Margen máx: {to_conf_m} min)</li>
+                <li>Disponibilidad VTV — Diario 06:00 AM (Margen máx: {to_dispo_m} min)</li>
             </ul>
         </div>
 
@@ -409,81 +462,138 @@ def test_telegram(message: str = Query("🔔 Mensaje de prueba desde Render Clou
 def get_status():
     return {
         "time": datetime.now().isoformat(),
+        "default_task_timeout_seconds": DEFAULT_TASK_TIMEOUT,
+        "socket_timeout_seconds": int(os.getenv("SOCKET_TIMEOUT", "600")),
+        "configured_timeouts_seconds": {k: get_timeout_for_task(k) for k in BASE_TIMEOUTS},
         "tasks": EXECUTION_STATE
     }
 
 @app.post("/sync/tracking")
-def trigger_tracking(day: Optional[int] = Query(None)):
+def trigger_tracking(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "sync_ruteos_movimientos.py", "--apply"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "tracking")
+    return execute_or_background(args, "tracking", timeout, background, bg_tasks)
 
 @app.post("/sync/vacio")
-def trigger_vacio(day: Optional[int] = Query(None)):
+def trigger_vacio(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "sync_vacio.py", "--apply", "--borders"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "vacio")
+    return execute_or_background(args, "vacio", timeout, background, bg_tasks)
 
 @app.post("/sync/poll-vacio")
-def trigger_poll_vacio(day: Optional[int] = Query(None), force: bool = Query(False)):
+def trigger_poll_vacio(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    force: bool = Query(False, description="Forzar ejecución ignorando hash previo"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 1800s / 30m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "poll_sync_vacio.py", "--apply", "--borders"]
     if day:
         args += ["--day", str(day)]
     if force:
         args.append("--force")
-    return run_command(args, "poll_vacio")
+    return execute_or_background(args, "poll_vacio", timeout, background, bg_tasks)
 
 @app.post("/sync/unified")
-def trigger_unified(day: Optional[int] = Query(None)):
+def trigger_unified(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 1800s / 30m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "sync_operativas_unificadas.py", "--apply", "--borders"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "unified")
+    return execute_or_background(args, "unified", timeout, background, bg_tasks)
 
 @app.post("/sync/seguimiento-vacio")
-def trigger_seguimiento_vacio(day: Optional[int] = Query(None)):
+def trigger_seguimiento_vacio(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "sync_seguimiento_vacio.py", "--apply"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "seguimiento")
+    return execute_or_background(args, "seguimiento", timeout, background, bg_tasks)
 
 @app.post("/sync/dispo")
-def trigger_dispo(spreadsheet_id: Optional[str] = Query(None)):
+def trigger_dispo(
+    spreadsheet_id: Optional[str] = Query(None, description="ID de planilla opcional"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = ["node", "pintarDisponibilidad.js"]
     if spreadsheet_id:
         args.append(spreadsheet_id)
-    return run_command(args, "dispo")
+    return execute_or_background(args, "dispo", timeout, background, bg_tasks)
 
 @app.post("/sync/cordillera")
-def trigger_cordillera():
-    return run_command([PYTHON_EXE, "main.py", "--seguridad-vial"], "cordillera")
+def trigger_cordillera(
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
+    return execute_or_background([PYTHON_EXE, "main.py", "--seguridad-vial"], "cordillera", timeout, background, bg_tasks)
 
 @app.post("/sync/conf-viaje")
-def trigger_conf_viaje():
-    return run_command([PYTHON_EXE, "main.py", "--conf-viaje"], "conf_viaje")
+def trigger_conf_viaje(
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
+    return execute_or_background([PYTHON_EXE, "main.py", "--conf-viaje"], "conf_viaje", timeout, background, bg_tasks)
 
 @app.post("/sync/limpiar-vacio")
-def trigger_limpiar_vacio(day: Optional[int] = Query(None)):
+def trigger_limpiar_vacio(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "limpiar_vacio.py", "--apply"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "limpiar")
+    return execute_or_background(args, "limpiar", timeout, background, bg_tasks)
 
 @app.post("/sync/bajas")
-def trigger_bajas(dry_run: bool = Query(False)):
+def trigger_bajas(
+    dry_run: bool = Query(False, description="Modo simulación"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 600s / 10m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "sync_bajas_movimientos.py"]
     if dry_run:
         args.append("--dry-run")
-    return run_command(args, "bajas")
+    return execute_or_background(args, "bajas", timeout, background, bg_tasks)
 
 @app.post("/sync/all")
-def trigger_all(day: Optional[int] = Query(None)):
+def trigger_all(
+    day: Optional[int] = Query(None, description="Día específico del mes"),
+    timeout: Optional[int] = Query(None, description="Timeout en segundos (default 1800s / 30m)"),
+    background: bool = Query(False, description="Ejecutar en segundo plano para evitar timeout HTTP de Render"),
+    bg_tasks: BackgroundTasks = None
+):
     args = [PYTHON_EXE, "run_all_syncs.py", "--apply", "--module", "all"]
     if day:
         args += ["--day", str(day)]
-    return run_command(args, "all")
+    return execute_or_background(args, "all", timeout, background, bg_tasks)
 
 
 # ==============================================================================
@@ -501,29 +611,34 @@ if HAS_SCHEDULER and os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
 
     now = datetime.now()
 
-    # Planificación escalonada (Staggered) para Render Free (límite 512MB RAM):
-    # 1. Cordillera: cada 10m (primer disparo en 1 min)
+    interval_cordillera = int(os.getenv("INTERVAL_CORDILLERA_MINUTES", "10"))
+    interval_conf_viaje = int(os.getenv("INTERVAL_CONF_VIAJE_MINUTES", "10"))
+    interval_poll_vacio = int(os.getenv("INTERVAL_POLL_VACIO_MINUTES", "15"))
+
+    # Planificación escalonada (Staggered) para Render Free/Starter (límite 512MB RAM):
+    # 1. Cordillera: cada N min (primer disparo en 1 min)
     scheduler.add_job(
         lambda: run_command([PYTHON_EXE, "main.py", "--seguridad-vial"], "cordillera"),
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=interval_cordillera),
         next_run_time=now + timedelta(minutes=1),
         id="job_cordillera",
         replace_existing=True
     )
 
-    # 2. CONF. DE VIAJE: cada 10m (primer disparo en 3 min)
+    # 2. CONF. DE VIAJE: cada N min (primer disparo en 3 min)
     scheduler.add_job(
         lambda: run_command([PYTHON_EXE, "main.py", "--conf-viaje"], "conf_viaje"),
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=interval_conf_viaje),
         next_run_time=now + timedelta(minutes=3),
         id="job_conf_viaje",
         replace_existing=True
     )
 
-    # 3. Polling Inteligente Unificado (Tracking + VACÍO + Seguimiento en Capas): cada 10m (primer disparo en 5 min)
+    # 3. Polling Inteligente Unificado (Tracking + VACÍO + Seguimiento en Capas): cada N min (primer disparo en 5 min)
+    # Por defecto 15m para dejar amplio margen tras ejecuciones multi-día (~700-880s)
     scheduler.add_job(
         lambda: run_command([PYTHON_EXE, "poll_sync_vacio.py", "--apply", "--borders"], "poll_vacio"),
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=interval_poll_vacio),
         next_run_time=now + timedelta(minutes=5),
         id="job_poll_vacio",
         replace_existing=True
@@ -538,6 +653,6 @@ if HAS_SCHEDULER and os.getenv("ENABLE_SCHEDULER", "true").lower() == "true":
     )
 
     scheduler.start()
-    print("[SCHEDULER] ✅ APScheduler iniciado con 4 tareas operativas escalonadas y serializadas.")
+    print(f"[SCHEDULER] ✅ APScheduler iniciado con tareas escalonadas (Cordillera: {interval_cordillera}m, CONF: {interval_conf_viaje}m, Polling: {interval_poll_vacio}m, Dispo: 06:00 AM).")
 else:
     print("[SCHEDULER] 🛡️ Scheduler en segundo plano DESHABILITADO (ENABLE_SCHEDULER=false). Modo seguro: no se ejecutarán tareas diarias ni llamadas automáticas a Google Sheets.")

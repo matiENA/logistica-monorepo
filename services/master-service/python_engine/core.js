@@ -4,37 +4,17 @@
  * ============================================================================
  *
  * Este módulo contiene la lógica completa del pintado de disponibilidad
- * en Google Sheets. Puede ser ejecutado por línea de comandos o importado
- * por la interfaz web local (server.js).
+ * en Google Sheets sincronizado bidireccionalmente con Google Drive:
+ *   Carpeta Drive: 18E_m8Ye5dp5xv2oCmYhEm8Ts7eeA7y8-
+ *   Archivo de estado: pintardispo.json
  *
- * ────────────────────────────────────────────────────────────────────────────
- * 📖 GUÍA PARA MODIFICACIONES Y CAMBIOS MAYORES EN LA PLANILLA
- * ────────────────────────────────────────────────────────────────────────────
- *
- * 1. SI CAMBIAN LAS COLUMNAS "Dispo.":
- *    - Modificar la propiedad `colsDispo` en `config.json` o desde la Interfaz Web.
- *    - Cada número corresponde a la posición exacta de la columna (1-based: A=1, B=2, etc.).
- *
- * 2. SI CAMBIA LA POSICIÓN DE TRACTOR O SEMI EN "Mov.Unidades":
- *    - Ir a la función `leerUnidades()` (aprox. línea 230).
- *    - Actualmente lee `row[4]` (Col E = Tractor) y `row[5]` (Col F = Semi).
- *    - Si se mueven, cambiar los índices `row[index]` correspondientes.
- *
- * 3. SI SE AGREGAN NUEVAS CABECERAS DE SERVICIO O DIVISIONES:
- *    - Modificar el arreglo `CONFIG.serviciosHeaders` (aprox. línea 80).
- *    - Agregar palabras clave en mayúsculas (ej: 'GASODUCTO', 'INTERPROVINCIAL').
- *    - El script protegerá automáticamente el color de fondo de esas filas.
- *
- * 4. SI CAMBIA LA ESTRUCTURA DE "base datos Uni QM":
- *    - Ir a `construirMapaVenc()` (aprox. línea 160).
- *    - Actualmente toma `row[0]` como Patente y `row[1]` a `row[5]` como Fechas.
- *    - Si hay más columnas de vencimientos, ampliar el arreglo `[row[1], row[2], ...]`.
- *
- * 5. SI CAMBIAN LOS DÍAS DE ALERTA O COLORES:
- *    - En `calcularAlertas()` (aprox. línea 300):
- *      - `minDiff < 0`   → Rojo (#FF4D4D) [Vencido]
- *      - `minDiff <= 10` → Azul (#4285F4) [Próximo a vencer en 10 días o menos]
- *      - Todo lo demás   → Normal (#F5F7FA) [Habilitado]
+ * Arquitectura de Rendimiento:
+ * 1. Índice de patentes y vencimientos extraído de "base datos Uni QM".
+ * 2. Mapeo de filas con tracking dual de estado: estadoPrevio vs estadoActual.
+ * 3. Detección O(1) de cambios de vencimientos (cambioDeVencimiento).
+ * 4. Actualización selectiva en Google Sheets únicamente para celdas/filas modificadas
+ *    (Gris #F5F7FA, Azul #4285F4, Rojo #FF4D4D).
+ * 5. Lotes de tamaño controlado (30 ops) con división adaptativa contra errores 503/500.
  * ============================================================================
  */
 
@@ -43,9 +23,21 @@
 const { google } = require('googleapis');
 const path       = require('path');
 const fs         = require('fs');
+const crypto     = require('crypto');
+
+const {
+  getAuthClient,
+  getDriveClient,
+  leerEstadoDrive,
+  guardarEstadoDrive,
+  LOCAL_CACHE_FILE,
+  DRIVE_FOLDER_ID,
+  STATE_FILENAME
+} = require('./driveDispoManager');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const KEY_FILE    = path.join(__dirname, 'ute-logistica-key.json');
+const STATE_FILE  = path.join(__dirname, 'last_dispo_state.json');
 
 // ─── CARGA DE CONFIGURACIÓN DINÁMICA ──────────────────────────────────────────
 
@@ -89,7 +81,7 @@ const DEFAULTS = {
     normal: { red: 0.961, green: 0.969, blue: 0.980 }  // #F5F7FA — Base / Habilitado
   },
   filaInicioDatos: 3,
-  tamanoLoteBatch: 700
+  tamanoLoteBatch: parseInt(process.env.DISPO_BATCH_SIZE || '30', 10)
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -143,58 +135,14 @@ function fechaBaseDesdeTitulo(titulo) {
 // ─── AUTENTICACIÓN ────────────────────────────────────────────────────────────
 
 async function getSheetsInstance() {
-  const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
-
-  // 1. Variable de entorno con JSON string o Base64 (estándar para Render Cloud)
-  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS_JSON;
-  if (rawJson && rawJson.trim()) {
-    try {
-      let jsonStr = rawJson.trim();
-      if (!jsonStr.startsWith('{')) {
-        jsonStr = Buffer.from(jsonStr, 'base64').toString('utf8');
-      }
-      const credentials = JSON.parse(jsonStr);
-      const auth = new google.auth.GoogleAuth({ credentials, scopes });
-      const client = await auth.getClient();
-      return google.sheets({ version: 'v4', auth: client });
-    } catch (e) {
-      console.warn('⚠️ Error al parsear GOOGLE_SERVICE_ACCOUNT_JSON:', e.message);
-    }
-  }
-
-  // 2. Variable de entorno con ruta de archivo
-  const fileEnv = process.env.GOOGLE_SERVICE_ACCOUNT_FILE || process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (fileEnv && fs.existsSync(fileEnv)) {
-    const auth = new google.auth.GoogleAuth({ keyFile: fileEnv, scopes });
-    const client = await auth.getClient();
-    return google.sheets({ version: 'v4', auth: client });
-  }
-
-  // 3. Búsqueda de archivos locales y de desarrollo (resiliencia multi-entorno)
-  const homeDir = require('os').homedir();
-  const candidatos = [
-    KEY_FILE,
-    path.join(__dirname, 'credentials.json'),
-    path.join(__dirname, 'gs account', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json'),
-    path.join(homeDir, 'Desktop', 'gs account', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json'),
-    path.join(homeDir, 'Desktop', 'ute-logistica-firebase-adminsdk-fbsvc-04f3a4a36e.json')
-  ];
-
-  for (const cand of candidatos) {
-    if (fs.existsSync(cand)) {
-      const auth = new google.auth.GoogleAuth({ keyFile: cand, scopes });
-      const client = await auth.getClient();
-      return google.sheets({ version: 'v4', auth: client });
-    }
-  }
-
-  throw new Error(`Archivo de clave no encontrado. Configure GOOGLE_SERVICE_ACCOUNT_JSON o coloque "credentials.json" / "ute-logistica-key.json" en la carpeta del servicio.`);
+  const client = await getAuthClient();
+  return google.sheets({ version: 'v4', auth: client });
 }
 
-// ─── INSPECCIÓN RÁPIDA DE METADATOS ──────────────────────────────────────────
+// ─── INSPECCIÓN DE METADATOS ─────────────────────────────────────────────────
 
-async function inspeccionarPlanilla(spreadsheetId) {
-  const sheets = await getSheetsInstance();
+async function inspeccionarPlanilla(spreadsheetId, sheetsInstance = null) {
+  const sheets = sheetsInstance || await getSheetsInstance();
   const res = await sheets.spreadsheets.get({
     spreadsheetId,
     fields: 'properties.title,sheets.properties(sheetId,title)'
@@ -229,13 +177,58 @@ async function leerRango(sheets, spreadsheetId, sheetName, rango) {
   return res.data.values || [];
 }
 
+// ─── ENVÍO DE LOTES CON DIVISIÓN ADAPTATIVA ──────────────────────────────────
+
+async function sendBatchWithAdaptiveSplit(sheets, spreadsheetId, lote, label, log) {
+  if (!lote || lote.length === 0) return;
+
+  const maxIntentos = 4;
+  let intento = 0;
+
+  while (intento < maxIntentos) {
+    try {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: lote }
+      });
+      return;
+    } catch (err) {
+      intento++;
+      const errMsg = String(err.message || '');
+      const esErrorServidor = err.code === 500 || err.code === 503 || err.code === 429 ||
+                              errMsg.includes('backendError') || errMsg.includes('Quota exceeded') ||
+                              errMsg.includes('Service Unavailable') || errMsg.includes('rateLimit');
+
+      if (esErrorServidor && intento < maxIntentos) {
+        if (lote.length > 10) {
+          const mid = Math.ceil(lote.length / 2);
+          const sub1 = lote.slice(0, mid);
+          const sub2 = lote.slice(mid);
+          log(`⚠️ Google API ocupada (${err.code || '503'}). Dividiendo ${label} (${lote.length} ops) en 2 sub-lotes (${sub1.length} y ${sub2.length})...`, 'WARN');
+          await sleep(1000 + Math.floor(Math.random() * 500));
+          await sendBatchWithAdaptiveSplit(sheets, spreadsheetId, sub1, `${label}.1`, log);
+          await sleep(350);
+          await sendBatchWithAdaptiveSplit(sheets, spreadsheetId, sub2, `${label}.2`, log);
+          return;
+        } else {
+          const espera = intento * 2000 + Math.floor(Math.random() * 1000);
+          log(`⚠️ Google API ocupada (${err.code || '503'}). Reintentando ${label} en ${(espera/1000).toFixed(1)}s (intento ${intento}/${maxIntentos})...`, 'WARN');
+          await sleep(espera);
+        }
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 // ─── PROCESO PRINCIPAL DE PINTADO ────────────────────────────────────────────
 
-async function ejecutarPintado(options = {}, onLog = null) {
+async function ejecutarPintado(options = {}, onLog = null, sheetsInstance = null) {
   const t0 = Date.now();
   const config = cargarConfig();
   const spreadsheetId = options.spreadsheetId || config.spreadsheetId;
-  const colsDispo = options.colsDispo || config.colsDispo || porDefecto.colsDispo;
+  const colsDispo = options.colsDispo || config.colsDispo;
 
   const log = (msg, level = 'INFO') => {
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
@@ -249,11 +242,23 @@ async function ejecutarPintado(options = {}, onLog = null) {
   log(`Iniciando proceso de disponibilidad...`, 'INFO');
   log(`ID Spreadsheet: ${spreadsheetId}`, 'INFO');
 
-  const sheets = await getSheetsInstance();
+  const sheets = sheetsInstance || await getSheetsInstance();
+  const drive = await getDriveClient();
 
-  // 1. Detectar pestaña Mov.Unidades
+  // 1. Cargar estado previo de Google Drive (pintardispo.json)
+  log(`Cargando estado desde Google Drive (${STATE_FILENAME} en carpeta ${DRIVE_FOLDER_ID})...`, 'INFO');
+  const driveStatePrevio = await leerEstadoDrive(drive);
+  if (driveStatePrevio && driveStatePrevio.indice_patentes) {
+    const totalPatPrev = Object.keys(driveStatePrevio.indice_patentes).length;
+    const totalFilasPrev = driveStatePrevio.filas ? Object.keys(driveStatePrevio.filas).length : 0;
+    log(`[Drive State] ✅ Estado anterior cargado: ${totalPatPrev} patentes indexadas, ${totalFilasPrev} filas registradas.`, 'OK');
+  } else {
+    log(`[Drive State] ℹ️ Sin estado previo registrado en Drive (Cold start inicial).`, 'INFO');
+  }
+
+  // 2. Detectar pestaña Mov.Unidades
   log('Verificando pestañas y metadatos...', 'INFO');
-  const metadata = await inspeccionarPlanilla(spreadsheetId);
+  const metadata = await inspeccionarPlanilla(spreadsheetId, sheets);
   if (!metadata.movSheet) {
     throw new Error('No se encontró ninguna pestaña con "Mov.Unidades" en el nombre.');
   }
@@ -263,7 +268,7 @@ async function ejecutarPintado(options = {}, onLog = null) {
   log(`Planilla activa: "${metadata.title}"`, 'OK');
   log(`Pestaña detectada: "${movTitle}" (sheetId: ${movSheetId})`, 'OK');
 
-  // 2. Leer vencimientos y unidades en paralelo
+  // 3. Leer vencimientos y unidades en paralelo
   log('Leyendo datos de vencimientos y unidades...', 'INFO');
   const [rowsUniQM, rowsMov] = await Promise.all([
     leerRango(sheets, spreadsheetId, DEFAULTS.uniQMSheet, 'A2:F5000'),
@@ -273,7 +278,7 @@ async function ejecutarPintado(options = {}, onLog = null) {
   log(`"base datos Uni QM": ${rowsUniQM.length} filas obtenidas`, 'INFO');
   log(`"${movTitle}": ${rowsMov.length} filas obtenidas`, 'INFO');
 
-  // 3. Procesar mapa de vencimientos (con merge inteligente)
+  // 4. Construir índice de patentes y vencimientos sacado de "base datos Uni QM"
   const agrupado = new Map();
   for (let i = 0; i < rowsUniQM.length; i++) {
     const row = rowsUniQM[i];
@@ -293,25 +298,35 @@ async function ejecutarPintado(options = {}, onLog = null) {
     agrupado.get(unitId).push({ fila: filaReal, fechas, maxFecha });
   }
 
-  const mapaVenc = {};
+  const indicePatentes = {};
   let totalDuplicados = 0;
 
   for (const [unitId, entradas] of agrupado.entries()) {
-    if (entradas.length === 1) {
-      mapaVenc[unitId] = entradas[0].fechas;
-    } else {
+    if (entradas.length > 1) {
       totalDuplicados++;
       entradas.sort((a, b) => {
         if (b.maxFecha !== a.maxFecha) return b.maxFecha - a.maxFecha;
         if (b.fechas.length !== a.fechas.length) return b.fechas.length - a.fechas.length;
         return b.fila - a.fila;
       });
-      mapaVenc[unitId] = entradas[0].fechas;
     }
-  }
-  log(`Vencimientos: ${Object.keys(mapaVenc).length} unidades indexadas (${totalDuplicados} duplicados resueltos)`, 'OK');
 
-  // 4. Procesar unidades y detectar filas de servicio / cabeceras
+    const fechasElegidas = entradas[0].fechas.sort((a, b) => a - b);
+    const hash = crypto.createHash('md5').update(fechasElegidas.join(',')).digest('hex');
+    const minFecha = fechasElegidas.length ? Math.min(...fechasElegidas) : null;
+
+    indicePatentes[unitId] = {
+      patente: unitId,
+      vencimientos: fechasElegidas,
+      vencimientosStr: fechasElegidas.map(formatearFecha),
+      vencimientoMinStr: formatearFecha(minFecha),
+      hash
+    };
+  }
+
+  log(`Vencimientos: ${Object.keys(indicePatentes).length} unidades indexadas (${totalDuplicados} duplicados resueltos)`, 'OK');
+
+  // 5. Procesar filas y proteger cabeceras de división
   const esDivision = [];
   const trIds = [];
   const seIds = [];
@@ -334,156 +349,270 @@ async function ejecutarPintado(options = {}, onLog = null) {
     seIds.push(norm(se));
   }
 
-  // Chunks continuos de unidades
-  const chunksUnidades = [];
-  let start = -1;
-  for (let r = 0; r < esDivision.length; r++) {
-    if (!esDivision[r]) {
-      if (start === -1) start = r;
-    } else {
-      if (start !== -1) {
-        chunksUnidades.push({ startRow: start, endRow: r });
-        start = -1;
-      }
-    }
-  }
-  if (start !== -1) {
-    chunksUnidades.push({ startRow: start, endRow: esDivision.length });
-  }
-
   const nDivisiones = esDivision.filter(Boolean).length;
   const nUnidades   = esDivision.length - nDivisiones;
   log(`Estructura: ${rowsMov.length} filas | 🚛 ${nUnidades} unidades | 🏷️  ${nDivisiones} cabeceras protegidas`, 'OK');
 
-  // 5. Generar Capa Base (#F5F7FA) y Capa de Alertas (🔴 / 🔵)
+  // 6. Matriz de Estados y Detección de Cambios por Fila (Ambos estados en Drive)
   const fb = fechaBaseDesdeTitulo(movTitle);
   const msPorDia = 86400000;
-  const allRequests = [];
-
   log(`Fecha base del mes: ${fb.toLocaleDateString('es-AR')}`, 'INFO');
 
-  // Capa Base
-  for (const colNum of colsDispo) {
-    for (const chunk of chunksUnidades) {
-      allRequests.push({
-        repeatCell: {
-          range: {
-            sheetId:          movSheetId,
-            startRowIndex:    (DEFAULTS.filaInicioDatos - 1) + chunk.startRow,
-            endRowIndex:      (DEFAULTS.filaInicioDatos - 1) + chunk.endRow,
-            startColumnIndex: colNum - 1,
-            endColumnIndex:   colNum
-          },
-          cell:   { userEnteredFormat: { backgroundColor: DEFAULTS.colores.normal } },
-          fields: 'userEnteredFormat.backgroundColor'
-        }
-      });
-    }
-  }
-  const baseCount = allRequests.length;
-  log(`Capa Base (#F5F7FA): ${baseCount} operaciones sobre ${colsDispo.length} columnas`, 'INFO');
+  const colorMap = {
+    R: DEFAULTS.colores.rojo,
+    A: DEFAULTS.colores.azul,
+    N: DEFAULTS.colores.normal
+  };
 
-  // Capa de Alertas
-  const bloquesAlertas = { R: [], A: [] };
-  for (let ci = 0; ci < colsDispo.length; ci++) {
-    const colNum     = colsDispo[ci];
-    const diaOffset  = Math.min(ci, 30);
-    const fechaColMs = fb.getTime() + diaOffset * msPorDia;
-    let bColor = null, bStart = -1;
+  const nuevasFilas = {};
+  let totalAlertasRojas = 0;
+  let totalAlertasAzules = 0;
+  let totalFilasCambiadas = 0;
 
-    for (let r = 0; r <= rowsMov.length; r++) {
-      let color = null;
-      if (r < rowsMov.length && !esDivision[r]) {
-        const tsTr = mapaVenc[trIds[r]] || [];
-        const tsSe = mapaVenc[seIds[r]] || [];
-        let minDiff = Infinity;
+  const prevFilasDrive = (driveStatePrevio && driveStatePrevio.filas) ? driveStatePrevio.filas : {};
 
-        for (const ts of tsTr) {
-          const d = Math.round((ts - fechaColMs) / msPorDia);
-          if (d < minDiff) minDiff = d;
-        }
-        for (const ts of tsSe) {
-          const d = Math.round((ts - fechaColMs) / msPorDia);
-          if (d < minDiff) minDiff = d;
-        }
+  for (let r = 0; r < rowsMov.length; r++) {
+    if (esDivision[r]) continue;
 
-        if      (minDiff < 0)   color = 'R';
-        else if (minDiff <= 10) color = 'A';
+    const tr = trIds[r];
+    const se = seIds[r];
+    const infoTr = indicePatentes[tr];
+    const infoSe = indicePatentes[se];
+
+    const tsTr = infoTr ? infoTr.vencimientos : [];
+    const tsSe = infoSe ? infoSe.vencimientos : [];
+
+    // Hash de vencimientos combinado de la fila
+    const hashVencimientos = crypto.createHash('md5')
+      .update(`${tr}:${infoTr?.hash || ''}|${se}:${infoSe?.hash || ''}`)
+      .digest('hex');
+
+    // Calcular estadoActual para las 33 fechas
+    const estadoActual = [];
+    for (let ci = 0; ci < colsDispo.length; ci++) {
+      const diaOffset = Math.min(ci, 30);
+      const fechaColMs = fb.getTime() + diaOffset * msPorDia;
+
+      let minDiff = Infinity;
+      for (const ts of tsTr) {
+        const d = Math.round((ts - fechaColMs) / msPorDia);
+        if (d < minDiff) minDiff = d;
+      }
+      for (const ts of tsSe) {
+        const d = Math.round((ts - fechaColMs) / msPorDia);
+        if (d < minDiff) minDiff = d;
       }
 
-      if (color !== bColor) {
-        if (bColor === 'R' || bColor === 'A') {
-          bloquesAlertas[bColor].push({
-            sr: (DEFAULTS.filaInicioDatos - 1) + bStart,
-            er: (DEFAULTS.filaInicioDatos - 1) + r,
-            ci: colNum - 1
-          });
-        }
-        bColor = color;
-        bStart = r;
+      let c = 'N';
+      if (minDiff < 0) {
+        c = 'R';
+        totalAlertasRojas++;
+      } else if (minDiff <= 10) {
+        c = 'A';
+        totalAlertasAzules++;
+      }
+      estadoActual.push(c);
+    }
+
+    // Comparar con el estado previo de la fila en Drive
+    const filaKey = String(r);
+    const prevData = prevFilasDrive[filaKey] || null;
+    const prevEstado = prevData ? prevData.estadoActual : null;
+    const prevHashVenc = prevData ? prevData.hashVencimientos : null;
+    const prevTr = prevData ? prevData.tractor : null;
+    const prevSe = prevData ? prevData.semi : null;
+
+    const cambioDeVencimiento = Boolean(
+      options.force ||
+      !prevData ||
+      prevHashVenc !== hashVencimientos ||
+      prevTr !== tr ||
+      prevSe !== se
+    );
+
+    const cambioDeEstado = Boolean(
+      options.force ||
+      !prevEstado ||
+      JSON.stringify(estadoActual) !== JSON.stringify(prevEstado)
+    );
+
+    if (cambioDeVencimiento || cambioDeEstado) {
+      totalFilasCambiadas++;
+    }
+
+    nuevasFilas[filaKey] = {
+      fila: DEFAULTS.filaInicioDatos + r,
+      tractor: tr,
+      semi: se,
+      vencimientoMinTractor: infoTr ? infoTr.vencimientoMinStr : 'N/A',
+      vencimientoMinSemi: infoSe ? infoSe.vencimientoMinStr : 'N/A',
+      hashVencimientos,
+      estadoPrevio: prevEstado || estadoActual,
+      estadoActual,
+      cambioDeVencimiento,
+      cambioDeEstado,
+      updatedAt: (cambioDeVencimiento || cambioDeEstado) ? new Date().toISOString() : (prevData?.updatedAt || new Date().toISOString())
+    };
+  }
+
+  log(`Matriz calculada: 🔴 ${totalAlertasRojas} celdas rojas, 🔵 ${totalAlertasAzules} celdas azules sobre ${colsDispo.length * nUnidades} celdas totales`, 'INFO');
+  log(`Diffing de filas: ${totalFilasCambiadas} fila(s) con cambio de vencimiento o estado detectado`, 'INFO');
+
+  // 7. Gatekeeper O(1): Si no hay filas cambiadas ni es force, salir en 0s con 0 escrituras
+  if (totalFilasCambiadas === 0 && !options.force) {
+    log(`[Gatekeeper O(1)] ✅ Cero cambios detectados en vencimientos ni asignaciones. Sincronización omitida (0 llamadas de escritura).`, 'OK');
+    const dur = ((Date.now() - t0) / 1000).toFixed(2);
+    return {
+      exito: true,
+      sinCambios: true,
+      duracionSegundos: dur,
+      title: metadata.title,
+      movTitle,
+      unidadesProcesadas: nUnidades,
+      alertas: {
+        rojos: totalAlertasRojas,
+        azules: totalAlertasAzules,
+        total: totalAlertasRojas + totalAlertasAzules
+      },
+      operacionesAplicadas: 0,
+      modo: 'gatekeeper_drive_noop'
+    };
+  }
+
+  // 8. Generación Óptima de Solicitudes repeatCell (Únicamente para filas y celdas modificadas)
+  const allRequests = [];
+  let celdasModificadas = 0;
+  const esColdStart = !driveStatePrevio || !driveStatePrevio.filas;
+
+  for (let r = 0; r < rowsMov.length; r++) {
+    if (esDivision[r]) continue;
+
+    const filaKey = String(r);
+    const rowInfo = nuevasFilas[filaKey];
+    if (!rowInfo) continue;
+
+    // Si la fila no cambió y no es force ni cold-start, omitir por completo
+    if (!rowInfo.cambioDeVencimiento && !rowInfo.cambioDeEstado && !options.force && !esColdStart) {
+      continue;
+    }
+
+    const currEstados = rowInfo.estadoActual;
+    const prevEstados = rowInfo.estadoPrevio;
+
+    for (let ci = 0; ci < colsDispo.length; ci++) {
+      const colNum = colsDispo[ci];
+      const currColor = currEstados[ci];
+      const prevColor = prevEstados ? prevEstados[ci] : null;
+
+      // Si es cold start, únicamente enviamos las celdas con alerta (Rojo y Azul)
+      // evitando saturar la API con 6,500 escrituras de Gris redundantes
+      let debePintar = false;
+      if (options.force) {
+        debePintar = true;
+      } else if (esColdStart) {
+        debePintar = (currColor === 'R' || currColor === 'A');
+      } else {
+        debePintar = (currColor !== prevColor);
+      }
+
+      if (debePintar) {
+        celdasModificadas++;
+        allRequests.push({
+          repeatCell: {
+            range: {
+              sheetId:          movSheetId,
+              startRowIndex:    (DEFAULTS.filaInicioDatos - 1) + r,
+              endRowIndex:      (DEFAULTS.filaInicioDatos - 1) + r + 1,
+              startColumnIndex: colNum - 1,
+              endColumnIndex:   colNum
+            },
+            cell: {
+              userEnteredFormat: {
+                backgroundColor: colorMap[currColor]
+              }
+            },
+            fields: 'userEnteredFormat.backgroundColor'
+          }
+        });
       }
     }
   }
 
-  const alertMap = { R: DEFAULTS.colores.rojo, A: DEFAULTS.colores.azul };
-  for (const [c, lista] of Object.entries(bloquesAlertas)) {
-    for (const b of lista) {
-      allRequests.push({
-        repeatCell: {
-          range: {
-            sheetId:          movSheetId,
-            startRowIndex:    b.sr,
-            endRowIndex:      b.er,
-            startColumnIndex: b.ci,
-            endColumnIndex:   b.ci + 1
-          },
-          cell:   { userEnteredFormat: { backgroundColor: alertMap[c] } },
-          fields: 'userEnteredFormat.backgroundColor'
-        }
-      });
-    }
+  const modoEjecucion = esColdStart ? 'drive_cold_start' : 'drive_diff_incremental';
+  log(`Estrategia: [${modoEjecucion}] -> ${celdasModificadas} celdas a pintar en ${allRequests.length} operaciones`, 'OK');
+
+  // Preparar nuevo estado para Drive
+  const nuevoEstadoDrive = {
+    metadata: {
+      updatedAt: new Date().toISOString(),
+      spreadsheetId,
+      sheetTitle: metadata.title,
+      movTitle,
+      movSheetId,
+      fechaBase: fb.toISOString(),
+      totalPatentes: Object.keys(indicePatentes).length,
+      totalFilasDiagramadas: nUnidades,
+      filasModificadasEnEsteCiclo: totalFilasCambiadas,
+      alertas: {
+        rojos: totalAlertasRojas,
+        azules: totalAlertasAzules,
+        normales: (colsDispo.length * nUnidades) - (totalAlertasRojas + totalAlertasAzules)
+      }
+    },
+    indice_patentes: indicePatentes,
+    filas: nuevasFilas
+  };
+
+  if (options.dryRun) {
+    log(`[DRY-RUN] Simulación activa. Se habrían enviado ${allRequests.length} operaciones a Sheets.`, 'INFO');
+    log(`[DRY-RUN] Guardando estado simulado en Google Drive (${STATE_FILENAME})...`, 'INFO');
+    await guardarEstadoDrive(drive, nuevoEstadoDrive);
+    const dur = ((Date.now() - t0) / 1000).toFixed(2);
+    return {
+      exito: true,
+      dryRun: true,
+      duracionSegundos: dur,
+      title: metadata.title,
+      movTitle,
+      unidadesProcesadas: nUnidades,
+      alertas: {
+        rojos: totalAlertasRojas,
+        azules: totalAlertasAzules,
+        total: totalAlertasRojas + totalAlertasAzules
+      },
+      operacionesAplicadas: 0,
+      operacionesSimuladas: allRequests.length,
+      modo: modoEjecucion
+    };
   }
 
-  const alertCount = allRequests.length - baseCount;
-  log(`Alertas calculadas: 🔴${bloquesAlertas.R.length} Rojos + 🔵${bloquesAlertas.A.length} Azules = ${alertCount} operaciones`, 'OK');
-  log(`Total operaciones en Sheets: ${allRequests.length}`, 'INFO');
-
-  // 6. Enviar en lotes con reintento
-  const loteSize = DEFAULTS.tamanoLoteBatch;
+  // 9. Enviar en lotes controlados (30 ops) con throttling preventivo
+  const loteSize = options.tamanoLoteBatch || DEFAULTS.tamanoLoteBatch;
   const totalLotes = Math.ceil(allRequests.length / loteSize);
-  log(`Aplicando cambios en ${totalLotes} lotes...`, 'INFO');
+  log(`Aplicando ${allRequests.length} operaciones en ${totalLotes} lote(s) (máx ${loteSize} ops/lote)...`, 'INFO');
 
   for (let i = 0; i < allRequests.length; i += loteSize) {
     const lote = allRequests.slice(i, i + loteSize);
     const nroLote = Math.floor(i / loteSize) + 1;
+    const tLote0 = Date.now();
     log(`Enviando lote ${nroLote}/${totalLotes} (${lote.length} bloques)...`, 'INFO');
 
-    let intento = 0;
-    while (intento < 4) {
-      try {
-        await sheets.spreadsheets.batchUpdate({
-          spreadsheetId,
-          requestBody: { requests: lote }
-        });
-        break;
-      } catch (err) {
-        intento++;
-        const esErrorServidor = err.code === 500 || err.code === 503 || String(err.message).includes('backendError');
-        if (esErrorServidor && intento < 4) {
-          const espera = intento * 3000;
-          log(`Google API ocupada. Reintentando en ${espera/1000}s (intento ${intento}/4)...`, 'WARN');
-          await sleep(espera);
-        } else {
-          throw err;
-        }
-      }
+    await sendBatchWithAdaptiveSplit(sheets, spreadsheetId, lote, `Lote ${nroLote}/${totalLotes}`, log);
+
+    const msLote = Date.now() - tLote0;
+    log(`Lote ${nroLote}/${totalLotes} aplicado con éxito en ${(msLote/1000).toFixed(2)}s`, 'OK');
+    if (i + loteSize < allRequests.length) {
+      await sleep(350); // Throttling preventivo para no saturar la API
     }
-    log(`Lote ${nroLote}/${totalLotes} aplicado con éxito`, 'OK');
-    if (nroLote < totalLotes) await sleep(400);
   }
 
+  // 10. Persistir estado definitivo en Google Drive y Espejo Local
+  log(`Persistiendo nuevo estado en Google Drive (${STATE_FILENAME} en carpeta ${DRIVE_FOLDER_ID})...`, 'INFO');
+  await guardarEstadoDrive(drive, nuevoEstadoDrive);
+  log(`[Drive State] ✅ Estado guardado con éxito en Drive y caché local.`, 'OK');
+
   const dur = ((Date.now() - t0) / 1000).toFixed(2);
-  log(`PROCESO COMPLETO FINALIZADO EXITOSAMENTE EN ${dur}s`, 'OK');
+  log(`PROCESO COMPLETO FINALIZADO EXITOSAMENTE EN ${dur}s (${allRequests.length} operaciones aplicadas)`, 'OK');
 
   // Actualizar historial de planillas si es nueva
   const existe = config.planillasGuardadas.find(p => p.id === spreadsheetId);
@@ -504,10 +633,12 @@ async function ejecutarPintado(options = {}, onLog = null) {
     movTitle,
     unidadesProcesadas: nUnidades,
     alertas: {
-      rojos: bloquesAlertas.R.length,
-      azules: bloquesAlertas.A.length,
-      total: alertCount
-    }
+      rojos: totalAlertasRojas,
+      azules: totalAlertasAzules,
+      total: totalAlertasRojas + totalAlertasAzules
+    },
+    operacionesAplicadas: allRequests.length,
+    modo: modoEjecucion
   };
 }
 
@@ -516,6 +647,10 @@ module.exports = {
   guardarConfig,
   inspeccionarPlanilla,
   ejecutarPintado,
+  getSheetsInstance,
+  getAuthClient,
+  getDriveClient,
+  STATE_FILE,
   DEFAULTS,
   KEY_FILE
 };

@@ -39,7 +39,9 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
 # Prevenir caídas por timeout de 60s en llamadas pesadas a Google Sheets
-socket.setdefaulttimeout(180)
+# Prevenir caídas por timeout en llamadas pesadas a Google Sheets (configurable vía SOCKET_TIMEOUT, default 600s / 10m)
+SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "600"))
+socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
 # Reconfigurar salida UTF-8 de forma segura para Windows / pyw / n8n
 if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:

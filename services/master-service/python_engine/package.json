@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dispo": "node pintarDisponibilidad.js"
+    "dispo": "node pintarDisponibilidad.js",
+    "dispo:dry": "node pintarDisponibilidad.js --dry-run",
+    "dispo:force": "node pintarDisponibilidad.js --force"
   },
   "dependencies": {
     "googleapis": "^144.0.0"

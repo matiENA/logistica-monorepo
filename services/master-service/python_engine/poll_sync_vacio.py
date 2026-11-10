@@ -48,7 +48,8 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import socket
 
-socket.setdefaulttimeout(300)
+SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "600"))
+socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
 from googleapiclient.discovery import build
 from credentials_helper import get_google_credentials, resolve_credentials_file

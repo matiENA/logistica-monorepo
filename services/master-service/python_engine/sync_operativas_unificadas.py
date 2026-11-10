@@ -43,8 +43,9 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-# Prevenir caídas por timeout de sockets en Google API
-socket.setdefaulttimeout(300)
+# Prevenir caídas por timeout de sockets en Google API (configurable vía SOCKET_TIMEOUT, default 600s / 10m)
+SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "600"))
+socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
 def api_call_with_retry(api_req: Any, max_retries: int = 5, initial_delay: float = 5.0) -> Any:
     """

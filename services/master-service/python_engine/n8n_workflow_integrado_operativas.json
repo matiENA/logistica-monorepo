@@ -46,7 +46,7 @@
     },
     {
       "parameters": {
-        "content": "## 🎨 TAREA 4: PINTAR DISPONIBILIDAD (VTV & HABILITACIONES)\n- **Origen:** Base Vencimientos + Configuración activa (`config.json`).\n- **Destino:** 33 Columnas `Dispo.` en Movimientos Mensual.\n- **Regla:** Pinta según vencimiento: 🔴 Rojo (<0 d, vencido), 🔵 Azul (<=10 d, próx. a vencer), ⬜ Normal (#F5F7FA). Protege intactas las cabeceras de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `node pintarDisponibilidad.js`",
+        "content": "## 🎨 TAREA 4: PINTAR DISPONIBILIDAD (VTV & HABILITACIONES)\n- **Origen:** Base Vencimientos + Configuración activa (`config.json`).\n- **Destino:** 33 Columnas `Dispo.` en Movimientos Mensual.\n- **Regla:** Pinta según vencimiento: 🔴 Rojo (<0 d, vencido), 🔵 Azul (<=10 d, próx. a vencer), ⬜ Normal (#F5F7FA). Protege intactas las cabeceras de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).\n- **Motor Optimizado:** Particionamiento RLE de pasada única + Diffing incremental O(1) con Gatekeeper y lotes adaptativos de 80 ops (sin solapamiento ni \"Google API ocupada\"). Soporta flags `--force` y `--dry-run`.\n- **Directorio:** `C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine`\n- **Comando:** `node pintarDisponibilidad.js`",
         "height": 340,
         "width": 1350,
         "color": 2

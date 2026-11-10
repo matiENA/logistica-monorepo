@@ -53,6 +53,15 @@ En la pestaña **Environment** de tu servicio en Render, agrega las siguientes v
 | `CONF_SOURCE_SHEET_NAME` | `UTE Cordillera Octubre 26` | Pestaña de origen en UTE Cordillera |
 | `CONF_TARGET_SHEET_NAME` | `CONF. DE VIAJE OCTUBRE 26` | Pestaña de destino en CONF. DE VIAJE |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | `{...}` | **Contenido completo del archivo JSON de tu Service Account** |
+| `DEFAULT_TASK_TIMEOUT` *(opcional)* | `1800` | Timeout general por defecto en segundos (30 min) antes de abortar tareas |
+| `TIMEOUT_POLL_VACIO` *(opcional)* | `1800` | Timeout para Polling Inteligente Multi-Día en segundos (30 min) |
+| `TIMEOUT_UNIFIED` *(opcional)* | `1800` | Timeout para sincronización unificada en segundos (30 min) |
+| `TIMEOUT_CORDILLERA` *(opcional)* | `600` | Timeout para Cordillera en segundos (10 min) |
+| `TIMEOUT_CONF_VIAJE` *(opcional)* | `600` | Timeout para CONF. DE VIAJE en segundos (10 min) |
+| `SOCKET_TIMEOUT` *(opcional)* | `600` | Timeout de sockets de red/Google Sheets API (10 min) |
+| `INTERVAL_POLL_VACIO_MINUTES` *(opcional)* | `15` | Minutos de intervalo entre ejecuciones de Polling de Vacío |
+| `DISPO_BATCH_SIZE` *(opcional)* | `30` | Tamaño de lote de operaciones repeatCell en pintarDisponibilidad (evita error 503) |
+| `DRIVE_FOLDER_REPORTES_ID` *(opcional)* | `18E_m8Ye5dp5xv2oCmYhEm8Ts7eeA7y8-` | ID de la carpeta compartida de Google Drive para estados |
 | `TELEGRAM_BOT_TOKEN` *(opcional)* | `123456:ABC...` | Token del bot provisto por `@BotFather` para recibir alertas |
 | `TELEGRAM_CHAT_ID` *(opcional)* | `123456789` | ID de usuario, grupo o canal donde enviar las notificaciones |
 | `TELEGRAM_NOTIFY_ALL` *(opcional)* | `false` | `false` = alerta sólo en fallos; `true` = notifica cada tarea |
@@ -94,9 +103,12 @@ Una vez que Render complete el despliegue:
 
 ## ⚡ Disparos Manuales Bajo Demanda desde n8n o Webhook
 
-Si necesitas disparar cualquier tarea remotamente desde n8n (o desde cualquier parte del mundo):
-- **Ejecutar Todo:** `POST https://diaria-operativas.onrender.com/sync/all`
-- **Solo Seguimiento Vacío:** `POST https://diaria-operativas.onrender.com/sync/seguimiento-vacio`
+> 💡 **Evitar Timeout HTTP de 100s de Render:**  
+> En llamadas manuales o webhooks de n8n, agrega el parámetro `?background=true` para que el servidor responda de inmediato (`202 Accepted`) y procese la tarea en segundo plano con el margen completo (hasta 30 minutos). Puedes monitorear el resultado en `/status`.
+> Si prefieres ejecución síncrona y deseas darle más margen, puedes especificar `?timeout=2400`.
+
+- **Ejecutar Todo en Background:** `POST https://diaria-operativas.onrender.com/sync/all?background=true`
+- **Polling Inteligente de Vacío:** `POST https://diaria-operativas.onrender.com/sync/poll-vacio?background=true`
 - **Solo Cordillera:** `POST https://diaria-operativas.onrender.com/sync/cordillera`
 - **Solo CONF. DE VIAJE:** `POST https://diaria-operativas.onrender.com/sync/conf-viaje`
 - **Solo Disponibilidad:** `POST https://diaria-operativas.onrender.com/sync/dispo`
