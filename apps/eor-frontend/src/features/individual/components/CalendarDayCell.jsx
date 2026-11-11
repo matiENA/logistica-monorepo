@@ -18,6 +18,7 @@ export const CalendarDayCell = ({
 
     if (v === 'FSF' || v.startsWith('FSF')) return 'status-fsf';
     if (v === 'F' || v.startsWith('F')) return 'status-franco';
+    if (v === 'VSF' || v.startsWith('VSF')) return 'status-vsf';
     if (v === 'V' || v.startsWith('V')) return 'status-vacaciones';
     if (v === 'IND' || v.startsWith('IND')) return 'status-ind';
     if (['E', 'ART', 'S', 'A', 'MED'].some((k) => v.includes(k))) return 'status-ausencia';

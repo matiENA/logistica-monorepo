@@ -103,6 +103,16 @@ export const RangeActionBar = ({
 
         <button
           type="button"
+          onClick={() => onAssignStatus('VSF')}
+          disabled={isPending}
+          className="btn-range-action btn-range-vsf"
+          title="Asignar Vacaciones Sin Firmar (VSF) en este rango"
+        >
+          Vacaciones (VSF)
+        </button>
+
+        <button
+          type="button"
           onClick={() => onAssignStatus('E')}
           disabled={isPending}
           className="btn-range-action btn-range-licencia"
