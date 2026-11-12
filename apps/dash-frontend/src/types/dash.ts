@@ -127,7 +127,7 @@ export interface RetornoItem {
   nom: string;
   nombre?: string;
   tractor?: string;
-  retorna_cuando?: string; // 'HOY' o 'MANANA' / 'MAÑANA'
+  retorna_cuando?: string; // 'AYER' | 'HOY' | 'MANANA' | 'MAÑANA'
   codigo_ayer?: string;
   codigo_hoy?: string;
   codigo_manana?: string;

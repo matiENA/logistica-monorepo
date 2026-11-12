@@ -4,6 +4,14 @@ import { RetornoItem, FlotaItem } from '../../types/dash';
 
 const retornosMock: RetornoItem[] = [
   {
+    nom: 'BURGOS JOSE LUIS',
+    tractor: 'AG554XE',
+    retorna_cuando: 'AYER',
+    codigo_ayer: '1',
+    codigo_hoy: '2',
+    codigo_manana: '-'
+  },
+  {
     nom: 'ALVAREZ MIGUEL',
     tractor: 'AG777CC',
     retorna_cuando: 'HOY',
