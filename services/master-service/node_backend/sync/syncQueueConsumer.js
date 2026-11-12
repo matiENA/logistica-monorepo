@@ -87,6 +87,28 @@ function colToLetter(colIndex) {
     return letter;
 }
 
+/**
+ * Formatea la tira de días para su escritura en Google Sheets.
+ * Por defecto convierte los guiones ('-') y valores inactivos en celdas vacías ('')
+ * para mantener la planilla limpia, preservando la capacidad de emitir guiones
+ * si la operación incluye allowHyphens / imprimir_guiones = true (para botón futuro).
+ */
+function formatDiasParaSheets(tiraRaw, { allowHyphens = false } = {}) {
+    if (!tiraRaw) return new Array(31).fill('');
+    let arrDias = tiraRaw.includes(',') ? tiraRaw.split(',') : tiraRaw.split('');
+    arrDias = arrDias.map(d => {
+        const val = String(d || '').trim().toUpperCase();
+        if (!allowHyphens && (val === '-' || val === 'NULL' || val === 'UNDEFINED')) {
+            return '';
+        }
+        return val;
+    });
+    while (arrDias.length < 31) {
+        arrDias.push(allowHyphens ? '-' : '');
+    }
+    return arrDias.slice(0, 31);
+}
+
 // ==============================================================================
 // 📡 GOOGLE SHEETS API CALLERS
 // ==============================================================================
@@ -451,10 +473,12 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
 
                     if (rowNum) {
                         const tiraRaw = item.datos_nuevos?.tira_dias || '';
-                        let arrDias = tiraRaw.includes(',') ? tiraRaw.split(',') : tiraRaw.split('');
-                        arrDias = arrDias.map(d => String(d).trim().toUpperCase());
-                        while (arrDias.length < 31) arrDias.push('-');
-                        arrDias = arrDias.slice(0, 31);
+                        const allowHyphens = Boolean(
+                            item.datos_nuevos?.imprimir_guiones ||
+                            item.datos_nuevos?.con_guiones ||
+                            item.datos_nuevos?.allowHyphens
+                        );
+                        const arrDias = formatDiasParaSheets(tiraRaw, { allowHyphens });
 
                         // Si viene rango específico (ej. días 1..14)
                         if (item.datos_nuevos?.dia_inicio && item.datos_nuevos?.dia_fin) {
@@ -782,5 +806,6 @@ module.exports = {
     cleanDni,
     cleanCuil,
     formatToSheetDate,
-    colToLetter
+    colToLetter,
+    formatDiasParaSheets
 };

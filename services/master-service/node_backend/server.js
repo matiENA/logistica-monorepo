@@ -37,6 +37,7 @@ const createDiagramasSyncRouter = require('./routes/diagramasSync');
 const createKmSyncRouter = require('./routes/kmSync');
 const createViewsRouter = require('./routes/views');
 const createSyncQueueRouter = require('./routes/syncQueue');
+const createOtsSyncRouter = require('./routes/otsSync');
 
 // ==============================================================
 // 🚀 EXPRESS + SOCKET.IO
@@ -410,6 +411,7 @@ app.use('/api/movimientos', createMovimientosRouter(cacheDatosGlobales, io, ioDa
 // Sincronizadores Autónomos de Particiones (Sheets -> Supabase)
 app.use('/api/sync/diagramas', createDiagramasSyncRouter(cacheDatosGlobales, io, ioDash));
 app.use('/api/sync/km', createKmSyncRouter(cacheDatosGlobales, io, ioDash));
+app.use('/api/sync/ots', createOtsSyncRouter());
 
 // Endpoint unificado /sync o /api/sync para UptimeRobot, webhooks o llamadas HTTP
 app.all(['/sync', '/api/sync', '/api/sync/all'], async (req, res) => {
