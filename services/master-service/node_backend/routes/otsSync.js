@@ -4,7 +4,15 @@
  */
 
 const express = require('express');
-const { runPipeline } = require('../scripts/sync_ots_pipeline');
+
+// Lazy-loader para evitar fallos de inicialización al arrancar el servidor
+let syncOtsPipeline = null;
+function getRunPipeline() {
+  if (!syncOtsPipeline) {
+    syncOtsPipeline = require('../scripts/sync_ots_pipeline');
+  }
+  return syncOtsPipeline.runPipeline;
+}
 
 module.exports = function createOtsSyncRouter() {
   const router = express.Router();
@@ -43,6 +51,7 @@ module.exports = function createOtsSyncRouter() {
     };
 
     try {
+      const runPipeline = getRunPipeline();
       const result = await runPipeline({
         week: week || req.query.week,
         dryRun: dryRun !== undefined ? Boolean(dryRun) : req.query.dryRun === 'true',
