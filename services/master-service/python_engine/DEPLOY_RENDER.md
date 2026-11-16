@@ -60,8 +60,7 @@ En la pestaña **Environment** de tu servicio en Render, agrega las siguientes v
 | `TIMEOUT_CONF_VIAJE` *(opcional)* | `600` | Timeout para CONF. DE VIAJE en segundos (10 min) |
 | `SOCKET_TIMEOUT` *(opcional)* | `600` | Timeout de sockets de red/Google Sheets API (10 min) |
 | `INTERVAL_POLL_VACIO_MINUTES` *(opcional)* | `15` | Minutos de intervalo entre ejecuciones de Polling de Vacío |
-| `DISPO_BATCH_SIZE` *(opcional)* | `30` | Tamaño de lote de operaciones repeatCell en pintarDisponibilidad (evita error 503) |
-| `DRIVE_FOLDER_REPORTES_ID` *(opcional)* | `18E_m8Ye5dp5xv2oCmYhEm8Ts7eeA7y8-` | ID de la carpeta compartida de Google Drive para estados |
+| `DRIVE_FOLDER_REPORTES_ID` *(opcional)* | `18E_m8Ye5dp5xv2oCmYhEm8Ts7eeA7y8-` | ID de la carpeta compartida de Google Drive para estados de vacío |
 | `TELEGRAM_BOT_TOKEN` *(opcional)* | `123456:ABC...` | Token del bot provisto por `@BotFather` para recibir alertas |
 | `TELEGRAM_CHAT_ID` *(opcional)* | `123456789` | ID de usuario, grupo o canal donde enviar las notificaciones |
 | `TELEGRAM_NOTIFY_ALL` *(opcional)* | `false` | `false` = alerta sólo en fallos; `true` = notifica cada tarea |

@@ -151,14 +151,10 @@ def update_operativas_configs(apply_changes: bool):
 # ==============================================================================
 ENV_FILES = [
     DOCS / "logistica-monorepo" / "services" / "master-service" / "node_backend" / ".env",
-    DOCS / "logistica-monorepo" / "apps" / "panol" / ".env",
-    DOCS / "logistica-monorepo" / "apps" / "panol" / "backend" / ".env",
     DOCS / "eor_v1" / ".env",
     DOCS / "server_local" / ".env",
     DOCS / "server_local" / "extractor_local" / ".env",
     DOCS / "server_local" / "sheet-render" / ".env",
-    DOCS / "panol" / ".env",
-    DOCS / "panol" / "backend" / ".env",
     DOCS / "dash" / "backend" / ".env",
     DESKTOP / "jAVI" / "diagramas" / "diagramasnode" / ".env"
 ]
@@ -219,7 +215,6 @@ RENDER_FILES = [
     DOCS / "eor_v1" / "deploy" / "render.yaml",
     DOCS / "server_local" / "operativas_diarias" / "render.yaml",
     DOCS / "server_local" / "sheet-render" / "render.yaml",
-    DOCS / "panol" / "render.yaml",
     DOCS / "dash" / "render.yaml",
     DESKTOP / "jAVI" / "diagramas" / "diagramasnode" / "render.yaml"
 ]

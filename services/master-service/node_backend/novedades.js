@@ -281,6 +281,28 @@ async function resolveCreadoPorId(creadoPorIdRaw, creadorNombreRaw) {
     return null;
 }
 
+function isReadOnlyRole(rol) {
+    if (!rol) return false;
+    const r = String(rol).trim().toLowerCase();
+    return ['lector', 'viewer', 'consulta', 'readonly', 'solo_lectura'].includes(r);
+}
+
+async function checkUserReadOnly(req, payload = {}) {
+    const headerRole = req.headers['x-user-role'];
+    if (isReadOnlyRole(headerRole)) return true;
+
+    const userId = req.headers['x-user-id'] || payload?.creado_por_id;
+    if (userId && isValidUuid(userId)) {
+        try {
+            const { rows } = await db.query('SELECT rol FROM public.dash WHERE id = $1::uuid LIMIT 1', [String(userId).trim()]);
+            if (rows.length > 0 && isReadOnlyRole(rows[0].rol)) {
+                return true;
+            }
+        } catch {}
+    }
+    return false;
+}
+
 async function resolveChoferYUnidad(payload, cacheDatosGlobales) {
     let choferId = null;
     let choferUnidadFallback = null;
@@ -634,6 +656,10 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
 
             const { action, id_novedad, payload = {} } = req.body || {};
 
+            if (await checkUserReadOnly(req, payload)) {
+                return res.status(403).json({ success: false, error: 'Usuario sin permisos de edición (modo solo lectura).' });
+            }
+
             if (action === 'nueva') {
                 const tipoObj = await resolveTipoNovedad(payload);
                 if (!tipoObj || !tipoObj.id) {
@@ -951,6 +977,10 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                 return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
             }
 
+            if (await checkUserReadOnly(req, req.body)) {
+                return res.status(403).json({ success: false, error: 'Usuario sin permisos de edición (modo solo lectura).' });
+            }
+
             const { id_novedad, usuario, accion } = req.body || {};
             const idClean = String(id_novedad ?? '').trim();
             const uNorm = String(usuario ?? '').trim().toUpperCase();
@@ -1010,6 +1040,10 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
         try {
             if (!db.isConfigured()) {
                 return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
+            }
+
+            if (await checkUserReadOnly(req, req.body)) {
+                return res.status(403).json({ success: false, error: 'Usuario sin permisos de edición (modo solo lectura).' });
             }
 
             const { id_novedad, terminal, terminal_id } = req.body || {};

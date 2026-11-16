@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ArrowLeft, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
-import { FlotaItem, Novedad, TipoNovedadItem } from '../../types/dash';
+import { FlotaItem, Novedad, TipoNovedadItem, puedeEditar } from '../../types/dash';
 import { api } from '../../services/api';
 import { useDashStore } from '../../store/useDashStore';
 import { formatearPatente, normalizarPatenteRaw, PatenteMercosur } from '../common/PatenteMercosur';
@@ -191,6 +191,11 @@ export const NoveltyModal: React.FC<NoveltyModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!puedeEditar(sesion)) {
+      toast.error('Su usuario no tiene permisos para crear o editar novedades (modo solo lectura).');
+      return;
+    }
 
     if (tipoItemActual.requiere_fecha_objetivo && (!fechaObjetivo || fechaObjetivo.trim() === '')) {
       toast.warning(`Seleccione una Fecha Objetivo / Vencimiento para "${tipoItemActual.titulo}"`);

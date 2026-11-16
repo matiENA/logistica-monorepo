@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDashStore } from '../../store/useDashStore';
-import { FlotaItem, Novedad } from '../../types/dash';
+import { FlotaItem, Novedad, puedeEditar } from '../../types/dash';
 import { api } from '../../services/api';
 import { PatenteMercosur } from '../common/PatenteMercosur';
 
@@ -32,7 +32,7 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  if (modoCartelera) return null;
+  if (modoCartelera || !puedeEditar(sesion)) return null;
 
   const handleToggle = () => {
     if (!sesion || !sesion.usuario) {

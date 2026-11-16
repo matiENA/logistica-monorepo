@@ -1,11 +1,9 @@
 # 🚀 Logística Monorepo (Servicio Maestro Unificado en Render)
 
-Monorepo centralizado para toda la infraestructura operativa, de sincronización y de visualización logística. Unifica el motor de **Hot RAM Cache (Node.js)**, **Sincronizaciones Operativas & Schedulers 24/7 (Python)** y los frontends (**DASH**, **Diagramas EOR** y **Pañol**) en una arquitectura orquestada y sincronizada con Render.
+Monorepo centralizado para toda la infraestructura operativa, de sincronización y de visualización logística. Unifica el motor de **Hot RAM Cache (Node.js)**, **Sincronizaciones Operativas & Schedulers 24/7 (Python)** y los frontends (**DASH** y **Diagramas EOR**) en una arquitectura orquestada y sincronizada con Render.
 
 - **Servicio Maestro (Web Service Multi-Runtime):**  
   👉 **`srv-db4302u0tbcc73ctq4ng`** (`diaria-operativas` / `https://diaria-operativas.onrender.com`)
-- **Servicio Satélite Pañol (Web Service Node.js):**  
-  👉 **`srv-d9adns3eo5us739q897g`** (`panol-monolith-service` / `https://panolnd.onrender.com`)
 
 ---
 
@@ -27,16 +25,11 @@ logistica-monorepo/
 ├── apps/
 │   ├── dash-frontend/                   <-- React 19 + Vite (DASH Kanban y Tablero de Flota)
 │   │   └── .env.production              (VITE_API_URL=https://diaria-operativas.onrender.com)
-│   ├── eor-frontend/                    <-- React + Vite (Diagramas EOR y Planificación Diaria)
-│   │   └── .env.production              (VITE_API_URL=https://diaria-operativas.onrender.com)
-│   └── panol/                           <-- Backend Monolito y Frontend Vite de Pañol y Mantenimiento
-│       ├── index.js                     (Express + PostgreSQL + Google Sheets para Pañol)
-│       └── frontend/                    (Static site conectado a https://panolnd.onrender.com)
+│   └── eor-frontend/                    <-- React + Vite (Diagramas EOR y Planificación Diaria)
+│       └── .env.production              (VITE_API_URL=https://diaria-operativas.onrender.com)
 │
 └── scripts/                             <-- Herramientas de desarrollo local y healthcheck
     ├── dev-backend.bat                  (Lanza localmente Node.js :3005 + Python :8000 en modo seguro)
-    ├── dev-panol.bat                    (Lanza backend :5000 y frontend :5173 de Pañol localmente)
-    ├── dev-backend-panol.bat            (Lanza Backend Maestro + Pañol en conjunto sin conflictos)
     ├── dev-dash.bat                     (Lanza frontend DASH en modo desarrollo)
     ├── dev-eor.bat                      (Lanza frontend EOR en modo desarrollo)
     └── test-health.ps1                  (Sonda de verificación de endpoints en producción)
@@ -130,22 +123,19 @@ flowchart TD
 
 ---
 
-## 🔮 Backlog de Arquitectura & Futuras Implementaciones
-
-### Propagación de Eventos de Flota desde Pañol hacia DASH (`unidad_cambiada`)
-- **Estado Actual:** Los acoples/desacoples y órdenes de trabajo (OTs) gestionadas en Pañol **no son la fuente canónica de verdad (Source of Truth)** para la asignación y movimiento operativo de la flota. La fuente canónica de verdad reside en el flujo maestro de operaciones (`public.movimientos` y `public.unidades` en Supabase/PostgreSQL). Por ende, DASH mantiene la recarga del catálogo de flota bajo demanda al interactuar con modales o selectores.
-- **Posible Implementación Futura:**  
-  Si en el futuro se requiriera reflejar en caliente estados de taller o acoples generados en Pañol en el tablero de DASH en tiempo real sin intervención del usuario:
-  1. El backend de Pañol o el gateway maestro emitirá un evento granular `ioDash.emit('unidad_cambiada', { unidad_id })` a través del WebSocket `/dash`.
-  2. Siguiendo el patrón canónico **"Listen on Table, Fetch from View"**, el hook [`useDash`](file:///c:/Users/Matias%20Rodriguez/Documents/logistica-monorepo/apps/dash-frontend/src/hooks/useDash.ts) interceptará el evento, solicitará únicamente esa fila a `public.view_dash_flota` (`GET /api/views/flota?unidad_id=...` o `.eq('unidad_id', id)`) con debounce de 300 ms, y reemplazará solo esa unidad en el estado local sin hacer polling ni re-consultar toda la flota.
-
----
-
 ## 📦 Ubicación de Directorios Originales (Movidos al Vault)
 
-Para mantener el espacio de trabajo limpio y prevenir ejecuciones accidentales en versiones desactualizadas, los proyectos y carpetas de código originales previos a la unificación monorepo fueron **archivados y resguardados en el Vault**:
+Para mantener el espacio de trabajo limpio y prevenir ejecuciones accidentales en versiones desactualizadas, los proyectos retirados del monorepo o previos a la unificación fueron **archivados y resguardados en el Vault**:
 
-📂 **Ruta de Resguardo:**  
+📂 **Retiro de Pañol (2026-11-16):**
+`C:\Users\Matias Rodriguez\Documents\VAULT\panol_2026-11-16\`
+- `frontend/` ➔ Frontend Vite/React (`apps/panol/frontend`).
+- `backend/` ➔ Backend Express y monolito (`apps/panol`).
+- `database_backup/` ➔ Schema SQL completo (`schema_panol_2026-11-16.sql`), volcado de datos (`seed_panol_data_2026-11-16.sql` + `data_panol_2026-11-16.json`) e historial SQL.
+- `scripts_monorepo/` ➔ Scripts retirados de `scripts/`, `services/master-service/node_backend/scripts/` y `scratch/`.
+- `obsidian_base/` ➔ Vaults de Obsidian `base` y nota `panol.md`.
+
+📂 **Archivo Pre-Monorepo (2026-11-03):**
 `C:\Users\Matias Rodriguez\Documents\VAULT\archive_pre_monorepo_20261103\`
 
 ### Contenido archivado en el Vault:

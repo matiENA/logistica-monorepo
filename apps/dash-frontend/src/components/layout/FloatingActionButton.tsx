@@ -1,6 +1,7 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
 import { useDashStore } from '../../store/useDashStore';
+import { puedeEditar } from '../../types/dash';
 
 /**
  * @deprecated Reubicado a Header.tsx como botón contiguo a las pestañas
@@ -9,11 +10,15 @@ import { useDashStore } from '../../store/useDashStore';
 export const FloatingActionButton: React.FC = () => {
   const { modoCartelera, setModalNuevaAbierto, setNovedadEnEdicion, sesion } = useDashStore();
 
-  if (modoCartelera) return null;
+  if (modoCartelera || !puedeEditar(sesion)) return null;
 
   const handleClick = () => {
     if (!sesion || !sesion.usuario) {
       alert('Debe iniciar sesión para reportar una novedad.');
+      return;
+    }
+    if (!puedeEditar(sesion)) {
+      alert('Su usuario no tiene permisos para crear novedades (modo solo lectura).');
       return;
     }
     setNovedadEnEdicion(null);

@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Truck, AlertTriangle, ArrowRight } from 'lucide-react';
+import { toast } from 'sonner';
 import { useDashStore } from '../../store/useDashStore';
 import { api } from '../../services/api';
+import { puedeEditar } from '../../types/dash';
 
 interface LoginWallProps {
   onLoginExitoso: () => void;
@@ -27,6 +29,9 @@ export const LoginWall: React.FC<LoginWallProps> = ({ onLoginExitoso }) => {
     try {
       const userSesion = await api.login(usuario.trim().toUpperCase(), password.trim());
       setSesion(userSesion);
+      if (!puedeEditar(userSesion)) {
+        toast.info(`Bienvenido ${userSesion.usuario} (Acceso en modo solo lectura)`);
+      }
       onLoginExitoso();
     } catch (err: any) {
       setError(err.message || 'Usuario o contraseña incorrectos');

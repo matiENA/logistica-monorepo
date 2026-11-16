@@ -8,6 +8,7 @@ import { ServiceDropOverlay } from './components/kanban/ServiceDropOverlay';
 import { NoveltyModal } from './components/modals/NoveltyModal';
 import { LoginWall } from './components/layout/LoginWall';
 import { Toaster, toast } from 'sonner';
+import { puedeEditar } from './types/dash';
 
 export const App: React.FC = () => {
   const {
@@ -45,6 +46,10 @@ export const App: React.FC = () => {
   }, [modoCartelera]);
 
   const handleResolverConServicio = async (id: number | string, nuevoServicio?: string) => {
+    if (!puedeEditar(sesion)) {
+      toast.error('Su usuario no tiene permisos para resolver novedades (modo solo lectura).');
+      return;
+    }
     try {
       await resolverNovedad(id, nuevoServicio);
       if (nuevoServicio) {

@@ -19,7 +19,7 @@ module.exports = function createAuthRouter() {
             if (db.isConfigured()) {
                 try {
                     const { rows: rowsDash } = await db.query(
-                        'SELECT id, nombre AS usuario, \'operador\' AS rol FROM public.dash WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) AND "contraseña" = $2 LIMIT 1',
+                        'SELECT id, nombre AS usuario, COALESCE(rol, \'operador\') AS rol FROM public.dash WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) AND "contraseña" = $2 LIMIT 1',
                         [uClean, pClean]
                     );
                     if (rowsDash && rowsDash.length > 0) {
@@ -29,7 +29,7 @@ module.exports = function createAuthRouter() {
                             id: user.id,
                             token: 'auth_' + user.id + '_' + Date.now(), 
                             usuario: String(user.usuario).toUpperCase(), 
-                            rol: user.rol,
+                            rol: user.rol || 'operador',
                             fuente: 'POSTGRES_DASH'
                         });
                     }
@@ -59,7 +59,7 @@ module.exports = function createAuthRouter() {
             try {
                 const { data: userDash } = await supabase
                     .from('dash')
-                    .select('id, nombre')
+                    .select('id, nombre, rol')
                     .ilike('nombre', uClean)
                     .eq('contraseña', pClean)
                     .maybeSingle();
@@ -70,7 +70,7 @@ module.exports = function createAuthRouter() {
                         id: userDash.id,
                         token: 'auth_' + userDash.id + '_' + Date.now(), 
                         usuario: String(userDash.nombre).toUpperCase(), 
-                        rol: 'operador',
+                        rol: userDash.rol || 'operador',
                         fuente: 'SUPABASE_REST_DASH'
                     });
                 }

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Pencil, Clock, Check, X, User } from 'lucide-react';
-import { Novedad, Usuario } from '../../types/dash';
+import { Novedad, Usuario, puedeEditar } from '../../types/dash';
 import { useDashStore } from '../../store/useDashStore';
 import { PatenteMercosur } from '../common/PatenteMercosur';
 import { DriverNameBadge } from '../common/DriverNameBadge';
@@ -67,7 +67,8 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
   onQuitarMencion,
   onRequestTerminalMenu
 }) => {
-  const { modoCartelera, setActiveDragCardId, terminales, servicios } = useDashStore();
+  const { modoCartelera, setActiveDragCardId, terminales, servicios, sesion } = useDashStore();
+  const userCanEdit = puedeEditar(sesion);
   const [fadingOut, setFadingOut] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
@@ -108,7 +109,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
   };
 
   const handleResolverClick = () => {
-    if (modoCartelera || novedad.resuelto) return;
+    if (modoCartelera || novedad.resuelto || !userCanEdit) return;
     setFadingOut(true);
     setTimeout(() => {
       onResolver(novedad.id);
@@ -213,9 +214,9 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
       <article
         ref={cardRef}
         id={`card-${novedad.id}`}
-        draggable={!modoCartelera}
+        draggable={!modoCartelera && userCanEdit}
         onDragStart={(e) => {
-          if (modoCartelera) return;
+          if (modoCartelera || !userCanEdit) return;
           e.dataTransfer.setData('text/plain', String(novedad.id));
           e.dataTransfer.effectAllowed = 'move';
           setTimeout(() => {
@@ -282,7 +283,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
               />
             </div>
 
-            {!modoCartelera && (
+            {!modoCartelera && userCanEdit && (
               <div className="flex items-center gap-1 shrink-0 -mt-1 -mr-1">
                 {onEditar && (
                   <button
@@ -339,26 +340,35 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
             {/* Selector Terminal (Exclusivo Libres) */}
             <div className="relative">
               {novedad.terminal ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (modoCartelera) return;
-                    if (onRequestTerminalMenu) {
-                      onRequestTerminalMenu(novedad, e.currentTarget);
-                    } else {
-                      setDropTerminalAbierto(!dropTerminalAbierto);
-                    }
-                  }}
-                  className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide transition-transform active:scale-95 cursor-pointer flex items-center gap-1 shadow-xs shrink-0 whitespace-nowrap focus-visible:ring-2 focus-visible:ring-black focus-visible:outline-hidden"
-                  style={{ backgroundColor: termColor?.bg || '#DD7E6B', color: termColor?.text || '#000000' }}
-                  title="Cambiar terminal asignada"
-                  aria-label={`Terminal asignada: ${novedad.terminal}. Clic para cambiar.`}
-                >
-                  {novedad.terminal}
-                </button>
+                userCanEdit && !modoCartelera ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onRequestTerminalMenu) {
+                        onRequestTerminalMenu(novedad, e.currentTarget);
+                      } else {
+                        setDropTerminalAbierto(!dropTerminalAbierto);
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide transition-transform active:scale-95 cursor-pointer flex items-center gap-1 shadow-xs shrink-0 whitespace-nowrap focus-visible:ring-2 focus-visible:ring-black focus-visible:outline-hidden"
+                    style={{ backgroundColor: termColor?.bg || '#DD7E6B', color: termColor?.text || '#000000' }}
+                    title="Cambiar terminal asignada"
+                    aria-label={`Terminal asignada: ${novedad.terminal}. Clic para cambiar.`}
+                  >
+                    {novedad.terminal}
+                  </button>
+                ) : (
+                  <span
+                    className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide flex items-center gap-1 shadow-xs shrink-0 whitespace-nowrap"
+                    style={{ backgroundColor: termColor?.bg || '#DD7E6B', color: termColor?.text || '#000000' }}
+                    title={`Terminal asignada: ${novedad.terminal}`}
+                  >
+                    {novedad.terminal}
+                  </span>
+                )
               ) : (
-                !modoCartelera && (
+                !modoCartelera && userCanEdit && (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -443,7 +453,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
             </span>
 
             {/* Menciones inline */}
-            {!modoCartelera && (
+            {!modoCartelera && userCanEdit && (
               <div className="relative inline-block mention-input-wrapper shrink-0" onClick={(e) => e.stopPropagation()}>
                 <input
                   type="text"
@@ -485,7 +495,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
                 className="bg-black/25 text-black px-1.5 py-0.5 rounded font-black uppercase flex items-center gap-1 shrink-0 text-[9px]"
               >
                 @{m}
-                {!modoCartelera && onQuitarMencion && (
+                {!modoCartelera && userCanEdit && onQuitarMencion && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -585,17 +595,27 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
         <div className="flex items-center gap-1.5 flex-wrap text-xs">
           {/* Dropdown Servicio */}
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => !modoCartelera && setDropServicioAbierto(!dropServicioAbierto)}
-              className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide transition-transform active:scale-95 cursor-pointer flex items-center gap-1 shadow-xs"
-              style={{ backgroundColor: srvCfg.bg, color: srvCfg.text }}
-              title="Cambiar Servicio de Chofer"
-            >
-              {novedad.srv && novedad.srv !== 'S/A' ? novedad.srv : 'S/A'}
-            </button>
+            {userCanEdit && !modoCartelera ? (
+              <button
+                type="button"
+                onClick={() => setDropServicioAbierto(!dropServicioAbierto)}
+                className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide transition-transform active:scale-95 cursor-pointer flex items-center gap-1 shadow-xs"
+                style={{ backgroundColor: srvCfg.bg, color: srvCfg.text }}
+                title="Cambiar Servicio de Chofer"
+              >
+                {novedad.srv && novedad.srv !== 'S/A' ? novedad.srv : 'S/A'}
+              </button>
+            ) : (
+              <span
+                className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide flex items-center gap-1 shadow-xs"
+                style={{ backgroundColor: srvCfg.bg, color: srvCfg.text }}
+                title={`Servicio: ${novedad.srv || 'S/A'}`}
+              >
+                {novedad.srv && novedad.srv !== 'S/A' ? novedad.srv : 'S/A'}
+              </span>
+            )}
 
-            {dropServicioAbierto && !modoCartelera && (
+            {dropServicioAbierto && !modoCartelera && userCanEdit && (
               <div className="absolute left-0 bottom-full mb-1 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl p-1.5 flex flex-col gap-1 w-36 max-h-56 overflow-y-auto custom-scrollbar animate-in fade-in duration-100">
                 <div className="px-2 py-1 text-[8px] font-black uppercase text-slate-400 border-b border-slate-100 dark:border-slate-800 tracking-wider">
                   Servicio Chofer
@@ -665,7 +685,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
         </span>
 
         {/* Input Menciones Inline */}
-        {!modoCartelera && (
+        {!modoCartelera && userCanEdit && (
           <div className="relative inline-block mention-input-wrapper">
             <input
               type="text"
@@ -706,7 +726,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
             className="bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black uppercase flex items-center gap-1"
           >
             @{m}
-            {!modoCartelera && onQuitarMencion && (
+            {!modoCartelera && userCanEdit && onQuitarMencion && (
               <button
                 onClick={() => onQuitarMencion(novedad.id, m)}
                 className="btn-mention-remove ml-1 hover:text-rose-500 transition-colors cursor-pointer inline-flex items-center"

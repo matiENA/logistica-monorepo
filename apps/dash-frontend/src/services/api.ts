@@ -1,4 +1,4 @@
-import { Novedad, FlotaItem, Usuario, RetornoItem, SesionUsuario, TerminalItem, ServicioChoferItem, TipoNovedadItem } from '../types/dash';
+import { Novedad, FlotaItem, Usuario, RetornoItem, SesionUsuario, TerminalItem, ServicioChoferItem, TipoNovedadItem, puedeEditar } from '../types/dash';
 
 const isLocal = typeof window !== 'undefined' && 
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -15,6 +15,19 @@ function resolveBackendUrl(url?: string): string {
 }
 
 const API_BASE = resolveBackendUrl((import.meta as any).env?.VITE_API_URL);
+
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('dash_user') : null;
+    if (raw) {
+      const sesion: SesionUsuario = JSON.parse(raw);
+      if (sesion.rol) headers['x-user-role'] = sesion.rol;
+      if (sesion.id) headers['x-user-id'] = sesion.id;
+    }
+  } catch {}
+  return headers;
+}
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController();
@@ -194,6 +207,12 @@ export const api = {
   },
 
   async despacharNovedad(body: { action: 'nueva' | 'editar' | 'resolver'; id_novedad?: number | string; payload?: any }) {
+    // Validar permisos de edición preventivamente
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('dash_user') : null;
+    if (rawUser && !puedeEditar(JSON.parse(rawUser))) {
+      throw new Error('Usuario sin permisos de edición (modo solo lectura).');
+    }
+
     // Sanitizar fechas vacías preventivamente
     if (body.payload) {
       if (body.payload.fecha_objetivo === '' || body.payload.fecha_objetivo === undefined) {
@@ -206,7 +225,7 @@ export const api = {
 
     const res = await fetchWithTimeout(`${API_BASE}/api/novedades/actualizar`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify(body)
     });
 
@@ -222,9 +241,14 @@ export const api = {
   },
 
   async gestionarMencion(idNovedad: number | string, usuario: string, accion: 'agregar' | 'quitar') {
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('dash_user') : null;
+    if (rawUser && !puedeEditar(JSON.parse(rawUser))) {
+      throw new Error('Usuario sin permisos de edición (modo solo lectura).');
+    }
+
     const res = await fetchWithTimeout(`${API_BASE}/api/novedades/mencion`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ id_novedad: idNovedad, usuario, accion })
     });
     if (!res.ok) {
@@ -239,9 +263,14 @@ export const api = {
   },
 
   async asignarTerminal(idNovedad: number | string, terminal: string, terminal_id?: string | null) {
+    const rawUser = typeof window !== 'undefined' ? localStorage.getItem('dash_user') : null;
+    if (rawUser && !puedeEditar(JSON.parse(rawUser))) {
+      throw new Error('Usuario sin permisos de edición (modo solo lectura).');
+    }
+
     const res = await fetchWithTimeout(`${API_BASE}/api/novedades/terminal`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ id_novedad: idNovedad, terminal, terminal_id })
     });
     if (!res.ok) {

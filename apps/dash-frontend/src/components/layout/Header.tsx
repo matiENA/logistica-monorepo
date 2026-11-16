@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Sun, Moon, LayoutGrid, Archive, User, AtSign, Plus } from 'lucide-react';
 import { useDashStore } from '../../store/useDashStore';
-import { VistaTab } from '../../types/dash';
+import { VistaTab, puedeEditar } from '../../types/dash';
 import { AuthDropdown } from './AuthDropdown';
 
 export const Header: React.FC = () => {
@@ -42,9 +42,15 @@ export const Header: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const userCanEdit = puedeEditar(sesion);
+
   const handleCrearNovedad = () => {
     if (!sesion || !sesion.usuario) {
       alert('Debe iniciar sesión para reportar una novedad.');
+      return;
+    }
+    if (!userCanEdit) {
+      alert('Su usuario no tiene permisos para crear novedades (modo solo lectura).');
       return;
     }
     setNovedadEnEdicion(null);
@@ -88,17 +94,19 @@ export const Header: React.FC = () => {
               })}
             </div>
 
-            {/* Botón Principal Nueva Novedad (+) reubicado fuera de los contenedores */}
-            <button
-              id="btn-nueva-novedad-header"
-              onClick={handleCrearNovedad}
-              className="h-9 px-3.5 bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl shadow-sm shadow-indigo-600/30 flex items-center justify-center gap-1.5 font-extrabold text-xs active:scale-95 transition-all duration-200 border border-indigo-400/30 group cursor-pointer shrink-0"
-              title="Reportar nueva novedad"
-              aria-label="Reportar nueva novedad"
-            >
-              <Plus className="w-4 h-4 stroke-[2.5] group-hover:rotate-90 transition-transform duration-300" />
-              <span className="hidden sm:inline">Nueva</span>
-            </button>
+            {/* Botón Principal Nueva Novedad (+) solo para usuarios con permisos de edición */}
+            {userCanEdit && (
+              <button
+                id="btn-nueva-novedad-header"
+                onClick={handleCrearNovedad}
+                className="h-9 px-3.5 bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl shadow-sm shadow-indigo-600/30 flex items-center justify-center gap-1.5 font-extrabold text-xs active:scale-95 transition-all duration-200 border border-indigo-400/30 group cursor-pointer shrink-0"
+                title="Reportar nueva novedad"
+                aria-label="Reportar nueva novedad"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5] group-hover:rotate-90 transition-transform duration-300" />
+                <span className="hidden sm:inline">Nueva</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="w-20 hidden md:block"></div>

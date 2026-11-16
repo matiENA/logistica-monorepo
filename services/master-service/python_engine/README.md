@@ -193,7 +193,7 @@ En la instancia local de n8n, el workflow **`Operativas Integradas - Cordillera,
 | # | Tarea | Script | Frecuencia | Origen | Destino | Regla Principal |
 |---|---|---|---|---|---|---|
 | **1-3** | **Polling Vacío Unificado** | `poll_sync_vacio.py` | Cada 2m (Local) / 10m (Cloud) | Ruteos (Cols L, X, H) + Mes Anterior | Movimientos Mensual | Gatekeeper SHA-256 + 3 capas: Tracking, Vacío con bordes y Seguimiento celeste. |
-| **4** | **Pintar Disponibilidad** | `pintarDisponibilidad.js` | Diario 07:00 AM (IDE) / 06:00 AM (Render/n8n) | `base datos Uni QM` + Drive `pintardispo.json` | 33 cols `Dispo.` Movimientos | Semáforo: Rojo (<0 d), Azul (<=10 d), Base (#F5F7FA). Diffing O(1) con tracking dual (estadoPrevio vs estadoActual). Protege 37 cabeceras de servicio. |
+| **4** | **Pintar Disponibilidad** | `pintarDisponibilidad.js` | Diario 07:00 AM (IDE) / 06:00 AM (Render/n8n) | `base datos Uni QM` + `config.json` | 33 cols `Dispo.` Movimientos | Semáforo: Rojo (<0 d), Azul (<=10 d), Base (#F5F7FA). Motor robusto de 4 lotes enteros (700 ops/lote) con compresión vertical RLE (0% error 429/503). Protege 37 cabeceras de servicio. |
 | **5** | **Viajes Cordillera** | `main.py --seguridad-vial` | Cada 10m | Ruteos (Col L y destinos) | Pestaña `SEGURIDA VIAL` | Sincroniza 22 columnas ordenadas por viaje TD si destino coincide con Cordillera. |
 | **6** | **CONF. DE VIAJE** | `main.py --conf-viaje` | Cada 10m | `UTE Cordillera Noviembre 26` | `CONF. DE VIAJE NOVIEMBRE 26` | Copia filas desde fila 5 con símbolo ⚠️ en Col F (Marca Temp - Respuesta). |
 | **7** | **Limpieza VACÍO (Reset)**| `limpiar_vacio.py` | Disparo manual | Movimientos Mensual | Movimientos Mensual | Limpieza administrativa de bordes y notas ante correcciones humanas. Preserva Col H. |
@@ -263,48 +263,17 @@ Para permitir que el sistema funcione en **modo desatendido 24/7** tanto desde *
 ### Archivos Gestionados en Google Drive:
 1. `estado_operativo_octubre_2026.json`: Estado congelado del mes anterior (~37 KB). Contiene el último TD y estado de vacío de los 211 tractores de Octubre. Carga en **0.5 ms** (cero llamadas de red para Octubre).
 2. `estado_operativo_noviembre_2026.json`: Registro activo mensual de celdas con merge (~80 KB). Se actualiza periódicamente ante cambios.
-3. `pintardispo.json`: Índice de vencimientos de flota y tracking dual de disponibilidad (`estadoPrevio` vs `estadoActual`). Gestionado automáticamente por [`driveDispoManager.js`](./driveDispoManager.js) y [`core.js`](./core.js).
 
-### Estructura Canónica de Disponibilidad (`pintardispo.json`):
-- **`indice_patentes`:** Guarda el catálogo indexado de `base datos Uni QM` (790 patentes) con sus fechas parseadas, fecha mínima y hash criptográfico MD5.
-- **`filas`:** Tracking fila por fila de las 258 unidades diagramadas, conservando **ambos estados** (`estadoPrevio` y `estadoActual`) a lo largo de las 33 columnas de días (`'N'` Gris `#F5F7FA`, `'A'` Azul `#4285F4`, `'R'` Rojo `#FF4D4D`).
-- **Diffing O(1) & Lotes Adaptativos:** Si no hay cambios en vencimientos ni asignaciones, el Gatekeeper finaliza con **0 llamadas de escritura**. Si cambian patentes, actualiza únicamente esas filas en lotes de 30 operaciones con 350ms de pausa para evitar errores 503/500 de Google API.
+### Arquitectura Canónica de Disponibilidad (4 Lotes Enteros):
+- **Lectura Unificada:** Extrae en paralelo `base datos Uni QM` (vencimientos de flota) y `Mov.Unidades y Choferes` con resolución automática de duplicados.
+- **Compresión Vertical RLE:** Agrupa rangos continuos verticales de celdas con igual estado (Base #F5F7FA, Rojo #FF4D4D para vencidos <0d, y Azul #4285F4 para próximos a vencer <=10d).
+- **Protección de Cabeceras:** Omite y protege las 37 cabeceras de división de servicio (`LIVIANO`, `METANOL`, `CAMPO`, `GLP`, etc.).
+- **Empaquetado Atómico de 700 ops:** Ejecuta exactamente 4 peticiones HTTP `batchUpdate` (`tamanoLoteBatch = 700`), consumiendo solo 4 llamadas de cuota (lejos del límite de 60/min de Google API), completando en ~15 segundos sin riesgo de errores 429 ni 503.
 
-```json
-{
-  "metadata": {
-    "spreadsheetId": "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc",
-    "totalPatentes": 790,
-    "totalFilasDiagramadas": 258,
-    "alertas": { "rojos": 1572, "azules": 500, "normales": 6442 }
-  },
-  "indice_patentes": {
-    "AA266DV": {
-      "patente": "AA266DV",
-      "vencimientos": [1521514800000, 1531278000000],
-      "vencimientoMinStr": "20/03/2018",
-      "hash": "9791421309d365868eee8fc02bff44dd"
-    }
-  },
-  "filas": {
-    "4": {
-      "fila": 4,
-      "tractor": "AG674AQ",
-      "semi": "AB882WY",
-      "estadoPrevio": ["N", "N", "N", "..."],
-      "estadoActual": ["N", "N", "N", "..."],
-      "cambioDeVencimiento": false,
-      "cambioDeEstado": false,
-      "updatedAt": "2026-11-10T12:10:27.151Z"
-    }
-  }
-}
-```
-
-### Automatización Programada desde el IDE:
-Se encuentra configurada la tarea automática en `.gemini/config/sidecars/pintar-disponibilidad/sidecar.json`:
-- **Disparador:** Diario a las 07:00 AM (`CRON_TZ=America/Argentina/Buenos_Aires 0 7 * * *`).
-- **Ejecuta:** `node pintarDisponibilidad.js` de forma autónoma con reporte de verificación en chat.
+### Automatización Programada:
+- **IDE (.gemini):** Configurada en `.gemini/config/sidecars/pintar-disponibilidad/sidecar.json` (Diario 07:00 AM).
+- **n8n Local:** Workflow `Operativas Integradas - Cordillera, Movimientos & Disponibilidad (Cloud & Local)` (Diario 06:00 AM).
+- **Render Cloud:** Endpoint `POST /sync/dispo` y cron interno en `server_render.py` (Diario 06:00 AM).
 
 ### Estructura Canónica del Objeto JSON:
 - Almacena **únicamente las celdas con merge activo** (sin filas vacías redundantes).

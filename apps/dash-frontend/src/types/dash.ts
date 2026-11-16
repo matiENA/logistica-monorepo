@@ -144,3 +144,12 @@ export interface SesionUsuario {
   usuario: string;
   rol: string;
 }
+
+export const ROLES_READ_ONLY = ['lector', 'viewer', 'consulta', 'readonly', 'solo_lectura'] as const;
+
+export function puedeEditar(sesion?: SesionUsuario | null): boolean {
+  if (!sesion || !sesion.rol) return false;
+  const r = sesion.rol.trim().toLowerCase();
+  return !ROLES_READ_ONLY.includes(r as any);
+}
+

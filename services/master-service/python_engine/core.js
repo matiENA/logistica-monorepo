@@ -49,29 +49,32 @@ const KEY_FILE    = path.join(__dirname, 'ute-logistica-key.json');
 
 // ─── CARGA DE CONFIGURACIÓN DINÁMICA ──────────────────────────────────────────
 
+const porDefecto = {
+  spreadsheetId: '1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc',
+  planillasGuardadas: [],
+  colsDispo: [
+     29,  42,  55,  68,  81,  94, 107, 120, 133, 146, 159,  // Días 1-11
+    172, 185, 198, 211, 224, 237, 250, 263, 276, 289, 302,  // Días 12-22
+    315, 328, 341, 354, 367, 380, 393, 406, 415, 419, 428   // Días 23-31
+  ]
+};
+
 function cargarConfig() {
   const envSpreadsheetId = process.env.MES_MOVIMIENTOS_ID || process.env.ID_SHEET_MOVIMIENTOS;
-  const porDefecto = {
-    spreadsheetId: envSpreadsheetId || '1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc',
-    planillasGuardadas: [],
-    colsDispo: [
-       29,  42,  55,  68,  81,  94, 107, 120, 133, 146, 159,  // Días 1-11
-      172, 185, 198, 211, 224, 237, 250, 263, 276, 289, 302,  // Días 12-22
-      315, 328, 341, 354, 367, 380, 393, 406, 415, 419, 428   // Días 23-31
-    ]
-  };
+  const defaults = { ...porDefecto };
+  if (envSpreadsheetId) defaults.spreadsheetId = envSpreadsheetId;
 
   if (fs.existsSync(CONFIG_PATH)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      const cfg = { ...porDefecto, ...parsed };
+      const cfg = { ...defaults, ...parsed };
       if (envSpreadsheetId) cfg.spreadsheetId = envSpreadsheetId;
       return cfg;
     } catch (e) {
       console.warn('⚠️ Error al leer config.json, usando valores por defecto.');
     }
   }
-  return porDefecto;
+  return defaults;
 }
 
 function guardarConfig(cfg) {
@@ -144,6 +147,7 @@ function fechaBaseDesdeTitulo(titulo) {
 
 async function getSheetsInstance() {
   const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
+  google.options({ timeout: 300000 });
 
   // 1. Variable de entorno con JSON string o Base64 (estándar para Render Cloud)
   const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS_JSON;
@@ -448,15 +452,16 @@ async function ejecutarPintado(options = {}, onLog = null) {
   log(`Alertas calculadas: 🔴${bloquesAlertas.R.length} Rojos + 🔵${bloquesAlertas.A.length} Azules = ${alertCount} operaciones`, 'OK');
   log(`Total operaciones en Sheets: ${allRequests.length}`, 'INFO');
 
-  // 6. Enviar en lotes con reintento
-  const loteSize = DEFAULTS.tamanoLoteBatch;
-  const totalLotes = Math.ceil(allRequests.length / loteSize);
-  log(`Aplicando cambios en ${totalLotes} lotes...`, 'INFO');
+  // 6. Enviar en 4 lotes enteros con reintento y balanceo óptimo
+  const totalLotes = 4;
+  const loteSize = options.tamanoLoteBatch || Math.ceil(allRequests.length / totalLotes);
+  const cantLotesReales = Math.ceil(allRequests.length / loteSize);
+  log(`Aplicando ${allRequests.length} operaciones distribuidas en ${cantLotesReales} lotes enteros (~${loteSize} bloques/lote)...`, 'INFO');
 
   for (let i = 0; i < allRequests.length; i += loteSize) {
     const lote = allRequests.slice(i, i + loteSize);
     const nroLote = Math.floor(i / loteSize) + 1;
-    log(`Enviando lote ${nroLote}/${totalLotes} (${lote.length} bloques)...`, 'INFO');
+    log(`Enviando lote ${nroLote}/${cantLotesReales} (${lote.length} bloques)...`, 'INFO');
 
     let intento = 0;
     while (intento < 4) {
@@ -468,18 +473,20 @@ async function ejecutarPintado(options = {}, onLog = null) {
         break;
       } catch (err) {
         intento++;
-        const esErrorServidor = err.code === 500 || err.code === 503 || String(err.message).includes('backendError');
+        const esErrorServidor = err.code === 500 || err.code === 503 || err.code === 429 ||
+                                String(err.message).includes('backendError') ||
+                                String(err.message).includes('rateLimit');
         if (esErrorServidor && intento < 4) {
-          const espera = intento * 3000;
-          log(`Google API ocupada. Reintentando en ${espera/1000}s (intento ${intento}/4)...`, 'WARN');
+          const espera = intento * 3500;
+          log(`Google API ocupada (${err.code || 'transitoria'}). Reintentando en ${espera/1000}s (intento ${intento}/4)...`, 'WARN');
           await sleep(espera);
         } else {
           throw err;
         }
       }
     }
-    log(`Lote ${nroLote}/${totalLotes} aplicado con éxito`, 'OK');
-    if (nroLote < totalLotes) await sleep(400);
+    log(`Lote ${nroLote}/${cantLotesReales} aplicado con éxito`, 'OK');
+    if (nroLote < cantLotesReales) await sleep(800);
   }
 
   const dur = ((Date.now() - t0) / 1000).toFixed(2);
@@ -516,6 +523,7 @@ module.exports = {
   guardarConfig,
   inspeccionarPlanilla,
   ejecutarPintado,
+  getSheetsInstance,
   DEFAULTS,
   KEY_FILE
 };
