@@ -37,3 +37,5 @@ reportes/*.json
 last_sync_result.json
 last_sync_conf_viaje.json
 last_poll_state.json
+REGLAS_IMPRESION_BAJA_DIAGRAMA.md
+**/REGLAS_IMPRESION_BAJA_DIAGRAMA.md

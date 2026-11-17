@@ -725,6 +725,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         tipo_novedad_titulo: card?.tipo_novedad_titulo || tipoObj.titulo,
                         chofer_id: card?.chofer_id || choferId,
                         chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        unidad_id: card?.unidad_id || unidadId,
+                        n_ute: card?.n_ute || payload?.n_ute || '',
+                        tractor: card?.tractor || payload?.tractor || '',
                         fecha_objetivo: fechaObjClean || card?.fecha_objetivo,
                         detalle: detalleClean
                     });
@@ -745,10 +748,14 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                             tn.titulo AS tipo_titulo,
                             COALESCE(tn.imprime_nota_movimientos, false) AS prev_imprime_nota,
                             UPPER(TRIM(COALESCE(c_prev.nombre, ''))) AS prev_chofer_nombre,
+                            COALESCE(u_prev.n_ute, '') AS prev_n_ute,
+                            UPPER(TRIM(COALESCE(t_prev.patente, ''))) AS prev_tractor,
                             TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS prev_fecha_iso
                      FROM public.novedades n
                      JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
                      LEFT JOIN public.choferes c_prev ON n.chofer_id = c_prev.id
+                     LEFT JOIN public.unidades u_prev ON n.unidad_id = u_prev.id
+                     LEFT JOIN public.tractores t_prev ON u_prev.tractor_id = t_prev.id
                      WHERE n.id = $1::bigint
                      LIMIT 1`,
                     [idClean]
@@ -858,6 +865,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         id: Number(idClean),
                         chofer_id: actual.chofer_id,
                         chofer_nombre: actual.prev_chofer_nombre,
+                        unidad_id: actual.unidad_id,
+                        n_ute: actual.prev_n_ute || '',
+                        tractor: actual.prev_tractor || '',
                         fecha_objetivo: actual.prev_fecha_iso
                     });
                 } else if (prevImprimia && nuevoImprime && targetFechaObjetivo < actual.prev_fecha_iso) {
@@ -868,6 +878,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                             id: null,
                             chofer_id: actual.chofer_id,
                             chofer_nombre: actual.prev_chofer_nombre,
+                            unidad_id: actual.unidad_id,
+                            n_ute: actual.prev_n_ute || '',
+                            tractor: actual.prev_tractor || '',
                             desde_fecha: desdeRecorte,
                             fecha_objetivo: actual.prev_fecha_iso
                         });
@@ -884,6 +897,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         tipo_novedad_titulo: card?.tipo_novedad_titulo || targetTipoTitulo,
                         chofer_id: targetChoferId,
                         chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        unidad_id: card?.unidad_id || targetUnidadId,
+                        n_ute: card?.n_ute || actual.prev_n_ute || '',
+                        tractor: card?.tractor || actual.prev_tractor || '',
                         fecha_objetivo: targetFechaObjetivo,
                         detalle: targetDetalle
                     });
@@ -946,6 +962,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         id: rowUpdated.id,
                         chofer_id: rowUpdated.chofer_id,
                         chofer_nombre: card?.chofer_nombre || card?.nom || '',
+                        unidad_id: card?.unidad_id || rowUpdated.unidad_id,
+                        n_ute: card?.n_ute || '',
+                        tractor: card?.tractor || '',
                         fecha_objetivo: rowUpdated.fecha_objetivo_iso
                     });
                 }

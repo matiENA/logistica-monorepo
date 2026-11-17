@@ -529,6 +529,80 @@ async function prefetchColumnsBatch(sheetId, tabName, colLetters, accessToken) {
     }
 }
 
+const unitsRowMapCache = new Map();
+
+/**
+ * Escanea el catálogo de unidades de las columnas A..F (filas 1..350)
+ * para mapear UTE y Tractor a su fila física 1-based en la planilla Movimientos.
+ */
+async function getUnitsRowMap(sheetId, tabName, accessToken) {
+    const cacheKey = `${sheetId}:::${tabName}`;
+    const cached = unitsRowMapCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.data;
+    }
+
+    const mapUteToRow = new Map();
+    const mapTractorToRow = new Map();
+    const rangeEnc = encodeURIComponent(`'${tabName}'!A1:F350`);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${rangeEnc}`;
+
+    try {
+        const res = await fetchWithRetry(url, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        }, 25000, 2);
+
+        if (res && res.ok) {
+            const data = await res.json();
+            const rows = data.values || [];
+            rows.forEach((r, idx) => {
+                const rowNum = 1 + idx;
+                const uteRaw = r && r[2] ? String(r[2]).trim() : '';
+                const tracRaw = r && r[4] ? String(r[4]).trim() : '';
+                const semiRaw = r && r[5] ? String(r[5]).trim() : '';
+
+                if (uteRaw) {
+                    const cleanU = uteRaw.toUpperCase().replace(/\s+/g, '');
+                    mapUteToRow.set(cleanU, rowNum);
+                    const numOnly = cleanU.replace(/^0+/, '');
+                    if (numOnly) mapUteToRow.set(numOnly, rowNum);
+                }
+                if (tracRaw) {
+                    const cleanT = tracRaw.toUpperCase().replace(/[\s\-_.]/g, '');
+                    mapTractorToRow.set(cleanT, rowNum);
+                }
+                if (semiRaw) {
+                    const cleanS = semiRaw.toUpperCase().replace(/[\s\-_.]/g, '');
+                    mapTractorToRow.set(cleanS, rowNum);
+                }
+            });
+        }
+    } catch (e) {
+        console.warn(`⚠️ [Hover Bajas Sync] Error obteniendo mapeo de unidades en [${tabName}]:`, e.message);
+    }
+
+    const result = { mapUteToRow, mapTractorToRow };
+    unitsRowMapCache.set(cacheKey, {
+        data: result,
+        expiresAt: Date.now() + 10 * 60 * 1000 // 10 min TTL
+    });
+    return result;
+}
+
+/**
+ * Compara si el texto de una celda coincide con el nombre de un chofer buscado.
+ * Insensible a acentos, signos de puntuación y espacios.
+ */
+function isDriverMatch(cellVal, normChofer) {
+    if (!cellVal || !normChofer) return false;
+    const normCell = normalizeText(cellVal);
+    if (!normCell) return false;
+    if (normChofer === normCell) return true;
+    if (normChofer.length >= 6 && normCell.includes(normChofer)) return true;
+    if (normCell.length >= 6 && normChofer.includes(normCell)) return true;
+    return false;
+}
+
 /**
  * Busca estrictamente al chofer en los valores de la columna Chofer del día (filas 3..250, 1-based)
  * Regla operativa estricta: SIN fallback a tractor.
@@ -536,16 +610,8 @@ async function prefetchColumnsBatch(sheetId, tabName, colLetters, accessToken) {
 function findDriverRowInColValues(colVals, normChofer) {
     if (!normChofer || !Array.isArray(colVals)) return null;
     for (let r = 2; r < colVals.length; r++) {
-        const cellVal = colVals[r];
-        if (cellVal && cellVal.length >= 3) {
-            const normCell = normalizeText(cellVal);
-            if (
-                normChofer === normCell ||
-                (normChofer.length >= 6 && normCell.includes(normChofer)) ||
-                (normCell.length >= 6 && normChofer.includes(normCell))
-            ) {
-                return r + 1; // 1-based row index
-            }
+        if (isDriverMatch(colVals[r], normChofer)) {
+            return r + 1; // 1-based row index
         }
     }
     return null;
@@ -568,6 +634,9 @@ async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId
                 n.id,
                 n.chofer_id,
                 UPPER(TRIM(COALESCE(c.nombre, ''))) AS chofer_nombre,
+                n.unidad_id,
+                COALESCE(u.n_ute, '') AS n_ute,
+                UPPER(TRIM(COALESCE(t.patente, ''))) AS tractor,
                 n.tipo_novedad_id,
                 tn.codigo AS tipo_novedad,
                 tn.titulo AS tipo_novedad_titulo,
@@ -578,6 +647,8 @@ async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId
              FROM public.novedades n
              JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
              LEFT JOIN public.choferes c ON n.chofer_id = c.id
+             LEFT JOIN public.unidades u ON n.unidad_id = u.id
+             LEFT JOIN public.tractores t ON u.tractor_id = t.id
              WHERE tn.imprime_nota_movimientos = true
                AND n.resuelto = false
                AND n.chofer_id IS NOT NULL
@@ -801,6 +872,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
 
                 const prevDay = prevTrack?.dias?.get(dateStr);
                 const alreadySynced = Boolean(
+                    !isReconciler &&
                     !forceRefresh &&
                     !noteChanged &&
                     prevDay &&
@@ -871,25 +943,121 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
             const { nov, novKey, choferNom, normChofer, fObjStr, noteText, daysForNov } = item;
             const diasMap = new Map();
 
+            // Atributos de unidad para indexación física en Movimientos
+            const cleanUteNov = nov.n_ute ? String(nov.n_ute).trim().toUpperCase().replace(/\s+/g, '') : '';
+            const cleanTracNov = nov.tractor ? String(nov.tractor).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
+
             for (const dInfo of daysForNov) {
                 if (dInfo.alreadySynced && dInfo.prevDay) {
                     diasMap.set(dInfo.dateStr, dInfo.prevDay);
                     continue;
                 }
 
-                const colVals = columnCache.get(`${dInfo.sheetId}_${dInfo.tabName}_${dInfo.colLetter}`) || [];
-                const rowFound1Based = findDriverRowInColValues(colVals, normChofer);
+                const { mapUteToRow, mapTractorToRow } = await getUnitsRowMap(dInfo.sheetId, dInfo.tabName, accessToken);
 
-                if (rowFound1Based !== null) {
-                    const coord = `${dInfo.colLetter}${rowFound1Based}`;
-                    console.log(`📍 [Hover Bajas Sync] Chofer '${choferNom}' detectado en [${dInfo.tabName}] ${coord} (${dInfo.dateStr})`);
+                // Determinar fila teórica de la unidad
+                let rowUnit = null;
+                if (cleanUteNov) {
+                    rowUnit = mapUteToRow.get(cleanUteNov) || mapUteToRow.get(cleanUteNov.replace(/^0+/, '')) || null;
+                }
+                if (!rowUnit && cleanTracNov) {
+                    rowUnit = mapTractorToRow.get(cleanTracNov) || null;
+                }
+
+                const colVals = columnCache.get(`${dInfo.sheetId}_${dInfo.tabName}_${dInfo.colLetter}`) || [];
+                const prevRow = dInfo.prevDay?.row1Based || null;
+
+                function addUpdateRequest(reqObj) {
+                    if (!updatesBySpreadsheet.has(dInfo.sheetId)) {
+                        updatesBySpreadsheet.set(dInfo.sheetId, {
+                            tabName: dInfo.tabName,
+                            requests: []
+                        });
+                    }
+                    updatesBySpreadsheet.get(dInfo.sheetId).requests.push(reqObj);
+                }
+
+                function clearHoverNote(r1Based) {
+                    if (!r1Based || r1Based < 1) return;
+                    addUpdateRequest({
+                        updateCells: {
+                            range: {
+                                sheetId: dInfo.sheetIdNum,
+                                startRowIndex: r1Based - 1,
+                                endRowIndex: r1Based,
+                                startColumnIndex: dInfo.colIdx,
+                                endColumnIndex: dInfo.colIdx + 1
+                            },
+                            rows: [{ values: [{ note: '' }] }],
+                            fields: 'note'
+                        }
+                    });
+                }
+
+                function setHoverNote(r1Based) {
+                    if (!r1Based || r1Based < 1) return;
+                    addUpdateRequest({
+                        updateCells: {
+                            range: {
+                                sheetId: dInfo.sheetIdNum,
+                                startRowIndex: r1Based - 1,
+                                endRowIndex: r1Based,
+                                startColumnIndex: dInfo.colIdx,
+                                endColumnIndex: dInfo.colIdx + 1
+                            },
+                            rows: [{ values: [{ note: noteText }] }],
+                            fields: 'note'
+                        }
+                    });
+                }
+
+                let targetRow = null;
+
+                // 1. REGLA CLAVE: "header nombre > fk chofer_id"
+                // Si la novedad pertenece a una unidad en Movimientos (ej. Unidad 342)
+                if (rowUnit !== null) {
+                    const cellValAtUnit = (rowUnit <= colVals.length) ? colVals[rowUnit - 1] : '';
+                    const sameDriverAtUnit = isDriverMatch(cellValAtUnit, normChofer);
+
+                    if (sameDriverAtUnit) {
+                        targetRow = rowUnit;
+                    } else {
+                        // Si en la unidad el chofer deja de ser el mismo (ej. Unidad 342 del 15 al 16,
+                        // donde el día 16 se insertó otro chofer en la fecha contigua o la celda cambió),
+                        // se borra la nota hover de esa unidad para evitar persistencia errónea.
+                        clearHoverNote(rowUnit);
+                        console.log(`🧹 [Hover Bajas Sync] Chofer en unidad [${cleanUteNov || cleanTracNov || rowUnit}] (${dInfo.dateStr}) dejó de ser '${choferNom}' (actual: '${cellValAtUnit || 'VACÍO'}'). Nota hover eliminada de ${dInfo.colLetter}${rowUnit}.`);
+                    }
+                }
+
+                // 2. Si no estuvo en la fila de la unidad (o no tenía unidad), buscar si el chofer fue diagramado en otra fila
+                if (targetRow === null) {
+                    const rowFoundAny = findDriverRowInColValues(colVals, normChofer);
+                    if (rowFoundAny !== null) {
+                        targetRow = rowFoundAny;
+                    }
+                }
+
+                // 3. Si en una celda previamente sincronizada (prevRow) el chofer ya no está, limpiarla
+                if (prevRow !== null && prevRow !== targetRow) {
+                    const cellValAtPrev = (prevRow <= colVals.length) ? colVals[prevRow - 1] : '';
+                    if (!isDriverMatch(cellValAtPrev, normChofer)) {
+                        clearHoverNote(prevRow);
+                        console.log(`🧹 [Hover Bajas Sync] Celda previa ${dInfo.colLetter}${prevRow} (${dInfo.dateStr}) ya no contiene a '${choferNom}'. Nota hover eliminada.`);
+                    }
+                }
+
+                // 4. Asignar estado e inyectar nota si corresponde
+                if (targetRow !== null) {
+                    const coord = `${dInfo.colLetter}${targetRow}`;
+                    console.log(`📍 [Hover Bajas Sync] Chofer '${choferNom}' activo en [${dInfo.tabName}] ${coord} (${dInfo.dateStr})`);
 
                     diasMap.set(dInfo.dateStr, {
                         status: 'SINCRONIZADO',
                         coord,
                         colLetter: dInfo.colLetter,
                         colIdx: dInfo.colIdx,
-                        row1Based: rowFound1Based,
+                        row1Based: targetRow,
                         sheetId: dInfo.sheetId,
                         tabName: dInfo.tabName,
                         updatedAt: new Date().toISOString()
@@ -904,26 +1072,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                         note: noteText
                     });
 
-                    if (!updatesBySpreadsheet.has(dInfo.sheetId)) {
-                        updatesBySpreadsheet.set(dInfo.sheetId, {
-                            tabName: dInfo.tabName,
-                            requests: []
-                        });
-                    }
-
-                    updatesBySpreadsheet.get(dInfo.sheetId).requests.push({
-                        updateCells: {
-                            range: {
-                                sheetId: dInfo.sheetIdNum,
-                                startRowIndex: rowFound1Based - 1,
-                                endRowIndex: rowFound1Based,
-                                startColumnIndex: dInfo.colIdx,
-                                endColumnIndex: dInfo.colIdx + 1
-                            },
-                            rows: [{ values: [{ note: noteText }] }],
-                            fields: 'note'
-                        }
-                    });
+                    setHoverNote(targetRow);
                 } else {
                     pendingDaysCount++;
                     diasMap.set(dInfo.dateStr, {
@@ -937,7 +1086,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                         updatedAt: new Date().toISOString()
                     });
                     if (!isReconciler) {
-                        console.log(`⏳ [Hover Bajas Sync] Día ${dInfo.dateStr} en espera (PENDIENTE_TIPEO): '${choferNom}' aún no tipeado en col ${dInfo.colLetter}`);
+                        console.log(`⏳ [Hover Bajas Sync] Día ${dInfo.dateStr} en espera (PENDIENTE_TIPEO): '${choferNom}' no presente en columna ${dInfo.colLetter}`);
                     }
                 }
             }
@@ -971,9 +1120,23 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
         for (const [sheetId, group] of updatesBySpreadsheet.entries()) {
             if (group.requests.length === 0) continue;
 
+            // Deduplicación O(1) de requests por celda física (última operación manda)
+            const dedupMap = new Map();
+            for (const req of group.requests) {
+                const u = req.updateCells;
+                if (u && u.range) {
+                    const cellKey = `${u.range.sheetId}_${u.range.startRowIndex}_${u.range.startColumnIndex}`;
+                    dedupMap.set(cellKey, req);
+                } else {
+                    dedupMap.set(Math.random().toString(), req);
+                }
+            }
+            const finalRequests = Array.from(dedupMap.values());
+            if (finalRequests.length === 0) continue;
+
             const batchSize = 100;
-            for (let i = 0; i < group.requests.length; i += batchSize) {
-                const chunk = group.requests.slice(i, i + batchSize);
+            for (let i = 0; i < finalRequests.length; i += batchSize) {
+                const chunk = finalRequests.slice(i, i + batchSize);
                 const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`;
 
                 try {
@@ -1098,9 +1261,41 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
 
         const clearRequestsBySheet = new Map();
         for (const dInfo of scanDays) {
+            const { mapUteToRow, mapTractorToRow } = await getUnitsRowMap(dInfo.sheetId, dInfo.tabName, accessToken);
+
+            let rowUnit = null;
+            const cleanUteCtx = contexto.n_ute ? String(contexto.n_ute).trim().toUpperCase().replace(/\s+/g, '') : '';
+            const cleanTracCtx = contexto.tractor ? String(contexto.tractor).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
+
+            if (cleanUteCtx) {
+                rowUnit = mapUteToRow.get(cleanUteCtx) || mapUteToRow.get(cleanUteCtx.replace(/^0+/, '')) || null;
+            }
+            if (!rowUnit && cleanTracCtx) {
+                rowUnit = mapTractorToRow.get(cleanTracCtx) || null;
+            }
+
             const colVals = columnCache.get(`${dInfo.sheetId}_${dInfo.tabName}_${dInfo.colLetter}`) || [];
+            const rowsToClear = new Set();
+
+            // 1. Limpiar fila de la unidad si la novedad pertenecía a una unidad
+            if (rowUnit !== null) {
+                rowsToClear.add(rowUnit);
+            }
+
+            // 2. Limpiar fila donde se encuentre actualmente tipeado el chofer
             const rowFound1Based = findDriverRowInColValues(colVals, normChofer);
             if (rowFound1Based !== null) {
+                rowsToClear.add(rowFound1Based);
+            }
+
+            // 3. Limpiar fila registrada previamente en el tracker para ese día
+            const prevTrackEntry = contexto.id != null ? bajasSyncTracker.get(String(contexto.id)) : null;
+            const prevDayInfo = prevTrackEntry?.dias?.get(dInfo.dateStr);
+            if (prevDayInfo?.row1Based) {
+                rowsToClear.add(prevDayInfo.row1Based);
+            }
+
+            for (const rClear of rowsToClear) {
                 if (!clearRequestsBySheet.has(dInfo.sheetId)) {
                     clearRequestsBySheet.set(dInfo.sheetId, {
                         tabName: dInfo.tabName,
@@ -1111,8 +1306,8 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
                     updateCells: {
                         range: {
                             sheetId: dInfo.sheetIdNum,
-                            startRowIndex: rowFound1Based - 1,
-                            endRowIndex: rowFound1Based,
+                            startRowIndex: rClear - 1,
+                            endRowIndex: rClear,
                             startColumnIndex: dInfo.colIdx,
                             endColumnIndex: dInfo.colIdx + 1
                         },
@@ -1132,6 +1327,21 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
         let totalCleared = 0;
         for (const [sheetId, group] of clearRequestsBySheet.entries()) {
             if (group.requests.length === 0) continue;
+
+            // Deduplicación O(1) de celdas a limpiar
+            const dedupMap = new Map();
+            for (const req of group.requests) {
+                const u = req.updateCells;
+                if (u && u.range) {
+                    const cellKey = `${u.range.sheetId}_${u.range.startRowIndex}_${u.range.startColumnIndex}`;
+                    dedupMap.set(cellKey, req);
+                } else {
+                    dedupMap.set(Math.random().toString(), req);
+                }
+            }
+            const finalRequests = Array.from(dedupMap.values());
+            if (finalRequests.length === 0) continue;
+
             const updateUrl = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`;
             try {
                 const updateRes = await fetchWithRetry(updateUrl, {
@@ -1140,11 +1350,11 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
                         Authorization: `Bearer ${accessToken}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ requests: group.requests })
+                    body: JSON.stringify({ requests: finalRequests })
                 }, 180000, 2);
                 if (updateRes && updateRes.ok) {
-                    console.log(`✅ [Hover Bajas Sync] ${group.requests.length} nota(s) removidas en [${group.tabName}].`);
-                    totalCleared += group.requests.length;
+                    console.log(`✅ [Hover Bajas Sync] ${finalRequests.length} nota(s) removidas en [${group.tabName}].`);
+                    totalCleared += finalRequests.length;
                 }
             } catch (e) {
                 console.warn(`⚠️ [Hover Bajas Sync] Error limpiando notas en ${sheetId}:`, e.message);
@@ -1272,5 +1482,7 @@ module.exports = {
     getColChofer,
     formatBajaNote,
     findDriverRowInColValues,
+    isDriverMatch,
+    getUnitsRowMap,
     SPREADSHEETS
 };

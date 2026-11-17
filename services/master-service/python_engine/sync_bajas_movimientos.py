@@ -231,6 +231,7 @@ class BajasDiagramaSync:
         self._cached_meta: Dict[str, Dict[str, int]] = {}
         self._cached_day_cols: Dict[str, List[str]] = {}
         self._cached_day_to_col_map: Dict[str, Dict[int, int]] = {}
+        self._cached_units_map: Dict[str, Tuple[Dict[str, int], Dict[str, int]]] = {}
 
     def _ensure_token(self):
         """Asegura que las credenciales tengan un token válido."""
@@ -286,6 +287,42 @@ class BajasDiagramaSync:
             if "mov" in k and "unidades" in k:
                 return v
         return 0
+
+    def get_units_row_map(self, spreadsheet_id: str, tab_name: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Mapea UTE y Tractor a su número de fila física (1-based) en Movimientos (columnas A..F, filas 1..350)."""
+        cache_key = f"{spreadsheet_id}_{tab_name}"
+        if cache_key in self._cached_units_map:
+            return self._cached_units_map[cache_key]
+
+        map_ute_to_row: Dict[str, int] = {}
+        map_tractor_to_row: Dict[str, int] = {}
+        self._ensure_token()
+        range_name = f"'{tab_name}'!A1:F350"
+        url = f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{quote(range_name)}"
+
+        try:
+            r = requests.get(url, headers={"Authorization": f"Bearer {self._creds.token}"}, timeout=25)
+            if r.status_code == 200:
+                rows = r.json().get("values", [])
+                for idx, row in enumerate(rows):
+                    row_num = 1 + idx
+                    ute_raw = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+                    trac_raw = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+                    if ute_raw:
+                        u_clean = re.sub(r"\s+", "", ute_raw.upper())
+                        map_ute_to_row[u_clean] = row_num
+                        u_num = re.sub(r"^0+", "", u_clean)
+                        if u_num:
+                            map_ute_to_row[u_num] = row_num
+                    if trac_raw:
+                        t_clean = re.sub(r"[\s\-_.]", "", trac_raw.upper())
+                        map_tractor_to_row[t_clean] = row_num
+        except Exception as e:
+            print(f"⚠️ Error leyendo catálogo de unidades en [{tab_name}]: {e}")
+
+        result = (map_ute_to_row, map_tractor_to_row)
+        self._cached_units_map[cache_key] = result
+        return result
 
     def get_day_to_chofer_col_map(self, spreadsheet_id: str, tab_name: str) -> Dict[int, int]:
         """
@@ -389,42 +426,83 @@ class BajasDiagramaSync:
             norm_chofer = normalizar_texto(chofer_nom)
             note_content = format_baja_note(tipo_titulo, f_obj_str, detalle)
 
+            n_ute_nov = re.sub(r"\s+", "", str(nov.get("n_ute") or "").upper())
+            trac_nov = re.sub(r"[\s\-_.]", "", str(nov.get("tractor") or "").upper())
+
             cur_date = f_inicio
             while cur_date <= f_obj:
                 dia_num = cur_date.day
                 sheet_id, tab_name = resolver_hoja_para_fecha(cur_date, self.config)
                 sheet_id_num = self.get_sheet_id_num(sheet_id, tab_name)
+                map_ute_to_row, map_tractor_to_row = self.get_units_row_map(sheet_id, tab_name)
 
                 col_chofer_idx = get_col_chofer(dia_num)
                 col_letter = index_to_col_letter(col_chofer_idx)
-
                 col_vals = self.fetch_day_column_values(sheet_id, tab_name, col_letter)
 
-                # REGLA ESTRICTA: Buscar al chofer estrictamente en la columna de Chofer del día (sin fallback a tractor)
-                encontrado_en_fila = None
-                for r_idx in range(2, len(col_vals)):
-                    cell_val = col_vals[r_idx]
-                    if cell_val and len(cell_val) >= 3:
-                        norm_cell = normalizar_texto(cell_val)
-                        if (
-                            norm_chofer == norm_cell
-                            or (norm_chofer in norm_cell and len(norm_chofer) >= 6)
-                            or (norm_cell in norm_chofer and len(norm_cell) >= 6)
-                        ):
-                            encontrado_en_fila = r_idx + 1  # 1-based
-                            break
+                if sheet_id not in updates_by_sheet:
+                    updates_by_sheet[sheet_id] = []
 
-                if encontrado_en_fila is not None:
-                    coord = f"{col_letter}{encontrado_en_fila}"
+                # Ubicar fila teórica de la unidad
+                row_unit = None
+                if n_ute_nov:
+                    row_unit = map_ute_to_row.get(n_ute_nov) or map_ute_to_row.get(re.sub(r"^0+", "", n_ute_nov))
+                if not row_unit and trac_nov:
+                    row_unit = map_tractor_to_row.get(trac_nov)
 
-                    if sheet_id not in updates_by_sheet:
-                        updates_by_sheet[sheet_id] = []
+                target_row = None
 
+                # 1. REGLA CLAVE: "header nombre > fk chofer_id"
+                if row_unit is not None:
+                    cell_val_unit = col_vals[row_unit - 1] if row_unit <= len(col_vals) else ""
+                    norm_cell_unit = normalizar_texto(cell_val_unit)
+                    is_same_driver = (
+                        norm_chofer == norm_cell_unit
+                        or (norm_chofer in norm_cell_unit and len(norm_chofer) >= 6)
+                        or (norm_cell_unit in norm_chofer and len(norm_cell_unit) >= 6)
+                    )
+
+                    if is_same_driver:
+                        target_row = row_unit
+                    else:
+                        # Si en la unidad deja de ser el mismo chofer (ej. Unidad 342 del 15 al 16),
+                        # se borra la nota hover de esa fila en este día
+                        coord_clear = f"{col_letter}{row_unit}"
+                        updates_by_sheet[sheet_id].append({
+                            "sheet_id_num": sheet_id_num,
+                            "tab_name": tab_name,
+                            "row_1based": row_unit,
+                            "row_0based": row_unit - 1,
+                            "col_idx": col_chofer_idx,
+                            "coord": coord_clear,
+                            "date": cur_date.isoformat(),
+                            "chofer": chofer_nom,
+                            "novedad_id": nov_id,
+                            "note": ""
+                        })
+                        print(f"🧹 [Hover Bajas Sync] Chofer en unidad ({cur_date.isoformat()}) dejó de ser '{chofer_nom}' (actual: '{cell_val_unit or 'VACIO'}'). Nota hover removida de {coord_clear}.")
+
+                # 2. Si no estuvo en la unidad o no tenía unidad, buscar si fue diagramado en otra fila
+                if target_row is None:
+                    for r_idx in range(2, len(col_vals)):
+                        cell_val = col_vals[r_idx]
+                        if cell_val and len(cell_val) >= 3:
+                            norm_cell = normalizar_texto(cell_val)
+                            if (
+                                norm_chofer == norm_cell
+                                or (norm_chofer in norm_cell and len(norm_chofer) >= 6)
+                                or (norm_cell in norm_chofer and len(norm_cell) >= 6)
+                            ):
+                                target_row = r_idx + 1  # 1-based
+                                break
+
+                if target_row is not None:
+                    coord = f"{col_letter}{target_row}"
                     updates_by_sheet[sheet_id].append({
                         "sheet_id_num": sheet_id_num,
                         "tab_name": tab_name,
-                        "row_1based": encontrado_en_fila,
-                        "row_0based": encontrado_en_fila - 1,
+                        "row_1based": target_row,
+                        "row_0based": target_row - 1,
                         "col_idx": col_chofer_idx,
                         "coord": coord,
                         "date": cur_date.isoformat(),
@@ -448,14 +526,21 @@ class BajasDiagramaSync:
             tab_name = items[0]["tab_name"]
             print(f"\n🚀 [Google Sheets] Preparando {len(items)} notas para [{tab_name}] (ID: {sheet_id})...")
 
+            # Deduplicación por celda física (la última operación para esa celda prevalece)
+            dedup_items = {}
+            for it in items:
+                k = (it["sheet_id_num"], it["row_0based"], it["col_idx"])
+                dedup_items[k] = it
+            items_final = list(dedup_items.values())
+
             if self.dry_run:
-                for it in items:
+                for it in items_final:
                     print(f"   [DRY-RUN] Celda {it['coord']} ({it['date']}) - Chofer: {it['chofer']} -> Nota: {it['note'][:45]}...")
-                total_aplicadas += len(items)
+                total_aplicadas += len(items_final)
                 continue
 
             requests_batch = []
-            for it in items:
+            for it in items_final:
                 requests_batch.append({
                     "updateCells": {
                         "range": {
