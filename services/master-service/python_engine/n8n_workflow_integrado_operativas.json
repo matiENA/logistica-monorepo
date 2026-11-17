@@ -273,7 +273,7 @@
     },
     {
       "parameters": {
-        "content": "## ⭐ Motor de Polling Inteligente Unificado en Capas (Gatekeeper + Capas 1, 2, 3)\n**Fase 1 (Gatekeeper)**: Chequeo ultraliviano SHA-256 de Columna X y Movimientos en ~2s (2 lecturas, 0 escrituras).\n**Fase 2 (Motor Unificado en Capas)**: Si detecta cambios, ejecuta en un único recorrido atómico:\n- Capa 1: Tracking de Col H en hover notes.\n- Capa 2: VACÍO desde Col X (soporta fechas completas y sin hora) + bordes SOLID_MEDIUM.\n- Capa 3: Seguimiento #9fc5e8 (sin nuevo TD) con cleanup automático.\n- Commit: 1 solo batchUpdate atómico consolidado en ~3-4s.",
+        "content": "## ⭐ Motor de Polling Inteligente Unificado en Capas (Gatekeeper + Capas 1, 2, 3)\n**Fase 1 (Gatekeeper)**: Chequeo ultraliviano SHA-256 de Columna X y Movimientos en ~2s (2 lecturas, 0 escrituras).\n**Fase 2 (Motor Unificado en Capas)**: Si detecta cambios, ejecuta en un único recorrido atómico:\n- Capa 1: Tracking de Col H en hover notes.\n- Capa 2: VACÍO desde Col X (soporta fechas completas y sin hora) + bordes SOLID_MEDIUM.\n- Capa 3: Seguimiento #9fc5e8 (sin nuevo TD) con cleanup automático.\n- Commit: 1 solo batchUpdate atómico consolidado en ~3-4s.\n- Ventana: 7 días (1 semana rodante).",
         "height": 270,
         "width": 1150,
         "color": 6
@@ -309,7 +309,7 @@
     },
     {
       "parameters": {
-        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 poll_sync_vacio.py --apply --borders\""
+        "command": "cmd /c \"cd /d C:\\Users\\Matias Rodriguez\\Documents\\logistica-monorepo\\services\\master-service\\python_engine && py -3.13 poll_sync_vacio.py --apply --borders --window 7\""
       },
       "id": "bdcea852-fb63-4296-a2f6-2e27eb150adc",
       "name": "Ejecutar Polling Inteligente VACIO + Seguimiento",

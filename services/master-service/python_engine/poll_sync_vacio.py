@@ -93,7 +93,7 @@ class VacioPoller:
         self.day_explicit = (day is not None)
         self.day = day or datetime.now().day
         self.window_explicit = (window is not None)
-        self.window = window or 4
+        self.window = window or 7
         self._creds = get_google_credentials(scopes=SCOPES)
         self._service = build("sheets", "v4", credentials=self._creds)
 
@@ -232,7 +232,7 @@ class VacioPoller:
         elif self.day_explicit:
             target_days = [self.day]
         else:
-            # Ventana deslizante (default 4 días) para cubrir viajes iniciados en días previos que vacían hoy
+            # Ventana deslizante (default 7 días / 1 semana) para cubrir viajes iniciados en días previos que vacían hoy
             target_days = list(range(max(1, today - (self.window - 1)), today + 1))
 
         print("\n" + "="*80)
@@ -336,7 +336,7 @@ def main():
         "--window",
         type=int,
         default=None,
-        help="Cantidad de días de ventana retroactiva a sincronizar si no se pasa --day (por defecto: día de hoy)."
+        help="Cantidad de días de ventana retroactiva a sincronizar si no se pasa --day (por defecto: 7 días / 1 semana)."
     )
     parser.add_argument(
         "--check-only",

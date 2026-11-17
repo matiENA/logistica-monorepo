@@ -178,7 +178,7 @@ En la instancia local de n8n, el workflow **`Operativas Integradas - Cordillera,
 
 | Carril / Tarea | Nodo Trigger en n8n | Nodo de Ejecución (`n8n-nodes-base.executeCommand`) | Comando Canónico Configurado |
 | :--- | :--- | :--- | :--- |
-| **Polling Vacío + Capas** | `⏰ Cron: Polling Unificado en Capas (Cada 2m)` | `Ejecutar Polling Inteligente VACIO + Seguimiento` | `cmd /c "cd /d C:\Users\Matias Rodriguez\Documents\logistica-monorepo\services\master-service\python_engine && py -3.13 poll_sync_vacio.py --apply --borders"` |
+| **Polling Vacío + Capas** | `⏰ Cron: Polling Unificado en Capas (Cada 2m)` | `Ejecutar Polling Inteligente VACIO + Seguimiento` | `cmd /c "cd /d C:\Users\Matias Rodriguez\Documents\logistica-monorepo\services\master-service\python_engine && py -3.13 poll_sync_vacio.py --apply --borders --window 7"` |
 | **Disponibilidad VTV** | `⏰ Cron: Disponibilidad (Diario 06:00 AM)` | `Ejecutar Pintado de Disponibilidad` | `cmd /c "cd /d C:\Users\Matias Rodriguez\Documents\logistica-monorepo\services\master-service\python_engine && node pintarDisponibilidad.js"` |
 | **Viajes Cordillera** | `⏰ Cron: Viajes Cordillera (Cada 10m)` | `Ejecutar Sync Viajes Cordillera` | `cmd /c "cd /d C:\Users\Matias Rodriguez\Documents\logistica-monorepo\services\master-service\python_engine && py -3.13 main.py --seguridad-vial"` |
 | **CONF. DE VIAJE** | `⏰ Cron: CONF. DE VIAJE (Cada 10m)` | `Ejecutar Sync CONF. DE VIAJE` | `cmd /c "cd /d C:\Users\Matias Rodriguez\Documents\logistica-monorepo\services\master-service\python_engine && py -3.13 main.py --conf-viaje"` |
