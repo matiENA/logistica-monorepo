@@ -66,14 +66,26 @@ const checkOrigin = function(origin, callback) {
 
 const corsConfig = {
     origin: checkOrigin,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'Accept',
+        'Origin',
+        'x-user-role',
+        'x-user-id',
+        'X-User-Role',
+        'X-User-Id',
+        'x-monitor-token',
+        'if-none-match'
+    ],
     credentials: true
 };
 
 const io = new Server(server, {
     cors: corsConfig,
-    transports: ['websocket', 'polling']
+    transports: ['polling', 'websocket']
 });
 
 // Namespace dedicado para DASH — recibe solo novedades

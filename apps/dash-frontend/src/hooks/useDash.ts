@@ -116,7 +116,7 @@ export function useDash() {
 
     // 🎯 Socket.IO para tiempo real reactivo (Patrón: Listen on Table/Event -> Fetch from View, SIN POLLING)
     const socket: Socket = io(`${SOCKET_URL}/dash`, {
-      transports: ['websocket', 'polling']
+      transports: ['polling', 'websocket']
     });
 
     // ⚡ Cola de actualización con Debounce (300ms) para amortiguar ráfagas de cambios concurrentes
