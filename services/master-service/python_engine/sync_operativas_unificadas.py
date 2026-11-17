@@ -458,6 +458,7 @@ class UnifiedOperativasSync:
         self._cached_curr_rows: Optional[List[List[str]]] = None
         self._cached_tractor_to_row: Optional[Dict[str, int]] = None
         self._cached_ut_to_row: Optional[Dict[str, int]] = None
+        self._cached_day_rows: Dict[int, List[Dict[str, Any]]] = {}
         self.state_mgr = DriveStateManager()
         self.current_month_name = "Noviembre"
 
@@ -488,6 +489,9 @@ class UnifiedOperativasSync:
 
     def fetch_ruteos_actual(self) -> List[List[str]]:
         """Lectura ultraliviana a las columnas esenciales de Ruteos (1 sola batchGet de ~1s)."""
+        if self._cached_curr_rows is not None:
+            return self._cached_curr_rows
+
         ranges = [
             f"'{self.tab_ruteos}'!A4:B",   # Col 0: Patente, Col 1: UT
             f"'{self.tab_ruteos}'!H4:H",   # Col 7: Tracking / Destinos
@@ -523,6 +527,7 @@ class UnifiedOperativasSync:
             if i < len(raw_ak) and raw_ak[i]:
                 row[36] = raw_ak[i][0].strip()
             structured_rows.append(row)
+        self._cached_curr_rows = structured_rows
         return structured_rows
 
     def fetch_ruteos_anterior(self, force_refresh: bool = False) -> List[List[str]]:
@@ -581,12 +586,115 @@ class UnifiedOperativasSync:
         """Lectura única a Ruteos del mes actual (compatibilidad retroactiva)."""
         return self.fetch_ruteos_actual()
 
+    def prefetch_movimientos_batch(self, days: List[int], chunk_size: int = 5) -> None:
+        """
+        Precarga en memoria las columnas de múltiples días en bloques (chunk_size).
+        Reduce drásticamente el tiempo de consulta multi-día en Google Sheets API.
+        """
+        needed_days = [d for d in days if d not in self._cached_day_rows]
+        if not needed_days:
+            return
+
+        sheet_id = self.get_mov_sheet_id()
+
+        for i in range(0, len(needed_days), chunk_size):
+            chunk = needed_days[i:i + chunk_size]
+            include_index = (self._cached_tractor_to_row is None or self._cached_ut_to_row is None)
+            ranges = []
+            if include_index:
+                ranges.append(f"'{TARGET_TAB_MOV}'!E1:E350")
+                ranges.append(f"'{TARGET_TAB_MOV}'!C1:C350")
+
+            for d in chunk:
+                col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(d)
+                let_ch = index_to_col_letter(col_ch)
+                let_s2 = index_to_col_letter(col_s2)
+                ranges.append(f"'{TARGET_TAB_MOV}'!{let_ch}1:{let_s2}350")
+
+            print(f"      [BATCH] Solicitando bloque de {len(chunk)} días a Movimientos ({chunk[0]}..{chunk[-1]})...")
+            t_chunk = time.time()
+            res = api_call_with_retry(self._service.spreadsheets().get(
+                spreadsheetId=self.mov_id,
+                ranges=ranges,
+                fields="sheets(data(rowData(values(formattedValue,note,userEnteredFormat.backgroundColor,userEnteredFormat.borders))))"
+            ))
+            sheet_data = res["sheets"][0]["data"]
+            data_offset = 0
+
+            if include_index:
+                raw_trks = sheet_data[0].get("rowData", [])
+                raw_uts = sheet_data[1].get("rowData", [])
+                data_offset = 2
+
+                tractor_to_row: Dict[str, int] = {}
+                ut_to_row: Dict[str, int] = {}
+
+                for idx, r in enumerate(raw_trks):
+                    vals = r.get("values", [])
+                    if vals and vals[0]:
+                        raw_trk = str(vals[0].get("formattedValue") or "").strip().upper()
+                        clean_trk = re.sub(r"[^A-Z0-9]", "", raw_trk)
+                        if clean_trk and len(clean_trk) >= 5:
+                            tractor_to_row[clean_trk] = idx + 1
+
+                for idx, r in enumerate(raw_uts):
+                    vals = r.get("values", [])
+                    if vals and vals[0]:
+                        raw_ut = str(vals[0].get("formattedValue") or "").strip().replace(".0", "")
+                        if raw_ut and raw_ut.isdigit():
+                            ut_to_row[raw_ut] = idx + 1
+
+                self._cached_tractor_to_row = tractor_to_row
+                self._cached_ut_to_row = ut_to_row
+
+            for chunk_idx, d in enumerate(chunk):
+                raw_day = sheet_data[data_offset + chunk_idx].get("rowData", []) if len(sheet_data) > (data_offset + chunk_idx) else []
+                col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(d)
+                off_ch = 0
+                off_disp = col_disp - col_ch
+                off_s1 = col_s1 - col_ch
+                off_s2 = col_s2 - col_ch
+
+                day_rows = []
+                for r_idx, r in enumerate(raw_day):
+                    row_num = r_idx + 1
+                    c_vals = r.get("values", [])
+
+                    def get_cell_info(offset):
+                        if len(c_vals) > offset and c_vals[offset]:
+                            cell = c_vals[offset]
+                            b_info = cell.get("userEnteredFormat", {}).get("borders", {}) or {}
+                            has_border = bool(
+                                b_info.get("bottom", {}).get("style") == "SOLID_MEDIUM" and
+                                b_info.get("left", {}).get("style") == "SOLID_MEDIUM"
+                            )
+                            return {
+                                "value": str(cell.get("formattedValue") or "").strip(),
+                                "note": str(cell.get("note") or "").strip(),
+                                "bg": cell.get("userEnteredFormat", {}).get("backgroundColor"),
+                                "has_border": has_border
+                            }
+                        return {"value": "", "note": "", "bg": None, "has_border": False}
+
+                    day_rows.append({
+                        "row_num": row_num,
+                        "chofer": get_cell_info(off_ch)["value"],
+                        "dispo": get_cell_info(off_disp)["value"],
+                        "slot1": get_cell_info(off_s1),
+                        "slot2": get_cell_info(off_s2)
+                    })
+                self._cached_day_rows[d] = day_rows
+
+            print(f"      [BATCH] Bloque completado en {round(time.time() - t_chunk, 2)}s.")
+
     def fetch_movimientos_targeted(self, day: int) -> Tuple[int, Dict[str, int], Dict[str, int], List[Dict[str, Any]]]:
         """
         Lectura dirigida a Movimientos (1 sola petición HTTP con múltiples rangos específicos).
         Solicita: Tractores (E1:E350), UTs (C1:C350), y columnas del día seleccionado.
         """
         sheet_id = self.get_mov_sheet_id()
+        if day in self._cached_day_rows and self._cached_tractor_to_row is not None and self._cached_ut_to_row is not None:
+            return sheet_id, self._cached_tractor_to_row, self._cached_ut_to_row, self._cached_day_rows[day]
         col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(day)
 
         let_ch = index_to_col_letter(col_ch)
@@ -599,7 +707,7 @@ class UnifiedOperativasSync:
             res = api_call_with_retry(self._service.spreadsheets().get(
                 spreadsheetId=self.mov_id,
                 ranges=ranges,
-                fields="sheets(data(rowData(values(formattedValue,note,userEnteredFormat.backgroundColor))))"
+                fields="sheets(data(rowData(values(formattedValue,note,userEnteredFormat.backgroundColor,userEnteredFormat.borders))))"
             ))
             sheet_data = res["sheets"][0]["data"]
             raw_day = sheet_data[0].get("rowData", [])
@@ -614,7 +722,7 @@ class UnifiedOperativasSync:
             res = api_call_with_retry(self._service.spreadsheets().get(
                 spreadsheetId=self.mov_id,
                 ranges=ranges,
-                fields="sheets(data(rowData(values(formattedValue,note,userEnteredFormat.backgroundColor))))"
+                fields="sheets(data(rowData(values(formattedValue,note,userEnteredFormat.backgroundColor,userEnteredFormat.borders))))"
             ))
             sheet_data = res["sheets"][0]["data"]
             raw_trks = sheet_data[0].get("rowData", [])
@@ -658,12 +766,18 @@ class UnifiedOperativasSync:
             def get_cell_info(offset):
                 if len(c_vals) > offset and c_vals[offset]:
                     cell = c_vals[offset]
+                    b_info = cell.get("userEnteredFormat", {}).get("borders", {}) or {}
+                    has_border = bool(
+                        b_info.get("bottom", {}).get("style") == "SOLID_MEDIUM" and
+                        b_info.get("left", {}).get("style") == "SOLID_MEDIUM"
+                    )
                     return {
                         "value": str(cell.get("formattedValue") or "").strip(),
                         "note": str(cell.get("note") or "").strip(),
-                        "bg": cell.get("userEnteredFormat", {}).get("backgroundColor")
+                        "bg": cell.get("userEnteredFormat", {}).get("backgroundColor"),
+                        "has_border": has_border
                     }
-                return {"value": "", "note": "", "bg": None}
+                return {"value": "", "note": "", "bg": None, "has_border": False}
 
             day_rows.append({
                 "row_num": row_num,
@@ -673,6 +787,7 @@ class UnifiedOperativasSync:
                 "slot2": get_cell_info(off_s2)
             })
 
+        self._cached_day_rows[day] = day_rows
         return sheet_id, tractor_to_row, ut_to_row, day_rows
 
     def analyze_trips_and_layers(
@@ -864,12 +979,7 @@ class UnifiedOperativasSync:
                     "hash_nota": cell_hash
                 }
 
-                prev_cell = existing_day_cells.get(cell_coord)
-                needs_note = False
-                if prev_cell:
-                    needs_note = (prev_cell.get("hash_nota") != cell_hash)
-                else:
-                    needs_note = bool(final_note and final_note != target_cell["note"])
+                needs_note = bool(final_note and final_note != target_cell["note"])
 
                 if needs_note and final_note:
                     planned_note_updates.append({
@@ -885,15 +995,13 @@ class UnifiedOperativasSync:
                         "td": td_code
                     })
 
-                # Bordes si hay VACÍO en Col X (solo si no fue aplicado previamente)
-                if vacio_head:
-                    already_bordered = prev_cell.get("borde_doble", False) if prev_cell else False
-                    if not already_bordered:
-                        planned_border_updates.append({
-                            "row": row_target,
-                            "col_idx": target_col_idx,
-                            "cell_coord": cell_coord
-                        })
+                # Bordes si hay VACÍO en Col X y la celda no tiene bordes dobles aplicados en Sheets
+                if vacio_head and not target_cell.get("has_border", False):
+                    planned_border_updates.append({
+                        "row": row_target,
+                        "col_idx": target_col_idx,
+                        "cell_coord": cell_coord
+                    })
 
             else:
                 for slot_idx, (td_code, td_data) in enumerate(td_items[:2]):
@@ -928,12 +1036,7 @@ class UnifiedOperativasSync:
                         "hash_nota": cell_hash
                     }
 
-                    prev_cell = existing_day_cells.get(cell_coord)
-                    needs_note = False
-                    if prev_cell:
-                        needs_note = (prev_cell.get("hash_nota") != cell_hash)
-                    else:
-                        needs_note = bool(final_note and final_note != target_cell["note"])
+                    needs_note = bool(final_note and final_note != target_cell["note"])
 
                     if needs_note and final_note:
                         planned_note_updates.append({
@@ -949,14 +1052,13 @@ class UnifiedOperativasSync:
                             "td": td_code
                         })
 
-                    if vacio_head:
-                        already_bordered = prev_cell.get("borde_doble", False) if prev_cell else False
-                        if not already_bordered:
-                            planned_border_updates.append({
-                                "row": row_target,
-                                "col_idx": target_col_idx,
-                                "cell_coord": cell_coord
-                            })
+                    # Bordes si hay VACÍO en Col X y la celda no tiene bordes dobles aplicados en Sheets
+                    if vacio_head and not target_cell.get("has_border", False):
+                        planned_border_updates.append({
+                            "row": row_target,
+                            "col_idx": target_col_idx,
+                            "cell_coord": cell_coord
+                        })
 
         # 4. Capa 3: Evaluación de Pintado Celeste (#9fc5e8) y Cleanup
         # Se evalúa sobre la celda del día (Slot 1) para cada tractor indexado
@@ -1345,6 +1447,11 @@ class UnifiedOperativasSync:
             "day_summaries": {},
             "batch_results": []
         }
+
+        print(f"[*] Precargando en bloques optimizados {len(days)} días desde Movimientos...")
+        t_pre = time.time()
+        self.prefetch_movimientos_batch(days, chunk_size=5)
+        print(f"[*] Precarga completada en {round(time.time() - t_pre, 2)}s.")
 
         all_analyses = []
         for d in days:
