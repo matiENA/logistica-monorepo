@@ -286,12 +286,14 @@ CREATE TABLE IF NOT EXISTS public.chofer_documentacion (
     vacuna_covid TEXT,
     dosis_covid TEXT,
     obs_documentacion TEXT,
+    estado_capacitacion TEXT,
     actualizado_el TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_chofer_doc_chofer_id ON public.chofer_documentacion(chofer_id);
 CREATE INDEX IF NOT EXISTS idx_chofer_doc_cuil ON public.chofer_documentacion(cuil);
 CREATE INDEX IF NOT EXISTS idx_chofer_doc_dni ON public.chofer_documentacion(dni);
+CREATE INDEX IF NOT EXISTS idx_chofer_doc_estado_capacitacion ON public.chofer_documentacion(estado_capacitacion);
 
 -- ==============================================================================
 -- 12. TABLA: chofer_observaciones (Historial de Novedades y Sanciones)

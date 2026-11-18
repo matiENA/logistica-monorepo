@@ -131,6 +131,7 @@ export interface RetornoItem {
   codigo_ayer?: string;
   codigo_hoy?: string;
   codigo_manana?: string;
+  estado_capacitacion?: string;
 }
 
 export interface Usuario {

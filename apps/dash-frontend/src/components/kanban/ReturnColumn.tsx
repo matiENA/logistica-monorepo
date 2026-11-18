@@ -84,6 +84,28 @@ const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
   );
 };
 
+const getCapacitacionVisual = (val?: string) => {
+  if (!val) return null;
+  const raw = val.trim().toUpperCase();
+  // Regla 1 del usuario: no renderiza badge si está al día o sin pendientes
+  if (raw === 'AL DÍA' || raw === 'AL DIA' || raw === 'SIN PENDIENTES') {
+    return null;
+  }
+
+  let colorClasses = '';
+  if (raw === 'CRÍTICA' || raw === 'CRITICA') {
+    colorClasses = 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800/60';
+  } else if (raw === 'ALTA') {
+    colorClasses = 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800/60';
+  } else if (raw === 'MEDIA') {
+    colorClasses = 'text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-800/60';
+  } else {
+    colorClasses = 'text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700';
+  }
+
+  return { raw, colorClasses };
+};
+
 export const ReturnColumn: React.FC<ReturnColumnProps> = ({
   retornos,
   flexWeight
@@ -303,9 +325,30 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
                     nombre={ch.nom || ch.nombre}
                     className="w-full"
                   />
-                  {ch.tractor && (
-                    <div className="flex items-center">
-                      <PatenteMercosur patente={ch.tractor} />
+                  {(ch.tractor || getCapacitacionVisual(ch.estado_capacitacion)) && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {ch.tractor && (
+                        <div className="flex items-center">
+                          <PatenteMercosur patente={ch.tractor} />
+                        </div>
+                      )}
+                      {(() => {
+                        const cap = getCapacitacionVisual(ch.estado_capacitacion);
+                        if (!cap) return null;
+                        return (
+                          <div
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] leading-tight select-none shadow-2xs ${cap.colorClasses}`}
+                            title={`Control Humand: Estado de capacitación ${cap.raw}`}
+                          >
+                            <span className="text-[8.5px] font-semibold uppercase tracking-wider opacity-80">
+                              Estado de capacitación:
+                            </span>
+                            <span className="text-[9.5px] font-black uppercase">
+                              {cap.raw}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -343,9 +386,30 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
                     nombre={ch.nom || ch.nombre}
                     className="w-full"
                   />
-                  {ch.tractor && (
-                    <div className="flex items-center">
-                      <PatenteMercosur patente={ch.tractor} />
+                  {(ch.tractor || getCapacitacionVisual(ch.estado_capacitacion)) && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {ch.tractor && (
+                        <div className="flex items-center">
+                          <PatenteMercosur patente={ch.tractor} />
+                        </div>
+                      )}
+                      {(() => {
+                        const cap = getCapacitacionVisual(ch.estado_capacitacion);
+                        if (!cap) return null;
+                        return (
+                          <div
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] leading-tight select-none shadow-2xs ${cap.colorClasses}`}
+                            title={`Control Humand: Estado de capacitación ${cap.raw}`}
+                          >
+                            <span className="text-[8.5px] font-semibold uppercase tracking-wider opacity-80">
+                              Estado de capacitación:
+                            </span>
+                            <span className="text-[9.5px] font-black uppercase">
+                              {cap.raw}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -383,9 +447,30 @@ export const ReturnColumn: React.FC<ReturnColumnProps> = ({
                     nombre={ch.nom || ch.nombre}
                     className="w-full"
                   />
-                  {ch.tractor && (
-                    <div className="flex items-center">
-                      <PatenteMercosur patente={ch.tractor} />
+                  {(ch.tractor || getCapacitacionVisual(ch.estado_capacitacion)) && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {ch.tractor && (
+                        <div className="flex items-center">
+                          <PatenteMercosur patente={ch.tractor} />
+                        </div>
+                      )}
+                      {(() => {
+                        const cap = getCapacitacionVisual(ch.estado_capacitacion);
+                        if (!cap) return null;
+                        return (
+                          <div
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] leading-tight select-none shadow-2xs ${cap.colorClasses}`}
+                            title={`Control Humand: Estado de capacitación ${cap.raw}`}
+                          >
+                            <span className="text-[8.5px] font-semibold uppercase tracking-wider opacity-80">
+                              Estado de capacitación:
+                            </span>
+                            <span className="text-[9.5px] font-black uppercase">
+                              {cap.raw}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

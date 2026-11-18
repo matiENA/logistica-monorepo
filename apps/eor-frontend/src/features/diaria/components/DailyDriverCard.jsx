@@ -28,6 +28,11 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
       }
     : calculateDriverReturn(driver, fechaContexto);
 
+  // Estado de capacitación (Humand) - Solo alerta ante prioridades activas
+  const estadoCapacitacion = driver.retorno_info?.estado_capacitacion || driver.estado_capacitacion;
+  const rawCap = String(estadoCapacitacion || '').trim().toUpperCase();
+  const tieneCapacitacionPendiente = Boolean(rawCap && !['AL DÍA', 'AL DIA', 'SIN PENDIENTES', 'NULL', 'UNDEFINED'].includes(rawCap));
+
   // 2. Formato de teléfono para WhatsApp (Argentina: +54 9 ...)
   const formatWhatsApp = (tel) => {
     if (!tel) return null;
@@ -266,6 +271,16 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
               <div className="daily-card-right-box">
                 {/* Alertas Minimalistas */}
                 <div className="daily-card-alerts">
+                  {/* Badge Capacitación Lateral (Personal que Retorna) */}
+                  {isRetornoMode && tieneCapacitacionPendiente && (
+                    <div 
+                      className={`badge-capacitacion-lateral cap-prio-${rawCap === 'CRÍTICA' || rawCap === 'CRITICA' ? 'critica' : rawCap === 'ALTA' ? 'alta' : rawCap === 'MEDIA' ? 'media' : 'default'}`}
+                      title={`Control Humand: Estado de capacitación ${rawCap}`}
+                    >
+                      <span className="label-capacitacion-h2">Estado de capacitación:</span>
+                      <span className="dato-capacitacion-bold">{rawCap}</span>
+                    </div>
+                  )}
                   {/* Badge Legacy: Retorna Hoy / Vuelve en Xd (solo en vista regular sin grupos H1) */}
                   {!isRetornoMode && returnInfo && (
                     <span

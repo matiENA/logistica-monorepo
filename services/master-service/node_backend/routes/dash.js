@@ -874,7 +874,8 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
                         codigo_ayer,
                         codigo_hoy,
                         codigo_manana,
-                        retorna_cuando
+                        retorna_cuando,
+                        estado_capacitacion
                     FROM public.view_personal_retorno
                     WHERE retorna_cuando IN ('AYER', 'HOY', 'MANANA', 'MAÑANA')
                     ORDER BY fecha_retorno ASC, nombre ASC

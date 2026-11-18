@@ -1703,4 +1703,105 @@ html:not(.dark) .doc-date-val.vencido {
   gap: 0;
 }
 
+/* ==============================================================
+   🏷️ BADGE ESTADO DE CAPACITACIÓN (HUMAND - PERSONAL QUE RETORNA)
+   Directivas: Join Lateral, Jerarquía H2 Label, Dato Bold, Responsive Vertical
+   ============================================================== */
+.badge-capacitacion-lateral {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  background-color: #ffffff;
+  line-height: 1.1;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.15s ease-in-out;
+}
+
+html.dark .badge-capacitacion-lateral {
+  background-color: rgba(30, 41, 59, 0.85);
+  border-color: rgba(51, 65, 85, 0.8);
+}
+
+.label-capacitacion-h2 {
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+  opacity: 0.85;
+}
+
+html.dark .label-capacitacion-h2 {
+  color: #94a3b8;
+}
+
+.dato-capacitacion-bold {
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+
+/* Variantes según prioridad WCAG 2.2 */
+.badge-capacitacion-lateral.cap-prio-critica {
+  border-color: rgba(239, 68, 68, 0.35);
+  background-color: #fef2f2;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-critica {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.badge-capacitacion-lateral.cap-prio-critica .dato-capacitacion-bold {
+  color: #dc2626;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-critica .dato-capacitacion-bold {
+  color: #f87171;
+}
+
+.badge-capacitacion-lateral.cap-prio-alta {
+  border-color: rgba(245, 158, 11, 0.35);
+  background-color: #fffbeb;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-alta {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+.badge-capacitacion-lateral.cap-prio-alta .dato-capacitacion-bold {
+  color: #d97706;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-alta .dato-capacitacion-bold {
+  color: #fbbf24;
+}
+
+.badge-capacitacion-lateral.cap-prio-media {
+  border-color: rgba(99, 102, 241, 0.35);
+  background-color: #eef2ff;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-media {
+  background-color: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+.badge-capacitacion-lateral.cap-prio-media .dato-capacitacion-bold {
+  color: #4f46e5;
+}
+html.dark .badge-capacitacion-lateral.cap-prio-media .dato-capacitacion-bold {
+  color: #a5b4fc;
+}
+
+/* 📱 Responsive Vertical en pantallas móviles / tabletas */
+@media (max-width: 640px) {
+  .badge-capacitacion-lateral {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.12rem;
+    padding: 0.25rem 0.45rem;
+    white-space: normal;
+  }
+}
+
 
