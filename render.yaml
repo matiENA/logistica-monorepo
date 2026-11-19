@@ -84,9 +84,9 @@ services:
   # ------------------------------------------------------------
   # 2. FRONTEND DASH (Static Site — React 19 / Vite)
   # ------------------------------------------------------------
-  - type: static
+  - type: web
     name: dash
-    region: oregon
+    runtime: static
     rootDir: apps/dash-frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
@@ -103,9 +103,9 @@ services:
   # ------------------------------------------------------------
   # 3. FRONTEND EOR / DIAGRAMAS (Static Site — React / Vite)
   # ------------------------------------------------------------
-  - type: static
+  - type: web
     name: eor
-    region: oregon
+    runtime: static
     rootDir: apps/eor-frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
@@ -124,24 +124,37 @@ services:
         value: "false"
 
   # ------------------------------------------------------------
-  # 4. FRONTEND BASE / PLANEACIÓN Y TALLER (Static Site — React / Vite)
+  # 4. FRONTEND COORDINACIÓN (Static Site — Planeación Kanban)
   # ------------------------------------------------------------
-  - type: static
-    name: base
-    region: oregon
+  - type: web
+    name: coordinacion
+    runtime: static
     rootDir: apps/base-frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     routes:
       - type: rewrite
-        source: /coordinacion
+        source: /*
         destination: /coordinacion.html
-      - type: rewrite
-        source: /taller
-        destination: /taller.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://diaria-operativas.onrender.com
+      - key: VITE_SOCKET_URL
+        value: https://diaria-operativas.onrender.com
+
+  # ------------------------------------------------------------
+  # 5. FRONTEND TALLER (Static Site — Terminal Operativa Taller)
+  # ------------------------------------------------------------
+  - type: web
+    name: taller
+    runtime: static
+    rootDir: apps/base-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
       - type: rewrite
         source: /*
-        destination: /index.html
+        destination: /taller.html
     envVars:
       - key: VITE_API_URL
         value: https://diaria-operativas.onrender.com
