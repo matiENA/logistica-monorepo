@@ -78,8 +78,14 @@ const corsConfig = {
         'X-User-Role',
         'X-User-Id',
         'x-monitor-token',
-        'if-none-match'
+        'if-none-match',
+        'If-None-Match',
+        'x-taller-user-id',
+        'x-coordinacion-user-id',
+        'x-usuario-nombre',
+        'x-origen'
     ],
+    exposedHeaders: ['ETag'],
     credentials: true
 };
 
@@ -500,6 +506,26 @@ app.use('/api/subir-foto', createFotosRouter(cacheDatosGlobales, io));
 
 // Webhooks — Inyección en RAM desde Google Sheets
 app.use('/api/webhook', webhookRouter(cacheDatosGlobales, io, ioDash, cargarNovedades, fetchRango, ID_SPREADSHEET_MASTER));
+
+// Planeación, Coordinación y Taller (Schema base — Hot RAM C1 + Socket.IO + ETag 304)
+try {
+    const { createPlaneacionRouter } = require('./planeacion/routes/planeacionRoutes');
+    const { hotRamBaseService } = require('./planeacion/services/hotRamBaseService');
+    app.use('/api/planeacion', createPlaneacionRouter(io));
+    hotRamBaseService.startWeeklyColdSweepScheduler();
+    hotRamBaseService
+        .hydrateBoard(true)
+        .then((snap) =>
+            console.log(
+                `⚡ [Hot RAM Base C1] Hidratado: ${snap.activos.length} procesos activos, ${snap.holds.length} preasignados, ${snap.catalog.zones.length} zonas, ${snap.catalog.boxes.length} boxes`
+            )
+        )
+        .catch((err) =>
+            console.warn('⚠️ [Hot RAM Base C1] Hidratación inicial diferida:', err.message || err)
+        );
+} catch (e) {
+    console.error('❌ No se pudo inicializar módulo /api/planeacion:', e.message);
+}
 
 // Bot — Asistente de consultas inteligente con Gemini y RAM (Módulo exclusivo local)
 try {

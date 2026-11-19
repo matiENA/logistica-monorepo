@@ -122,3 +122,28 @@ services:
         value: sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R
       - key: VITE_ENABLE_REALTIME
         value: "false"
+
+  # ------------------------------------------------------------
+  # 4. FRONTEND BASE / PLANEACIÓN Y TALLER (Static Site — React / Vite)
+  # ------------------------------------------------------------
+  - type: static
+    name: base
+    region: oregon
+    rootDir: apps/base-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /coordinacion
+        destination: /coordinacion.html
+      - type: rewrite
+        source: /taller
+        destination: /taller.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://diaria-operativas.onrender.com
+      - key: VITE_SOCKET_URL
+        value: https://diaria-operativas.onrender.com

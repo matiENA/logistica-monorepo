@@ -13,6 +13,9 @@ ENV/
 .env
 .env.local
 .env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
 *.key
 *.pem
 credentials.json
@@ -24,6 +27,11 @@ ute-logistica-key.json
 dist/
 build/
 .cache/
+.vite/
+.ui-history/
+**/.ui-history/
+*.bak
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 *.log
