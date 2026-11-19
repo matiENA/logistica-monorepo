@@ -1,11 +1,18 @@
 # Handoff & Blueprint Activo (`logistica-monorepo` + `base`)
 
 ## 1. Variación Actual
-- **Objetivo**: Adherir el módulo de Planeación, Coordinación y Taller (`base`) al monorepo principal (`logistica-monorepo`) y a su infraestructura en Render (`render.yaml`).
+- **Objetivo**: Adherir el módulo de Planeación, Coordinación y Taller (`base`) al monorepo principal (`logistica-monorepo`) y desplegar sus Static Sites en Render Cloud.
 - **Modo**: Brownfield (Adherencia a `services/master-service/node_backend` + `apps/base-frontend`)
-- **Escala (`db-render-arch`)**: Tier M (Web Service único `diaria-operativas` con Pool PG compartido de 5 conexiones + Hot RAM C1 + 3 Static Sites: `dash`, `eor`, `base`)
+- **Escala (`db-render-arch`)**: Tier M (Web Service único `diaria-operativas` con Pool PG compartido de 5 conexiones + Hot RAM C1 + Static Sites `dash`, `eor`, `coordinacion`, `taller`)
 
-## 2. Contratos de Datos y Endpoints Adheridos en `diaria-operativas`
+## 2. Servicios Activos en Render Cloud
+| Servicio Render | Service ID | Tipo | URL Producción | Entrada / Destino |
+| :--- | :--- | :--- | :--- | :--- |
+| `diaria-operativas` | `srv-db4302u0tbcc73ctq4ng` | Web Service (Docker) | `https://diaria-operativas.onrender.com` | `/api/planeacion/*` + Socket.IO |
+| `coordinacion` | `srv-dbvjple1egvs73age6q0` | Static Site | `https://coordinacion-06ce.onrender.com` | Rewrite `/*` -> `/coordinacion.html` |
+| `taller` | `srv-dbvjqgavcj2c73d5uod0` | Static Site | `https://taller-jdzi.onrender.com` | Rewrite `/*` -> `/taller.html` |
+
+## 3. Contratos de Datos y Endpoints Adheridos en `diaria-operativas`
 | Entidad / Endpoint | Grupo Render | Capa | Identificador Natural | Campos Expuestos en DTO |
 | :--- | :--- | :--- | :--- | :--- |
 | `GET /api/planeacion/board` | G1 Tablero Vivo | C1 Hot RAM (`ETag` 304) | `n_ute`, `tractor_plate`, `semi_plate` | `activos`, `holds`, `catalog` (`zones`, `boxes`, `unidades`) |
@@ -14,15 +21,11 @@
 | `POST /api/planeacion/taller/login` | G2 Auth Terminal | C2 On-Demand (`base.usuarios_taller`) | `usuario`, `box_name` | `usuario`, `box_name`, `zone_name`, `notes` |
 | `POST /api/planeacion/coordinacion/login` | G2 Auth Coordinación | C2 On-Demand (`base.user_coordinacion`) | `user` | `user` |
 
-## 3. Árbol de Archivos Adheridos en `logistica-monorepo`
-- `render.yaml`, `.gitignore`, `HANDOFF.md`
-- `services/master-service/node_backend/`: `package.json`, `package-lock.json`, `server.js`, `planeacion/db/{index,schema}.js`, `planeacion/services/hotRamBaseService.js`, `planeacion/routes/planeacionRoutes.js`
-- `apps/base-frontend/`: `package.json`, `package-lock.json`, `tsconfig.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `coordinacion.html`, `taller.html`, `public/fonts/*`, `src/**` (100% producción)
-
 ## 4. Variables de Entorno Requeridas
 - [x] `DATABASE_URL`, `PG_MAX_CONNECTIONS`, `PG_IDLE_TIMEOUT` (Compartidas en `diaria-operativas`)
-- [x] `VITE_API_URL`, `VITE_SOCKET_URL` (`https://diaria-operativas.onrender.com` en Static Site `base`)
+- [x] `VITE_API_URL`, `VITE_SOCKET_URL` (`https://diaria-operativas.onrender.com` en `coordinacion` y `taller`)
 
-## 5. Estado de Compilación y Verificación
-- **Módulos Backend (`node_backend/planeacion`)**: PASS (Exit Code 0)
-- **Build Frontend (`apps/base-frontend`)**: PASS (Exit Code 0)
+## 5. Estado de Compilación y Despliegue
+- **Módulos Backend (`node_backend/planeacion`)**: PASS (Exit Code 0, Live en `diaria-operativas`)
+- **Build & Deploy `coordinacion`**: PASS (Live en `https://coordinacion-06ce.onrender.com`)
+- **Build & Deploy `taller`**: PASS (Live en `https://taller-jdzi.onrender.com`)

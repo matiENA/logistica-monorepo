@@ -1,9 +1,37 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
+function devEntryRewritePlugin(): Plugin {
+  return {
+    name: 'dev-entry-rewrite',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url || '';
+        if (
+          url === '/taller' ||
+          url.startsWith('/taller/') ||
+          url.startsWith('/taller?') ||
+          url === '/login' ||
+          url.startsWith('/login/')
+        ) {
+          req.url = '/taller.html';
+        } else if (
+          url === '/' ||
+          url === '/coordinacion' ||
+          url.startsWith('/coordinacion/') ||
+          url.startsWith('/coordinacion?')
+        ) {
+          req.url = '/coordinacion.html';
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), devEntryRewritePlugin()],
   server: {
     port: 5173,
     cors: true,
@@ -24,7 +52,6 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
         taller: path.resolve(__dirname, 'taller.html'),
         coordinacion: path.resolve(__dirname, 'coordinacion.html'),
       },
