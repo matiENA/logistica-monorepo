@@ -1,14 +1,21 @@
-import React, { useState } from 'react';
-import { MapPin, User } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, MapPin, User } from 'lucide-react';
 import { toast } from 'sonner';
 import type { PlaneacionCard } from '../../types/planeacion';
-import { actualizarHold, agregarNotaProceso, getActiveSessionUser } from '../../services/planeacionApi';
+import { actualizarHold, agregarNotaProceso } from '../../services/planeacionApi';
 import { UnitLicensePlate } from '../common/UnitLicensePlate';
+import {
+  OperariosAssignDropdownCard,
+  type OperarioAssignableItem,
+} from '../common/OperariosAssignDropdownCard';
 
 export interface UnitPlaneacionCardProps {
   card: PlaneacionCard;
   onClick: (card: PlaneacionCard) => void;
   onNoteAdded?: () => void;
+  zoneUsuarios?: OperarioAssignableItem[];
+  onAssignUsuarios?: (card: PlaneacionCard, nextUserIds: string[]) => Promise<void>;
+  onAssignOpenChange?: (isOpen: boolean) => void;
   /** Slot extensible para inyectar métricas/badges adicionales sin romper el layout base */
   extraRightSlot?: React.ReactNode;
   draggable?: boolean;
@@ -47,6 +54,9 @@ export const UnitPlaneacionCard: React.FC<UnitPlaneacionCardProps> = ({
   card,
   onClick,
   onNoteAdded,
+  zoneUsuarios = [],
+  onAssignUsuarios,
+  onAssignOpenChange,
   extraRightSlot,
   draggable = true,
   onDragStart,
@@ -54,6 +64,25 @@ export const UnitPlaneacionCard: React.FC<UnitPlaneacionCardProps> = ({
   const [noteText, setNoteText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const assignBtnRef = useRef<HTMLButtonElement | null>(null);
+  const isAssignOpenRef = useRef(false);
+  const onAssignOpenChangeRef = useRef(onAssignOpenChange);
+  onAssignOpenChangeRef.current = onAssignOpenChange;
+
+  const setAssignOpenState = (next: boolean) => {
+    isAssignOpenRef.current = next;
+    setIsAssignOpen(next);
+    onAssignOpenChangeRef.current?.(next);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (isAssignOpenRef.current) {
+        onAssignOpenChangeRef.current?.(false);
+      }
+    };
+  }, []);
 
   const isPreasignadoHold = Boolean(card.hold_id || card.etapa_ciclo === 'PLANIFICADO_HOLD');
   const isUnfinalizedPreasignado = isPreasignadoHold && Boolean(card.en_proceso_activo);
@@ -169,7 +198,7 @@ export const UnitPlaneacionCard: React.FC<UnitPlaneacionCardProps> = ({
 
   return (
     <div
-      draggable={draggable}
+      draggable={draggable && !isAssignOpen}
       onDragStart={handleDefaultDragStart}
       onDragEnd={handleDragEndInternal}
       onClick={() => onClick(card)}
@@ -200,103 +229,153 @@ export const UnitPlaneacionCard: React.FC<UnitPlaneacionCardProps> = ({
         )}
       </div>
 
-      {/* Columna Derecha: Box actual (location: empty = Sin Box) + Timestamps Top Right + Última tarea/nota + Input stroke al fondo */}
+      {/* Columna Derecha: Jerarquía 2 (ÚLTIMA UBICACIÓN: ZONA y BOX) + Timestamps + Notas + Input */}
       <div className="flex flex-col justify-start items-start min-w-0 flex-1 self-stretch py-0.5 gap-1.5">
-        <div
-          className="flex items-center justify-between gap-1.5 text-[12px] leading-tight text-zinc-950 font-extrabold w-full"
-          title={
-            isPreasignadoHold
-              ? lastZone && lastBox
-                ? `Última ubicación: ${lastZone} · ${lastBox}`
-                : lastBox
-                ? `Última ubicación: ${lastBox}`
-                : 'Sin Box (Preasignado)'
-              : card.box_name
-              ? `Box actual: ${card.box_name}`
-              : 'Sin Box'
-          }
-        >
-          <div className="flex items-center gap-1.5 min-w-0">
-            <MapPin
-              className={`w-3.5 h-3.5 shrink-0 ${
-                isUnfinalizedPreasignado
-                  ? 'text-[#78350F]'
-                  : lastBox || card.box_name
-                  ? 'text-zinc-900'
-                  : 'text-zinc-400'
-              }`}
-            />
-            {isPreasignadoHold ? (
-              lastZone && lastBox ? (
-                <span className="truncate">
-                  <span
-                    className={`uppercase font-mono text-[10px] font-bold tracking-tight ${
-                      isUnfinalizedPreasignado ? 'text-[#78350F]' : 'text-zinc-500'
-                    }`}
-                  >
-                    {lastZone}
-                  </span>
-                  <span
-                    className={`mx-1 ${
-                      isUnfinalizedPreasignado ? 'text-[#78350F]/70' : 'text-zinc-400'
-                    }`}
-                  >
-                    ·
-                  </span>
-                  <span
-                    className={
-                      isUnfinalizedPreasignado
-                        ? 'text-zinc-950 font-extrabold'
-                        : 'text-zinc-900 font-extrabold'
-                    }
-                  >
-                    {lastBox}
-                  </span>
-                </span>
-              ) : lastBox ? (
-                <span className="truncate">{lastBox}</span>
-              ) : (
-                <span
-                  className={`truncate font-normal italic ${
-                    isUnfinalizedPreasignado ? 'text-zinc-800' : 'text-zinc-400'
-                  }`}
-                >
-                  Sin Box
-                </span>
-              )
-            ) : card.box_name ? (
-              <span className="truncate">{card.box_name}</span>
+        <div className="flex flex-col gap-0.5 w-full">
+          {/* Header de Ubicación con Timestamp */}
+          <div className="flex items-center justify-between gap-1 w-full">
+            <div className="flex items-center gap-1 min-w-0">
+              <MapPin
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                focusable="false"
+                className={`shrink-0 ${
+                  isUnfinalizedPreasignado ? 'text-[#78350F]' : 'text-zinc-600'
+                }`}
+              />
+              <span
+                className={`text-[9px] font-mono font-bold uppercase tracking-wider truncate ${
+                  isUnfinalizedPreasignado ? 'text-[#78350F]' : 'text-zinc-500'
+                }`}
+              >
+                {isPreasignadoHold ? 'ÚLTIMA UBICACIÓN' : 'UBICACIÓN'}
+              </span>
+            </div>
+            {card.salida_at ? (
+              <span
+                className="text-[10px] font-numeric tabular-nums text-zinc-700 font-bold shrink-0"
+                title={`Salida / Finalizó: ${card.salida_at}`}
+              >
+                {formatDateTimeShort(card.salida_at)}
+              </span>
+            ) : card.inicio_at ? (
+              <span
+                className="text-[10px] font-numeric tabular-nums text-emerald-700 font-bold shrink-0"
+                title={`Inicio: ${card.inicio_at}`}
+              >
+                {formatDateTimeShort(card.inicio_at)}
+              </span>
             ) : (
-              <span className="truncate font-normal italic text-zinc-400">Sin Box</span>
+              card.llegada_at ? (
+                <span
+                  className={`text-[10px] font-numeric tabular-nums font-bold shrink-0 ${
+                    isUnfinalizedPreasignado ? 'text-zinc-900' : 'text-amber-800'
+                  }`}
+                  title={`Preasignado / En espera: ${card.llegada_at}`}
+                >
+                  {formatDateTimeShort(card.llegada_at)}
+                </span>
+              ) : null
             )}
           </div>
-          {card.salida_at ? (
-            <span
-              className="text-[10px] font-numeric tabular-nums text-zinc-700 font-bold shrink-0"
-              title={`Salida / Finalizó: ${card.salida_at}`}
-            >
-              {formatDateTimeShort(card.salida_at)}
-            </span>
-          ) : card.inicio_at ? (
-            <span
-              className="text-[10px] font-numeric tabular-nums text-emerald-700 font-bold shrink-0"
-              title={`Inicio: ${card.inicio_at}`}
-            >
-              {formatDateTimeShort(card.inicio_at)}
-            </span>
-          ) : (
-            card.llegada_at ? (
-              <span
-                className={`text-[10px] font-numeric tabular-nums font-bold shrink-0 ${
-                  isUnfinalizedPreasignado ? 'text-zinc-900' : 'text-amber-800'
-                }`}
-                title={`Preasignado / En espera: ${card.llegada_at}`}
-              >
-                {formatDateTimeShort(card.llegada_at)}
+
+          {/* Explicitación: Tanto de Zona como Box */}
+          <div className="flex items-center gap-1.5 text-[11px] leading-tight flex-wrap w-full">
+            <span className={`inline-flex items-center gap-1 ${
+              isUnfinalizedPreasignado ? 'text-[#78350F]' : 'text-zinc-600'
+            }`}>
+              <span className="text-[9px] font-mono font-semibold uppercase opacity-80">ZONA:</span>
+              <span className={`font-extrabold truncate max-w-[85px] ${
+                isUnfinalizedPreasignado ? 'text-zinc-950' : 'text-zinc-900'
+              }`}>
+                {lastZone || (isPreasignadoHold ? 'Sin Zona' : card.zone_name || 'Sin Zona')}
               </span>
-            ) : null
-          )}
+            </span>
+            <span className={`text-[10px] ${
+              isUnfinalizedPreasignado ? 'text-[#78350F]/50' : 'text-zinc-300'
+            }`}>|</span>
+            <span className={`inline-flex items-center gap-1 ${
+              isUnfinalizedPreasignado ? 'text-[#78350F]' : 'text-zinc-600'
+            }`}>
+              <span className="text-[9px] font-mono font-semibold uppercase opacity-80">BOX:</span>
+              <span className={`font-extrabold font-mono truncate max-w-[75px] ${
+                isUnfinalizedPreasignado ? 'text-zinc-950' : 'text-zinc-900'
+              }`}>
+                {lastBox || 'Sin Box'}
+              </span>
+            </span>
+          </div>
         </div>
+
+        {/* Trigger compacto para Dropdown Card de operarios disponibles en la zona */}
+        {onAssignUsuarios && (
+          <div
+            className="w-full flex items-center gap-1.5 flex-wrap"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              ref={assignBtnRef}
+              type="button"
+              draggable={false}
+              onDragStart={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setAssignOpenState(!isAssignOpen);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation();
+                }
+              }}
+              aria-expanded={isAssignOpen}
+              aria-haspopup="dialog"
+              aria-label={`Asignar operarios en ${card.zone_name || 'zona'}`}
+              className={`max-w-full min-h-[26px] px-2 py-0.5 rounded-md border inline-flex items-center gap-1.5 text-[11px] font-medium transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-1 ${
+                isUnfinalizedPreasignado
+                  ? 'bg-amber-950/10 hover:bg-amber-950/20 text-zinc-950 border-amber-900/35'
+                  : 'bg-zinc-100 hover:bg-zinc-200/80 text-zinc-800 border-zinc-300'
+              }`}
+            >
+              <User
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                focusable="false"
+                className={isUnfinalizedPreasignado ? 'text-zinc-950 shrink-0' : 'text-emerald-700 shrink-0'}
+              />
+              <span className="truncate font-normal">
+                {card.usuarios_nombres && card.usuarios_nombres.length > 0
+                  ? card.usuarios_nombres.join(', ')
+                  : 'Asignar operarios'}
+              </span>
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                aria-hidden="true"
+                focusable="false"
+                className={`shrink-0 transition-transform ${isAssignOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            <OperariosAssignDropdownCard
+              open={isAssignOpen}
+              anchorRef={assignBtnRef}
+              onClose={() => setAssignOpenState(false)}
+              tractorPlate={card.tractor_plate}
+              semiPlate={card.semi_plate}
+              nUte={card.n_ute}
+              availableUsuarios={zoneUsuarios}
+              selectedUserIds={card.usuarios_ids || []}
+              onCommitUsuarios={(nextIds) => onAssignUsuarios(card, nextIds)}
+              theme="light"
+            />
+          </div>
+        )}
 
         {/* Última tarea/nota registrada en JSON */}
         {previewNote && (

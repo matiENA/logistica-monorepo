@@ -23,6 +23,8 @@ exports.usuariosTaller = exports.baseSchema.table('usuarios_taller', {
     id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
     nombreUsuario: (0, pg_core_1.text)('nombre_usuario').notNull().unique(),
     password: (0, pg_core_1.text)('password').notNull(),
+    rol: (0, pg_core_1.text)('rol').notNull().default('operario'),
+    zoneId: (0, pg_core_1.uuid)('zone_id').references(() => exports.zones.id, { onDelete: 'set null' }),
     boxId: (0, pg_core_1.uuid)('box_id').references(() => exports.boxes.id, { onDelete: 'set null' }),
     authUserId: (0, pg_core_1.uuid)('auth_user_id'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -75,8 +77,11 @@ exports.procesos = exports.baseSchema.table('procesos', {
     pendienteAt: (0, pg_core_1.timestamp)('pendiente_at', { withTimezone: true }).notNull().defaultNow(),
     llegadaZonaAt: (0, pg_core_1.timestamp)('llegada_zona_at', { withTimezone: true }),
     boxId: (0, pg_core_1.uuid)('box_id').references(() => exports.boxes.id, { onDelete: 'restrict' }),
+    estado: (0, pg_core_1.text)('estado').$type(),
     ingresoBoxAt: (0, pg_core_1.timestamp)('ingreso_box_at', { withTimezone: true }),
     usuariosIds: (0, pg_core_1.uuid)('usuarios_ids').array().notNull().default([]),
+    encargadoId: (0, pg_core_1.uuid)('encargado_id').references(() => exports.usuariosTaller.id, { onDelete: 'set null' }),
+    encargadoAt: (0, pg_core_1.timestamp)('encargado_at', { withTimezone: true }),
     salidaAt: (0, pg_core_1.timestamp)('salida_at', { withTimezone: true }),
     circuitoCerradoAt: (0, pg_core_1.timestamp)('circuito_cerrado_at', { withTimezone: true }),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -106,8 +111,11 @@ exports.procesosCold = exports.baseSchema.table('procesos_cold', {
     pendienteAt: (0, pg_core_1.timestamp)('pendiente_at', { withTimezone: true }).notNull(),
     llegadaZonaAt: (0, pg_core_1.timestamp)('llegada_zona_at', { withTimezone: true }),
     boxId: (0, pg_core_1.uuid)('box_id').references(() => exports.boxes.id, { onDelete: 'set null' }),
+    estado: (0, pg_core_1.text)('estado').$type(),
     ingresoBoxAt: (0, pg_core_1.timestamp)('ingreso_box_at', { withTimezone: true }),
     usuariosIds: (0, pg_core_1.uuid)('usuarios_ids').array().notNull().default([]),
+    encargadoId: (0, pg_core_1.uuid)('encargado_id').references(() => exports.usuariosTaller.id, { onDelete: 'set null' }),
+    encargadoAt: (0, pg_core_1.timestamp)('encargado_at', { withTimezone: true }),
     salidaAt: (0, pg_core_1.timestamp)('salida_at', { withTimezone: true }),
     circuitoCerradoAt: (0, pg_core_1.timestamp)('circuito_cerrado_at', { withTimezone: true }).notNull(),
     archivedAt: (0, pg_core_1.timestamp)('archived_at', { withTimezone: true }).notNull().defaultNow(),
@@ -131,6 +139,10 @@ exports.usuariosTallerRelations = (0, drizzle_orm_1.relations)(exports.usuariosT
     defaultBox: one(exports.boxes, {
         fields: [exports.usuariosTaller.boxId],
         references: [exports.boxes.id],
+    }),
+    zone: one(exports.zones, {
+        fields: [exports.usuariosTaller.zoneId],
+        references: [exports.zones.id],
     }),
 }));
 exports.unidadesRelations = (0, drizzle_orm_1.relations)(exports.unidades, ({ one }) => ({
@@ -160,6 +172,10 @@ exports.procesosRelations = (0, drizzle_orm_1.relations)(exports.procesos, ({ on
         fields: [exports.procesos.boxId],
         references: [exports.boxes.id],
     }),
+    encargado: one(exports.usuariosTaller, {
+        fields: [exports.procesos.encargadoId],
+        references: [exports.usuariosTaller.id],
+    }),
     notas: many(exports.procesosNotas),
 }));
 exports.procesosNotasRelations = (0, drizzle_orm_1.relations)(exports.procesosNotas, ({ one }) => ({
@@ -184,5 +200,9 @@ exports.procesosColdRelations = (0, drizzle_orm_1.relations)(exports.procesosCol
     box: one(exports.boxes, {
         fields: [exports.procesosCold.boxId],
         references: [exports.boxes.id],
+    }),
+    encargado: one(exports.usuariosTaller, {
+        fields: [exports.procesosCold.encargadoId],
+        references: [exports.usuariosTaller.id],
     }),
 }));

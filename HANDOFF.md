@@ -38,3 +38,14 @@
   - `apps/dash-frontend/src/store/useDashStore.ts`, `apps/dash-frontend/src/App.tsx`, `apps/dash-frontend/src/index.css`
   - `apps/dash-frontend/src/components/layout/Header.tsx`, `apps/dash-frontend/src/components/kanban/{QuickAddLibre,ColumnSplitter,LibresRow,NoveltyCard}.tsx`
   - `apps/dash-frontend/UPDATE_2026-11-19_IDLE_CARTELERA.md` (nuevo)
+
+## 7. Variación 2026-11-20 (`base-frontend` + `node_backend/planeacion` — Matriz Box × ADENTRO/AFUERA, Rol `encargado_zona` y `OperariosAssignDropdownCard`)
+- **Objetivo**: Sincronizar cambios locales validados en `localhost:5173` hacia `logistica-monorepo`: rol `encargado_zona` con stamp `encargado_id`/`encargado_at`, estado físico `adentro`/`afuera` en `base.procesos`, matriz dinámica por zona/box y portal de asignación de operarios en `/coordinacion` y `/taller`.
+- **Clasificación (`/db-render-arch`)**: **Capa C1 Hot RAM (`ETag` 304 por `zoneId`) + Write-Through + Capa C0 (micro-buffer 450 ms)**; 0 variables `.env` nuevas.
+- **Contratos Actualizados**:
+  - `GET /api/planeacion/board?includeCatalog=0&zoneId=<uuid>` & `GET /api/planeacion/taller-zone-map/:zoneId`: devuelven `taller_zone_map` (`boxes[]` con carriles `adentro`/`afuera`) y `catalog` filtrado por zona (`rol`, `zone_id`).
+  - `PATCH /api/planeacion/procesos/:id` / `POST /api/planeacion/holds/:id/activar` / `PATCH /api/planeacion/holds/:id`: aceptan `estado` (`'adentro' | 'afuera'`), validan permisos (`403 Forbidden` si `operario` intenta editar `usuariosIds`/`boxId`) y estampan `encargado_id`/`encargado_at` (nullable).
+- **Archivos**:
+  - `apps/base-frontend/src/components/common/{OperariosAssignDropdownCard,ZoneBoxMatrixContainer}.tsx` (nuevos)
+  - `apps/base-frontend/src/{components/kanban/{UnitPlaneacionCard,UnitPlaneacionDeployedModal},components/taller/TallerUnitCard,hooks/usePlaneacionKanban,pages/{PlaneacionKanbanPage,TallerLoginTerminalPage},services/planeacionApi,types/planeacion}.{ts,tsx}`
+  - `services/master-service/node_backend/planeacion/{db/schema,services/hotRamBaseService,routes/planeacionRoutes}.js`

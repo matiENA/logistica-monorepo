@@ -57,6 +57,10 @@ async function requireCoordinacionDeleteAuth(req, res) {
     return true;
 }
 function sendRouteError(res, err, fallbackMessage) {
+    if (err instanceof hotRamBaseService_js_1.ForbiddenError) {
+        res.status(403).json({ success: false, error: err.message });
+        return;
+    }
     if (err instanceof hotRamBaseService_js_1.ConflictError) {
         res.status(409).json({ success: false, error: err.message });
         return;
@@ -91,6 +95,7 @@ const llegadaSchema = zod_1.z.object({
 const patchProcesoSchema = zod_1.z.object({
     boxId: zod_1.z.string().uuid().optional(),
     zoneId: zod_1.z.string().uuid().optional(),
+    estado: zod_1.z.enum(['adentro', 'afuera']).nullable().optional(),
     usuariosIds: zod_1.z.array(zod_1.z.string().uuid()).optional(),
     targetEstado: zod_1.z.enum(['LLEGADA', 'INICIO']).optional(),
     action: zod_1.z.enum([
@@ -131,6 +136,7 @@ const patchHoldSchema = zod_1.z.object({
 const activarHoldSchema = zod_1.z.object({
     boxId: zod_1.z.string().uuid().nullable().optional(),
     iniciarInmediato: zod_1.z.boolean().optional(),
+    estado: zod_1.z.enum(['adentro', 'afuera']).nullable().optional(),
 });
 const archiveColdSchema = zod_1.z.object({
     retencion: zod_1.z
@@ -295,13 +301,22 @@ function createPlaneacionRouter(io) {
     });
     // Tablero caliente C1 (activos + holds + catalog) con soporte ETag / 304
     // includeCatalog=0 omite el padrón de 270+ unidades para mantener /taller < 3 KB Gzip (/db-perf-review)
+    // Si se envía zoneId válido junto a includeCatalog=0, devuelve únicamente el slice liviano de boxes y operarios de esa zona.
     router.get('/board', async (req, res) => {
         try {
             const includeCatalog = req.query.includeCatalog !== '0';
+            const rawZoneId = typeof req.query.zoneId === 'string' ? req.query.zoneId.trim() : '';
+            const validZoneId = UUID_REGEX.test(rawZoneId) ? rawZoneId : '';
+            const sectorZoneId = !includeCatalog ? validZoneId : '';
             const snapshot = await hotRamBaseService_js_1.hotRamBaseService.getBoardSnapshot();
+            const tallerZoneMap = validZoneId ? snapshot.tallerZoneMaps.get(validZoneId) ?? null : null;
             const effectiveEtag = includeCatalog
-                ? snapshot.etag
-                : `${snapshot.etag.slice(0, -1)}-taller"`;
+                ? validZoneId
+                    ? `${snapshot.etag.slice(0, -1)}-full-${validZoneId}"`
+                    : snapshot.etag
+                : sectorZoneId
+                    ? `${snapshot.etag.slice(0, -1)}-taller-${sectorZoneId}"`
+                    : `${snapshot.etag.slice(0, -1)}-taller"`;
             const clientEtag = req.headers['if-none-match'];
             if (clientEtag && clientEtag === effectiveEtag) {
                 res.status(304).end();
@@ -313,7 +328,19 @@ function createPlaneacionRouter(io) {
                 success: true,
                 activos: snapshot.activos,
                 holds: snapshot.holds,
-                ...(includeCatalog ? { catalog: snapshot.catalog } : {}),
+                ...(includeCatalog
+                    ? { catalog: snapshot.catalog }
+                    : sectorZoneId
+                        ? {
+                            catalog: {
+                                zones: snapshot.catalog.zones.filter((z) => z.id === sectorZoneId),
+                                unidades: [],
+                                boxes: snapshot.catalog.boxes.filter((b) => b.zone_id === sectorZoneId),
+                                usuarios: snapshot.catalog.usuarios.filter((u) => u.rol !== 'coordinacion' && u.zone_id === sectorZoneId),
+                            },
+                        }
+                        : {}),
+                ...(validZoneId ? { taller_zone_map: tallerZoneMap } : {}),
                 updatedAt: snapshot.updatedAt,
             });
         }
@@ -321,6 +348,39 @@ function createPlaneacionRouter(io) {
             res.status(500).json({
                 success: false,
                 error: err instanceof Error ? err.message : 'Error cargando tablero',
+            });
+        }
+    });
+    // Mapeo C1 Hot RAM dedicado para renderizado de /taller por zona (boxes contenidos + adentro/afuera)
+    router.get('/taller-zone-map/:zoneId', async (req, res) => {
+        const zoneId = String(req.params.zoneId || '').trim();
+        if (!UUID_REGEX.test(zoneId)) {
+            res.status(400).json({ success: false, error: 'zoneId inválido (se requiere UUID).' });
+            return;
+        }
+        try {
+            const { zoneMap, etag, updatedAt } = await hotRamBaseService_js_1.hotRamBaseService.getTallerZoneMap(zoneId);
+            if (!zoneMap) {
+                res.status(404).json({ success: false, error: `Zona ${zoneId} no encontrada en base.zones.` });
+                return;
+            }
+            const clientEtag = req.headers['if-none-match'];
+            if (clientEtag && clientEtag === etag) {
+                res.status(304).end();
+                return;
+            }
+            res.setHeader('ETag', etag);
+            res.setHeader('Cache-Control', 'no-cache');
+            res.json({
+                success: true,
+                taller_zone_map: zoneMap,
+                updatedAt,
+            });
+        }
+        catch (err) {
+            res.status(500).json({
+                success: false,
+                error: err instanceof Error ? err.message : 'Error cargando mapeo de boxes de zona',
             });
         }
     });
@@ -587,7 +647,12 @@ function createPlaneacionRouter(io) {
         }
         try {
             const holdId = String(req.params.id);
-            const hold = await hotRamBaseService_js_1.hotRamBaseService.actualizarHold(holdId, parsed.data);
+            const { actorUsuarioId, origen } = extractActorContext(req);
+            const hold = await hotRamBaseService_js_1.hotRamBaseService.actualizarHold(holdId, {
+                ...parsed.data,
+                actorUsuarioId,
+                origen,
+            });
             io.emit('planeacion_board_updated', { action: 'HOLD_UPDATED', holdId, updatedAt: Date.now() });
             res.json({ success: true, hold });
         }
@@ -618,7 +683,7 @@ function createPlaneacionRouter(io) {
         try {
             const holdId = String(req.params.id);
             const { actorUsuarioId } = extractActorContext(req);
-            const proceso = await hotRamBaseService_js_1.hotRamBaseService.activarHold(holdId, parsed.data.boxId, Boolean(parsed.data.iniciarInmediato), actorUsuarioId);
+            const proceso = await hotRamBaseService_js_1.hotRamBaseService.activarHold(holdId, parsed.data.boxId, Boolean(parsed.data.iniciarInmediato), actorUsuarioId, parsed.data.estado);
             io.emit('planeacion_board_updated', { action: 'HOLD_ACTIVATED', holdId, updatedAt: Date.now() });
             res.json({ success: true, proceso });
         }

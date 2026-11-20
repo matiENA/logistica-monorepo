@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import type {
   BoardResponse,
+  EstadoBox,
   PlaneacionCard,
   PlaneacionUnidadDetalle,
   TrayectoriaResponse,
@@ -8,12 +9,7 @@ import type {
   UsuarioTallerSession,
 } from '../types/planeacion';
 
-const isLocalHost =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE =
-  import.meta.env.VITE_API_URL ||
-  (isLocalHost ? '' : 'https://diaria-operativas.onrender.com');
+const API_BASE = import.meta.env.VITE_API_URL || '';
 const REQUEST_TIMEOUT_MS = 50_000; // Poka-Yoke Cold Start (Render)
 const TALLER_AUTH_STORAGE_KEY = 'base_taller_user';
 const COORDINACION_AUTH_STORAGE_KEY = 'base_coordinacion_user';
@@ -70,30 +66,38 @@ export function clearCoordinacionUser() {
   }
 }
 
+function isTallerPathname(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    (window.location.pathname.startsWith('/taller') ||
+      window.location.pathname.startsWith('/login'))
+  );
+}
+
 export function getActiveSessionUser(): {
   id: string;
   nombre_usuario: string;
   rol: 'taller' | 'coordinacion';
 } | null {
-  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/taller')) {
+  if (isTallerPathname()) {
     const taller = getSavedTallerUser();
     if (taller) return { id: taller.id, nombre_usuario: taller.nombre_usuario, rol: 'taller' };
+    return null;
   }
   const coord = getSavedCoordinacionUser();
   if (coord) return { id: coord.id, nombre_usuario: coord.nombre_usuario, rol: 'coordinacion' };
-  const taller = getSavedTallerUser();
-  if (taller) return { id: taller.id, nombre_usuario: taller.nombre_usuario, rol: 'taller' };
   return null;
 }
 
-const boardCache: Record<'full' | 'lite', { etag: string | null; data: BoardResponse | null }> = {
+const boardCache: Record<string, { etag: string | null; data: BoardResponse | null }> = {
   full: { etag: null, data: null },
   lite: { etag: null, data: null },
 };
 
 function clearBoardCache() {
-  boardCache.full.etag = null;
-  boardCache.lite.etag = null;
+  for (const key of Object.keys(boardCache)) {
+    boardCache[key].etag = null;
+  }
 }
 
 async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -106,10 +110,17 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
   }
 }
 
-async function loadBoardWithEtag(mode: 'full' | 'lite'): Promise<BoardResponse> {
-  const entry = boardCache[mode];
+async function loadBoardWithEtag(mode: 'full' | 'lite', zoneId?: string): Promise<BoardResponse> {
+  const cacheKey = mode === 'lite' && zoneId ? `lite:${zoneId}` : mode;
+  if (!boardCache[cacheKey]) {
+    boardCache[cacheKey] = { etag: null, data: null };
+  }
+  const entry = boardCache[cacheKey];
   const headers: HeadersInit = entry.etag ? { 'If-None-Match': entry.etag } : {};
-  const qs = mode === 'lite' ? '?includeCatalog=0' : '';
+  const qs =
+    mode === 'lite'
+      ? `?includeCatalog=0${zoneId ? `&zoneId=${encodeURIComponent(zoneId)}` : ''}`
+      : '';
 
   const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/board${qs}`, { headers });
 
@@ -128,6 +139,7 @@ async function loadBoardWithEtag(mode: 'full' | 'lite'): Promise<BoardResponse> 
     activos: raw.activos || [],
     holds: raw.holds || [],
     catalog: raw.catalog || { zones: [], boxes: [], usuarios: [], unidades: [] },
+    taller_zone_map: raw.taller_zone_map ?? null,
     updatedAt: raw.updatedAt || Date.now(),
   };
 
@@ -140,8 +152,8 @@ export async function fetchPlaneacionBoard(): Promise<BoardResponse> {
   return loadBoardWithEtag('full');
 }
 
-export async function fetchTallerBoard(): Promise<BoardResponse> {
-  return loadBoardWithEtag('lite');
+export async function fetchTallerBoard(zoneId?: string): Promise<BoardResponse> {
+  return loadBoardWithEtag('lite', zoneId);
 }
 
 export async function fetchFinalizados(limit = 50, offset = 0): Promise<PlaneacionCard[]> {
@@ -185,6 +197,8 @@ function buildSessionHeaders(extra?: Record<string, string>): Record<string, str
     headers['x-coordinacion-user-id'] = activeUser.id;
     headers['x-user-id'] = activeUser.id;
     headers['x-origen'] = 'coordinacion';
+  } else if (!isTallerPathname()) {
+    headers['x-origen'] = 'coordinacion';
   }
   return headers;
 }
@@ -216,6 +230,7 @@ export async function actualizarProceso(
   patch: {
     boxId?: string;
     zoneId?: string;
+    estado?: EstadoBox | null;
     usuariosIds?: string[];
     targetEstado?: 'LLEGADA' | 'INICIO';
     action?:
@@ -450,12 +465,17 @@ export async function eliminarNotaProceso(procesoId: string, noteId: string) {
 export async function activarHoldProceso(
   holdId: string,
   boxId?: string | null,
-  iniciarInmediato = false
+  iniciarInmediato = false,
+  estado?: EstadoBox | null
 ) {
   const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/holds/${holdId}/activar`, {
     method: 'POST',
     headers: buildSessionHeaders(),
-    body: JSON.stringify({ boxId: boxId || null, iniciarInmediato }),
+    body: JSON.stringify({
+      boxId: boxId || null,
+      iniciarInmediato,
+      ...(estado !== undefined ? { estado } : {}),
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -477,7 +497,7 @@ export async function actualizarHold(
 ) {
   const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/holds/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildSessionHeaders(),
     body: JSON.stringify(patch),
   });
   if (!res.ok) {

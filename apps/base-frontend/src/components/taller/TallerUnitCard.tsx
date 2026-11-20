@@ -1,9 +1,13 @@
-import React, { useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { GripVertical, MapPin, SlidersHorizontal, User, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { UnitLicensePlate } from '../common/UnitLicensePlate';
+import {
+  OperariosAssignDropdownCard,
+  type OperarioAssignableItem,
+} from '../common/OperariosAssignDropdownCard';
 import { actualizarHold, agregarNotaProceso, getSavedTallerUser } from '../../services/planeacionApi';
-import type { ProcesoNota } from '../../types/planeacion';
+import type { EstadoBox, ProcesoNota } from '../../types/planeacion';
 
 export type TallerColumnId = 'HOLD' | 'LLEGADA' | 'INICIO' | 'SALIDA';
 
@@ -18,6 +22,7 @@ export interface TallerCardItem {
   semi_plate: string;
   box_id: string | null;
   box_name: string;
+  estado?: EstadoBox | null;
   zone_id: string;
   zone_name: string;
   orden?: number | null;
@@ -25,12 +30,18 @@ export interface TallerCardItem {
   llegada_at?: string | null;
   inicio_at?: string | null;
   salida_at?: string | null;
+  usuarios_ids?: string[];
   usuarios_nombres: string[];
+  encargado_id?: string | null;
+  encargado_nombre?: string | null;
+  encargado_at?: string | null;
   notes?: ProcesoNota[];
   notes_count?: number;
   salida_previa_at?: string | null;
   salida_origen_box?: string | null;
   salida_origen_zone?: string | null;
+  ubicacion_actual_box?: string | null;
+  ubicacion_actual_zone?: string | null;
   ultima_tarea?: string | null;
   ultima_tarea_usuario?: string | null;
   ultima_tarea_at?: string | null;
@@ -41,7 +52,16 @@ interface TallerUnitCardProps {
   nowMs: number;
   isBusy: boolean;
   layout?: 'vertical' | 'horizontal';
+  compact?: boolean;
   isHoldExpanded?: boolean;
+  canManageAssignment?: boolean;
+  sectorBoxes?: Array<{ id: string; box_name: string }>;
+  sectorUsuarios?: OperarioAssignableItem[];
+  onAssign?: (
+    item: TallerCardItem,
+    payload: { usuariosIds?: string[]; boxId?: string | null }
+  ) => Promise<void>;
+  onAssignOpenChange?: (isOpen: boolean) => void;
   onNoteAdded?: () => void;
   onDragStart: (e: React.DragEvent<HTMLDivElement>, item: TallerCardItem) => void;
   onDragEnd: () => void;
@@ -112,7 +132,13 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   nowMs,
   isBusy,
   layout = 'vertical',
+  compact = false,
   isHoldExpanded = false,
+  canManageAssignment = false,
+  sectorBoxes = [],
+  sectorUsuarios = [],
+  onAssign,
+  onAssignOpenChange,
   onNoteAdded,
   onDragStart,
   onDragEnd,
@@ -121,7 +147,32 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   const [noteText, setNoteText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const assignBtnRef = useRef<HTMLButtonElement | null>(null);
+  const isAssignOpenRef = useRef(false);
+  const onAssignOpenChangeRef = useRef(onAssignOpenChange);
+  onAssignOpenChangeRef.current = onAssignOpenChange;
   const isDraggingRef = useRef(false);
+
+  const setAssignOpenState = (next: boolean) => {
+    isAssignOpenRef.current = next;
+    setIsAssignOpen(next);
+    onAssignOpenChangeRef.current?.(next);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (isAssignOpenRef.current) {
+        onAssignOpenChangeRef.current?.(false);
+      }
+    };
+  }, []);
+
+  const toggleAssignPanel = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isBusy) return;
+    setAssignOpenState(!isAssignOpen);
+  };
 
   const toggleExpand = () => {
     if (isBusy || isDraggingRef.current) return;
@@ -216,6 +267,18 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   const salidaDurationMin =
     item.col === 'SALIDA' ? formatDiffMin(item.llegada_at, item.salida_at) : null;
 
+  const ultimaZona =
+    item.salida_origen_zone ||
+    item.ubicacion_actual_zone ||
+    (item.col !== 'HOLD' ? item.zone_name : null) ||
+    'Sin Zona';
+
+  const ultimoBox =
+    item.salida_origen_box ||
+    item.ubicacion_actual_box ||
+    (item.col !== 'HOLD' ? item.box_name : null) ||
+    'Sin Box';
+
   if (layout === 'horizontal') {
     const isDockCollapsed = !isHoldExpanded;
     return (
@@ -223,21 +286,22 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
         role="button"
         tabIndex={0}
         aria-expanded={isExpanded}
-        draggable={!isBusy}
+        draggable={!isBusy && !isAssignOpen}
         onClick={toggleExpand}
         onKeyDown={handleKeyDown}
         onDragStart={handleDragStartInternal}
         onDragEnd={handleDragEndInternal}
-        className={`w-[240px] ${
-          isDockCollapsed ? 'h-[80px]' : 'h-[164px]'
-        } shrink-0 bg-[#0E131E] border rounded-xl p-2 flex flex-col justify-between transition-all duration-300 ease-out select-none outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] will-change-transform translate-z-0 ${colAccent} ${
+        className={`w-[290px] ${
+          isDockCollapsed ? 'h-[92px]' : 'h-[174px]'
+        } shrink-0 bg-[#0E131E] border rounded-xl p-2.5 flex flex-col justify-between transition-all duration-300 ease-out select-none outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] will-change-transform translate-z-0 ${colAccent} ${
           isDragging ? 'opacity-40 scale-[0.98] ring-2 ring-amber-400/50 shadow-lg' : ''
         } ${isBusy ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}
       >
-        <div className={isDockCollapsed ? 'flex items-center justify-between gap-1.5 h-full w-full' : ''}>
-          {/* Header de card horizontal: Grip + Patentes a la izquierda | Fecha salida previa al Top Right */}
-          <div className={`flex ${isDockCollapsed ? 'items-center' : 'items-start'} justify-between gap-1.5 min-w-0 w-full`}>
-            <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex flex-col gap-1.5 w-full">
+          {/* Header de card horizontal: Grip + Jerarquía 1 (Patentes) a la izquierda | Jerarquía 2 (ÚLTIMA UBICACIÓN) a la derecha */}
+          <div className="flex items-center justify-between gap-2 min-w-0 w-full">
+            {/* Jerarquía 1: Patentes */}
+            <div className="flex items-center gap-1.5 shrink-0">
               <GripVertical
                 size={16}
                 strokeWidth={2}
@@ -258,30 +322,100 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               </div>
             </div>
 
-            {item.salida_previa_at && (
-              <div className={`flex flex-col items-end shrink-0 font-numeric tabular-nums text-right ${isDockCollapsed ? 'self-center' : ''}`}>
-                <span className="text-[10px] text-emerald-300 font-bold" title={`Salida de: ${item.salida_origen_box || 'Box'}`}>
-                  {formatDateTimeShort(item.salida_previa_at)}
+            {/* Jerarquía 2: ÚLTIMA UBICACIÓN (h: ULTIMA UBICACION, ZONA y BOX explícitos) */}
+            <div className="flex flex-col justify-center min-w-0 flex-1 self-stretch pl-2 border-l border-white/10">
+              <div className="flex items-center justify-between gap-1 w-full">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1 truncate">
+                  <MapPin size={10} strokeWidth={2} aria-hidden="true" className="text-emerald-400 shrink-0" />
+                  ÚLTIMA UBICACIÓN
                 </span>
+                {item.salida_previa_at && (
+                  <span className="text-[9px] font-mono text-emerald-400 font-bold tabular-nums shrink-0" title={`Salida: ${item.salida_previa_at}`}>
+                    {formatDateTimeShort(item.salida_previa_at)}
+                  </span>
+                )}
               </div>
-            )}
+              <div className="flex flex-col gap-0.5 mt-1">
+                <div className="flex items-center gap-1 text-[11px] leading-tight">
+                  <span className="text-[9px] font-mono font-semibold text-zinc-500 uppercase">ZONA:</span>
+                  <span className="font-extrabold text-zinc-100 truncate" title={ultimaZona}>{ultimaZona}</span>
+                </div>
+                <div className="flex items-center gap-1 text-[11px] leading-tight">
+                  <span className="text-[9px] font-mono font-semibold text-zinc-500 uppercase">BOX:</span>
+                  <span className="font-extrabold text-emerald-400 font-mono truncate" title={ultimoBox}>{ultimoBox}</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* En estado expandido, mostrar aviso de Salida y Nota */}
+          {/* En estado expandido, mostrar aviso de Asignación y Nota */}
           {!isDockCollapsed && (
             <>
-              {/* Aviso de Salida de Box previo en horizontal */}
-              {item.salida_previa_at && (
-                <div className="mt-1.5 pl-5">
-                  <span className="inline-flex items-center gap-1 font-numeric tabular-nums text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold truncate max-w-full">
-                    Salida {item.salida_origen_box}
-                  </span>
+              {/* Metadata de sector para encargado en HOLD horizontal */}
+              {(canManageAssignment || item.encargado_at) && (
+                <div
+                  className="mt-1 pl-5 flex items-center justify-between gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                    {item.box_name && (
+                      <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-zinc-200 truncate">
+                        {item.box_name}
+                      </span>
+                    )}
+                    {item.usuarios_nombres.slice(0, 2).map((uname, idx) => (
+                      <span
+                        key={`${uname}-${idx}`}
+                        className="inline-flex items-center gap-0.5 text-[9px] font-medium px-1.5 py-0.5 rounded bg-[#141A26] border border-[#263042] text-zinc-200 truncate max-w-[85px]"
+                      >
+                        <User size={10} strokeWidth={2} aria-hidden="true" focusable="false" />
+                        <span className="truncate">{uname}</span>
+                      </span>
+                    ))}
+                  </div>
+                  {canManageAssignment && (
+                    <button
+                      ref={assignBtnRef}
+                      type="button"
+                      onClick={toggleAssignPanel}
+                      aria-expanded={isAssignOpen}
+                      aria-haspopup="dialog"
+                      aria-label="Asignar box u operarios"
+                      className="h-6 px-1.5 rounded bg-[#141A26] hover:bg-[#1E2530] border border-[#263042] text-zinc-200 hover:text-emerald-300 inline-flex items-center gap-1 text-[10px] font-semibold shrink-0 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[#10B981]"
+                    >
+                      <SlidersHorizontal size={11} strokeWidth={2} aria-hidden="true" focusable="false" />
+                      <span>Asignar</span>
+                    </button>
+                  )}
                 </div>
+              )}
+
+              {canManageAssignment && onAssign && (
+                <OperariosAssignDropdownCard
+                  open={isAssignOpen}
+                  anchorRef={assignBtnRef}
+                  onClose={() => setAssignOpenState(false)}
+                  tractorPlate={item.tractor_plate}
+                  semiPlate={item.semi_plate}
+                  nUte={item.n_ute}
+                  availableUsuarios={sectorUsuarios}
+                  selectedUserIds={item.usuarios_ids || []}
+                  onCommitUsuarios={(nextUserIds) =>
+                    onAssign(item, { usuariosIds: nextUserIds })
+                  }
+                  boxes={sectorBoxes}
+                  selectedBoxId={item.box_id}
+                  allowEmptyBox={true}
+                  onCommitBox={(nextBoxId) =>
+                    onAssign(item, { boxId: nextBoxId })
+                  }
+                  theme="dark"
+                />
               )}
 
               {/* Nota resumida si existe (author derecha de locación/box hex en amarillo) */}
               {previewNote && (
-                <div className="mt-1.5 pl-5 space-y-0.5">
+                <div className="mt-1 pl-5 space-y-0.5">
                   <div className="flex items-center justify-between gap-2 text-[10px]">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="font-bold text-[#F59E0B] tracking-wide shrink-0">
@@ -335,12 +469,14 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
       role="button"
       tabIndex={0}
       aria-expanded={isExpanded}
-      draggable={!isBusy}
+      draggable={!isBusy && !isAssignOpen}
       onClick={toggleExpand}
       onKeyDown={handleKeyDown}
       onDragStart={handleDragStartInternal}
       onDragEnd={handleDragEndInternal}
-      className={`bg-[#0E131E] border rounded-xl p-3.5 transition-all duration-200 select-none outline-none focus-visible:ring-2 focus-visible:ring-[#10B981] focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] will-change-transform translate-z-0 ${colAccent} ${
+      className={`bg-[#0E131E] border rounded-xl ${
+        compact ? 'p-2.5' : 'p-3.5'
+      } transition-all duration-200 select-none outline-none focus-visible:ring-2 focus-visible:ring-[#10B981] focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] will-change-transform translate-z-0 ${colAccent} ${
         isDragging ? 'opacity-40 scale-[0.98] ring-2 ring-emerald-500/50 shadow-lg' : ''
       } ${isBusy ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}
     >
@@ -399,12 +535,109 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
         </div>
       </div>
 
+      {/* Jerarquía 2: ÚLTIMA UBICACIÓN (se omite en modo compact dentro de su carril de box para evitar redundancia) */}
+      {!compact && (
+        <div className="mt-2 pl-6 flex flex-col gap-0.5">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1">
+              <MapPin size={11} strokeWidth={2} aria-hidden="true" className="text-emerald-400 shrink-0" />
+              {item.col === 'HOLD' ? 'ÚLTIMA UBICACIÓN' : 'UBICACIÓN'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] leading-tight flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              <span className="text-[9px] font-mono font-semibold text-zinc-500 uppercase">ZONA:</span>
+              <span className="font-extrabold text-zinc-100">{ultimaZona}</span>
+            </span>
+            <span className="text-zinc-600">|</span>
+            <span className="inline-flex items-center gap-1">
+              <span className="text-[9px] font-mono font-semibold text-zinc-500 uppercase">BOX:</span>
+              <span className="font-extrabold text-emerald-400 font-mono">{ultimoBox}</span>
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Asignación de Box / Operarios + Stamp de Encargado (sin UUIDs en UI) */}
+      {(canManageAssignment || item.encargado_at || item.usuarios_nombres.length > 0) && (
+        <div
+          className="mt-2 pl-6 flex items-center justify-between gap-2 flex-wrap"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            {!compact && canManageAssignment && item.box_name && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/5 border border-white/15 text-zinc-200">
+                {item.box_name}
+              </span>
+            )}
+            {item.usuarios_nombres.map((uname, idx) => (
+              <span
+                key={`${uname}-${idx}`}
+                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#141A26] border border-[#263042] text-zinc-200"
+              >
+                <User size={12} strokeWidth={2} aria-hidden="true" focusable="false" className="text-[#10B981]" />
+                <span>{uname}</span>
+              </span>
+            ))}
+            {item.encargado_at && (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-numeric tabular-nums px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
+                title="Última gestión de encargado de zona"
+              >
+                <UserCheck size={12} strokeWidth={2} aria-hidden="true" focusable="false" />
+                <span>{item.encargado_nombre || 'Encargado'}</span>
+                <span>· {formatDateTimeShort(item.encargado_at)}</span>
+              </span>
+            )}
+          </div>
+
+          {canManageAssignment && (
+            <button
+              ref={assignBtnRef}
+              type="button"
+              onClick={toggleAssignPanel}
+              aria-expanded={isAssignOpen}
+              aria-haspopup="dialog"
+              aria-label="Editar asignación de box y operarios"
+              className="h-7 min-h-[28px] px-2 rounded-md bg-[#141A26] hover:bg-[#1E2530] border border-[#263042] hover:border-[#10B981]/60 text-zinc-200 hover:text-emerald-300 inline-flex items-center gap-1 text-[11px] font-semibold shrink-0 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[#10B981]"
+            >
+              <SlidersHorizontal size={13} strokeWidth={2} aria-hidden="true" focusable="false" />
+              <span>Asignar</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Dropdown Card compartido de Operarios + Box (solo encargado_zona) */}
+      {canManageAssignment && onAssign && (
+        <OperariosAssignDropdownCard
+          open={isAssignOpen}
+          anchorRef={assignBtnRef}
+          onClose={() => setAssignOpenState(false)}
+          tractorPlate={item.tractor_plate}
+          semiPlate={item.semi_plate}
+          nUte={item.n_ute}
+          availableUsuarios={sectorUsuarios}
+          selectedUserIds={item.usuarios_ids || []}
+          onCommitUsuarios={(nextUserIds) =>
+            onAssign(item, { usuariosIds: nextUserIds })
+          }
+          boxes={sectorBoxes}
+          selectedBoxId={item.box_id}
+          allowEmptyBox={item.col === 'HOLD'}
+          onCommitBox={(nextBoxId) =>
+            onAssign(item, { boxId: nextBoxId })
+          }
+          theme="dark"
+        />
+      )}
+
       {/* Tarea previa en HOLD */}
       {item.col === 'HOLD' && item.ultima_tarea && (
         <div className="mt-2.5 pl-6">
           <div className="text-[12px] font-notes text-zinc-300 italic bg-white/5 border border-white/10 rounded-lg p-2 leading-relaxed">
             <span className="font-semibold text-zinc-100 not-italic block text-[10px] font-numeric uppercase tracking-wider text-emerald-400 mb-0.5">
-              Última tarea ({item.salida_origen_box}):
+              Última tarea ({ultimaZona} · {ultimoBox}):
             </span>
             “{item.ultima_tarea}”
             {item.ultima_tarea_usuario && (

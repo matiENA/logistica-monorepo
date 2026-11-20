@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.hotRamBaseService = exports.NotFoundError = exports.ConflictError = void 0;
+exports.hotRamBaseService = exports.ForbiddenError = exports.NotFoundError = exports.ConflictError = void 0;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_perf_hooks_1 = require("node:perf_hooks");
 const drizzle_orm_1 = require("drizzle-orm");
@@ -25,6 +25,14 @@ class NotFoundError extends Error {
     }
 }
 exports.NotFoundError = NotFoundError;
+class ForbiddenError extends Error {
+    statusCode = 403;
+    constructor(message) {
+        super(message);
+        this.name = 'ForbiddenError';
+    }
+}
+exports.ForbiddenError = ForbiddenError;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
 const WEEKLY_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000; // Chequeo diario (archiva circuitos > 7 días)
 class HotRamBaseService {
@@ -81,10 +89,134 @@ class HotRamBaseService {
             return 'EN_ESPERA';
         return 'PREASIGNADO';
     }
+    normalizeBoxEstado(raw) {
+        if (typeof raw !== 'string')
+            return null;
+        const normalized = raw.trim().toLowerCase();
+        if (normalized === 'adentro' || normalized === 'afuera') {
+            return normalized;
+        }
+        return null;
+    }
+    /**
+     * Construye el mapeo relacional O(1) en Hot RAM C1 para renderizado de /taller (TALLER YC.md):
+     * - "RESERVADO EN BOX" -> "RESERVADO"
+     * - "TRABAJANDO" -> denominación de la zona (zone_name)
+     * - Mapeo de los boxes contenidos en la zona, cada uno dividido en `adentro` y `afuera`.
+     */
+    buildTallerZoneMaps(catalog, activos) {
+        const map = new Map();
+        const boxesByZone = new Map();
+        for (const b of catalog.boxes) {
+            const list = boxesByZone.get(b.zone_id);
+            if (list)
+                list.push({ id: b.id, box_name: b.box_name });
+            else
+                boxesByZone.set(b.zone_id, [{ id: b.id, box_name: b.box_name }]);
+        }
+        for (const list of boxesByZone.values()) {
+            list.sort((a, b) => a.box_name.localeCompare(b.box_name, 'es', { numeric: true, sensitivity: 'base' }));
+        }
+        const boxSlotLookup = new Map();
+        for (const z of catalog.zones) {
+            const zoneBoxes = boxesByZone.get(z.id) || [];
+            const slots = zoneBoxes.map((b) => {
+                const slot = {
+                    box_id: b.id,
+                    box_name: b.box_name,
+                    adentro: [],
+                    afuera: [],
+                };
+                boxSlotLookup.set(b.id, slot);
+                return slot;
+            });
+            map.set(z.id, {
+                zone_id: z.id,
+                zone_name: z.zone_name,
+                etapa_labels: {
+                    reservado: 'RESERVADO',
+                    trabajando: z.zone_name,
+                    terminado: 'TERMINADO',
+                    pendiente: 'PENDIENTE',
+                },
+                boxes: slots,
+                sin_box: {
+                    adentro: [],
+                    afuera: [],
+                },
+            });
+        }
+        for (const card of activos) {
+            if (card.estado_proceso !== 'EN_PROCESO')
+                continue;
+            const zoneMap = map.get(card.zone_id);
+            if (!zoneMap)
+                continue;
+            const bucket = card.estado === 'afuera' ? 'afuera' : 'adentro';
+            const slot = card.box_id ? boxSlotLookup.get(card.box_id) : undefined;
+            if (slot) {
+                slot[bucket].push(card);
+            }
+            else {
+                zoneMap.sin_box[bucket].push(card);
+            }
+        }
+        return map;
+    }
     isPendingRow(row) {
         return !row.llegadaZonaAt && !row.ingresoBoxAt && !row.salidaAt;
     }
-    buildRuntimeIndex(catalog, tractoresRows, semisRows, coordUsersRows) {
+    async resolveTallerActorMeta(actorUsuarioId, index) {
+        const cleanId = (actorUsuarioId || '').trim();
+        if (!cleanId)
+            return null;
+        const cached = index.tallerUsersMetaMap.get(cleanId);
+        if (cached)
+            return cached;
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId)) {
+            return null;
+        }
+        const res = await index_js_1.pool.query(`SELECT
+         ut.id,
+         ut.auth_user_id,
+         ut.rol,
+         ut.box_id,
+         COALESCE(ut.zone_id, b.zone_id) AS zone_id
+       FROM base.usuarios_taller ut
+       LEFT JOIN base.boxes b ON b.id = ut.box_id
+       WHERE ut.id = $1::uuid OR ut.auth_user_id = $1::uuid
+       LIMIT 1;`, [cleanId]);
+        if (res.rows.length === 0)
+            return null;
+        const row = res.rows[0];
+        const meta = {
+            id: String(row.id),
+            rol: row.rol === 'encargado_zona' ? 'encargado_zona' : 'operario',
+            zone_id: row.zone_id ? String(row.zone_id) : null,
+            box_id: row.box_id ? String(row.box_id) : null,
+        };
+        index.tallerUsersMetaMap.set(meta.id, meta);
+        if (row.auth_user_id) {
+            index.tallerUsersMetaMap.set(String(row.auth_user_id), meta);
+        }
+        return meta;
+    }
+    async sanitizeAndValidateUsuariosIds(usuariosIds, targetZoneId, restrictToZone, index) {
+        const resolved = new Set();
+        for (const uid of usuariosIds) {
+            const meta = index.tallerUsersMetaMap.get(uid) ??
+                (await this.resolveTallerActorMeta(uid, index));
+            if (!meta) {
+                throw new ConflictError('Uno o más usuarios seleccionados no pertenecen a base.usuarios_taller.');
+            }
+            if (restrictToZone && (!meta.zone_id || meta.zone_id !== targetZoneId)) {
+                throw new ForbiddenError('Permiso denegado: el encargado_zona solo puede asignar operarios pertenecientes a su zona.');
+            }
+            resolved.add(meta.id);
+        }
+        return Array.from(resolved);
+    }
+    buildRuntimeIndex(catalog, tractoresRows, semisRows, coordUsersRows, tallerUsersMetaRows) {
         const zonesMap = new Map();
         for (const z of catalog.zones)
             zonesMap.set(z.id, z.zone_name);
@@ -97,6 +229,19 @@ class HotRamBaseService {
             usersMap.set(u.id, u.nombre_usuario);
         for (const c of coordUsersRows)
             usersMap.set(c.id, c.nombre_usuario);
+        const tallerUsersMetaMap = new Map();
+        for (const ut of tallerUsersMetaRows) {
+            const meta = {
+                id: ut.id,
+                rol: ut.rol === 'encargado_zona' ? 'encargado_zona' : 'operario',
+                zone_id: ut.zone_id,
+                box_id: ut.box_id,
+            };
+            tallerUsersMetaMap.set(ut.id, meta);
+            if (ut.auth_user_id) {
+                tallerUsersMetaMap.set(ut.auth_user_id, meta);
+            }
+        }
         const userNameToIdMap = new Map();
         for (const [id, name] of usersMap.entries()) {
             userNameToIdMap.set(name.trim().toLowerCase(), id);
@@ -130,6 +275,7 @@ class HotRamBaseService {
             zonesMap,
             boxesMap,
             usersMap,
+            tallerUsersMetaMap,
             userNameToIdMap,
             tractoresMap,
             semisMap,
@@ -221,9 +367,12 @@ class HotRamBaseService {
             index_js_1.db
                 .select({
                 id: schema_js_1.usuariosTaller.id,
+                auth_user_id: schema_js_1.usuariosTaller.authUserId,
                 nombre_usuario: schema_js_1.usuariosTaller.nombreUsuario,
+                rol: schema_js_1.usuariosTaller.rol,
                 box_id: schema_js_1.usuariosTaller.boxId,
                 box_name: schema_js_1.boxes.boxName,
+                zone_id: (0, drizzle_orm_1.sql) `COALESCE(${schema_js_1.usuariosTaller.zoneId}, ${schema_js_1.boxes.zoneId})`,
             })
                 .from(schema_js_1.usuariosTaller)
                 .leftJoin(schema_js_1.boxes, (0, drizzle_orm_1.eq)(schema_js_1.usuariosTaller.boxId, schema_js_1.boxes.id))
@@ -234,6 +383,7 @@ class HotRamBaseService {
                 nombre_usuario: schema_js_1.userCoordinacion.nombreUsuario,
                 box_id: schema_js_1.userCoordinacion.boxId,
                 box_name: schema_js_1.boxes.boxName,
+                zone_id: (0, drizzle_orm_1.sql) `COALESCE(${schema_js_1.userCoordinacion.zoneId}, ${schema_js_1.boxes.zoneId})`,
             })
                 .from(schema_js_1.userCoordinacion)
                 .leftJoin(schema_js_1.boxes, (0, drizzle_orm_1.eq)(schema_js_1.userCoordinacion.boxId, schema_js_1.boxes.id))
@@ -256,7 +406,24 @@ class HotRamBaseService {
         const catalog = {
             zones: zonesRows.map((z) => ({ id: z.id, zone_name: z.zoneName })),
             boxes: boxesRows,
-            usuarios: [...tallerUsersRows, ...coordUsersRows],
+            usuarios: [
+                ...tallerUsersRows.map((u) => ({
+                    id: u.id,
+                    nombre_usuario: u.nombre_usuario,
+                    rol: (u.rol === 'encargado_zona' ? 'encargado_zona' : 'operario'),
+                    box_id: u.box_id,
+                    box_name: u.box_name,
+                    zone_id: u.zone_id,
+                })),
+                ...coordUsersRows.map((c) => ({
+                    id: c.id,
+                    nombre_usuario: c.nombre_usuario,
+                    rol: 'coordinacion',
+                    box_id: c.box_id,
+                    box_name: c.box_name,
+                    zone_id: c.zone_id,
+                })),
+            ],
             unidades: unitsRows.map((u) => ({
                 unidad_id: u.unidad_id,
                 n_ute: u.n_ute || '',
@@ -266,7 +433,13 @@ class HotRamBaseService {
                 semi_plate: u.semi_id ? smMap.get(u.semi_id) || '' : '',
             })),
         };
-        const index = this.buildRuntimeIndex(catalog, tractoresRows, semisRows, coordUsersRows.map((c) => ({ id: c.id, nombre_usuario: c.nombre_usuario })));
+        const index = this.buildRuntimeIndex(catalog, tractoresRows, semisRows, coordUsersRows.map((c) => ({ id: c.id, nombre_usuario: c.nombre_usuario })), tallerUsersRows.map((u) => ({
+            id: u.id,
+            auth_user_id: u.auth_user_id,
+            rol: u.rol,
+            zone_id: u.zone_id,
+            box_id: u.box_id,
+        })));
         return { catalog, index };
     }
     async ensureRuntimeIndex() {
@@ -310,8 +483,11 @@ class HotRamBaseService {
                         pendienteAt: schema_js_1.procesos.pendienteAt,
                         llegadaZonaAt: schema_js_1.procesos.llegadaZonaAt,
                         boxId: schema_js_1.procesos.boxId,
+                        estado: schema_js_1.procesos.estado,
                         ingresoBoxAt: schema_js_1.procesos.ingresoBoxAt,
                         usuariosIds: schema_js_1.procesos.usuariosIds,
+                        encargadoId: schema_js_1.procesos.encargadoId,
+                        encargadoAt: schema_js_1.procesos.encargadoAt,
                         salidaAt: schema_js_1.procesos.salidaAt,
                         circuitoCerradoAt: schema_js_1.procesos.circuitoCerradoAt,
                         updatedAt: schema_js_1.procesos.updatedAt,
@@ -415,6 +591,9 @@ class HotRamBaseService {
                     const virtualUnit = this.resolveVirtualUnit(index, r.tractorId, r.semiId);
                     const usuariosIds = Array.isArray(r.usuariosIds) ? r.usuariosIds : [];
                     const usuariosNombres = usuariosIds.map((uid) => index.usersMap.get(uid) || 'Operario');
+                    const encargadoId = r.encargadoId || null;
+                    const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
+                    const encargadoAt = r.encargadoAt ? r.encargadoAt.toISOString() : null;
                     const circuitNotes = notesByCircuito.get(r.circuitoId) || [];
                     const lastNote = circuitNotes.length > 0 ? circuitNotes[circuitNotes.length - 1] : null;
                     const prevClosed = latestClosedByCircuito.get(r.circuitoId) || null;
@@ -441,9 +620,13 @@ class HotRamBaseService {
                             zone_name: zoneName,
                             box_id: r.boxId,
                             box_name: boxName,
+                            estado: this.normalizeBoxEstado(r.estado),
                             orden: 1,
                             usuarios_ids: usuariosIds,
                             usuarios_nombres: usuariosNombres,
+                            encargado_id: encargadoId,
+                            encargado_nombre: encargadoNombre,
+                            encargado_at: encargadoAt,
                             nota_planificacion: lastNote?.texto || null,
                             notes: circuitNotes,
                             proceso_origen_id: null,
@@ -500,6 +683,7 @@ class HotRamBaseService {
                         modalidad_tracking: this.resolveModalidad(r.tractorId, r.semiId),
                         box_id: r.boxId || '',
                         box_name: boxName,
+                        estado: this.normalizeBoxEstado(r.estado),
                         zone_id: r.zoneId,
                         zone_name: zoneName,
                         estado_proceso: this.resolveEstado(r.llegadaZonaAt, r.ingresoBoxAt, r.salidaAt),
@@ -511,6 +695,9 @@ class HotRamBaseService {
                         circuito_cerrado_at: r.circuitoCerradoAt ? r.circuitoCerradoAt.toISOString() : null,
                         usuarios_ids: usuariosIds,
                         usuarios_nombres: usuariosNombres,
+                        encargado_id: encargadoId,
+                        encargado_nombre: encargadoNombre,
+                        encargado_at: encargadoAt,
                         notes: circuitNotes,
                         salida_previa_at: prevClosed && prevClosed.row_id !== r.id ? prevClosed.salida_at : null,
                         salida_origen_box: prevClosed && prevClosed.row_id !== r.id ? prevClosed.box_name : null,
@@ -520,6 +707,7 @@ class HotRamBaseService {
                         ultima_tarea_at: lastNote?.timestamp || null,
                     });
                 }
+                const tallerZoneMaps = this.buildTallerZoneMaps(catalog, activos);
                 const etag = this.computeEtag({
                     activos,
                     holds,
@@ -530,6 +718,7 @@ class HotRamBaseService {
                     activos,
                     holds,
                     catalog,
+                    tallerZoneMaps,
                     etag,
                     updatedAt: Date.now(),
                 };
@@ -546,6 +735,15 @@ class HotRamBaseService {
             return this.hydrateBoard(true);
         }
         return this.cache;
+    }
+    async getTallerZoneMap(zoneId) {
+        const snapshot = await this.getBoardSnapshot();
+        const zoneMap = snapshot.tallerZoneMaps.get(zoneId) || null;
+        return {
+            zoneMap,
+            etag: `${snapshot.etag.slice(0, -1)}-zonemap-${zoneId}"`,
+            updatedAt: snapshot.updatedAt,
+        };
     }
     invalidate(forceCatalog = false) {
         if (forceCatalog) {
@@ -624,16 +822,16 @@ class HotRamBaseService {
         const res = await index_js_1.pool.query(`
       SELECT
         id, circuito_id, tractor_id, semi_id, tractor_n, semi_n,
-        zone_id, pendiente_at, llegada_zona_at, box_id, ingreso_box_at,
-        usuarios_ids, salida_at, circuito_cerrado_at,
+        zone_id, pendiente_at, llegada_zona_at, box_id, estado, ingreso_box_at,
+        usuarios_ids, encargado_id, encargado_at, salida_at, circuito_cerrado_at,
         'ACTIVO_HOT'::text AS etapa_origen
       FROM base.procesos
       WHERE salida_at IS NOT NULL
       UNION ALL
       SELECT
         id, circuito_id, tractor_id, semi_id, tractor_n, semi_n,
-        zone_id, pendiente_at, llegada_zona_at, box_id, ingreso_box_at,
-        usuarios_ids, salida_at, circuito_cerrado_at,
+        zone_id, pendiente_at, llegada_zona_at, box_id, estado, ingreso_box_at,
+        usuarios_ids, encargado_id, encargado_at, salida_at, circuito_cerrado_at,
         'HISTORICO_COLD'::text AS etapa_origen
       FROM base.procesos_cold
       WHERE salida_at IS NOT NULL
@@ -650,6 +848,9 @@ class HotRamBaseService {
             const semiId = r.semi_id ? String(r.semi_id) : null;
             const virtualUnit = this.resolveVirtualUnit(index, tractorId, semiId);
             const usuariosIds = Array.isArray(r.usuarios_ids) ? r.usuarios_ids : [];
+            const encargadoId = r.encargado_id ? String(r.encargado_id) : null;
+            const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
+            const encargadoAt = r.encargado_at ? new Date(String(r.encargado_at)).toISOString() : null;
             const notes = notesMap.get(String(r.circuito_id)) || [];
             return {
                 proceso_id: String(r.id),
@@ -665,6 +866,7 @@ class HotRamBaseService {
                 modalidad_tracking: this.resolveModalidad(tractorId, semiId),
                 box_id: r.box_id ? String(r.box_id) : '',
                 box_name: boxInfo?.box_name || '',
+                estado: this.normalizeBoxEstado(r.estado),
                 zone_id: zoneId,
                 zone_name: zoneName,
                 estado_proceso: 'FINALIZADO',
@@ -678,6 +880,9 @@ class HotRamBaseService {
                     : null,
                 usuarios_ids: usuariosIds,
                 usuarios_nombres: usuariosIds.map((uid) => index.usersMap.get(uid) || 'Operario'),
+                encargado_id: encargadoId,
+                encargado_nombre: encargadoNombre,
+                encargado_at: encargadoAt,
                 notes,
             };
         });
@@ -735,6 +940,9 @@ class HotRamBaseService {
             const zoneName = boxInfo?.zone_name || (zoneId ? index.zonesMap.get(zoneId) || '' : '');
             const virtualUnit = this.resolveVirtualUnit(index, r.tractorId, r.semiId);
             const uIds = Array.isArray(r.usuariosIds) ? r.usuariosIds : [];
+            const encargadoId = r.encargadoId || null;
+            const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
+            const encargadoAt = r.encargadoAt ? r.encargadoAt.toISOString() : null;
             const notes = notesMap.get(r.circuitoId) || [];
             return {
                 proceso_id: r.id,
@@ -750,6 +958,7 @@ class HotRamBaseService {
                 modalidad_tracking: this.resolveModalidad(r.tractorId, r.semiId),
                 box_id: r.boxId || '',
                 box_name: boxInfo?.box_name || '',
+                estado: this.normalizeBoxEstado(r.estado),
                 zone_id: zoneId,
                 zone_name: zoneName,
                 estado_proceso: this.resolveEstado(r.llegadaZonaAt, r.ingresoBoxAt, r.salidaAt),
@@ -761,6 +970,9 @@ class HotRamBaseService {
                 circuito_cerrado_at: r.circuitoCerradoAt ? r.circuitoCerradoAt.toISOString() : null,
                 usuarios_ids: uIds,
                 usuarios_nombres: uIds.map((uid) => index.usersMap.get(uid) || 'Operario'),
+                encargado_id: encargadoId,
+                encargado_nombre: encargadoNombre,
+                encargado_at: encargadoAt,
                 notes,
             };
         };
@@ -794,6 +1006,9 @@ class HotRamBaseService {
                 orden: 1,
                 usuarios_ids: card.usuarios_ids,
                 usuarios_nombres: card.usuarios_nombres,
+                encargado_id: card.encargado_id ?? null,
+                encargado_nombre: card.encargado_nombre ?? null,
+                encargado_at: card.encargado_at ?? null,
                 nota_planificacion: lastNote?.texto || null,
                 notes: card.notes,
                 created_at: r.pendienteAt.toISOString(),
@@ -809,6 +1024,7 @@ class HotRamBaseService {
         const toCleanStep = (c, etapa) => ({
             etapa_ciclo: etapa,
             estado_proceso: c.estado_proceso,
+            estado_box: c.estado,
             box_name: c.box_name || 'Sin Box asignado',
             zone_name: c.zone_name,
             orden: null,
@@ -819,6 +1035,8 @@ class HotRamBaseService {
             duracion_trabajo_min: diffMin(c.inicio_at, c.salida_at),
             duracion_total_min: diffMin(c.llegada_at, c.salida_at),
             usuarios_nombres: c.usuarios_nombres,
+            encargado_nombre: c.encargado_nombre ?? null,
+            encargado_at: c.encargado_at ?? null,
             nota_planificacion: null,
             notes_count: c.notes.length,
             ultima_nota: c.notes.length > 0 ? c.notes[c.notes.length - 1].texto : null,
@@ -829,6 +1047,7 @@ class HotRamBaseService {
             ...recorridoProgramado.map((h) => ({
                 etapa_ciclo: 'PLANIFICADO_HOLD',
                 estado_proceso: 'PREASIGNADO',
+                estado_box: h.estado ?? null,
                 box_name: h.box_name || 'Sin Box asignado',
                 zone_name: h.zone_name,
                 orden: h.orden,
@@ -839,6 +1058,8 @@ class HotRamBaseService {
                 duracion_trabajo_min: null,
                 duracion_total_min: null,
                 usuarios_nombres: h.usuarios_nombres,
+                encargado_nombre: h.encargado_nombre ?? null,
+                encargado_at: h.encargado_at ?? null,
                 nota_planificacion: h.nota_planificacion,
                 notes_count: h.notes ? h.notes.length : 0,
                 ultima_nota: h.notes && h.notes.length > 0 ? h.notes[h.notes.length - 1].texto : null,
@@ -1073,6 +1294,11 @@ class HotRamBaseService {
                             semiN: c.semi_n || null,
                             zoneId: nextZoneId,
                             boxId: nextBoxId,
+                            estado: targetEstado === 'LLEGADA'
+                                ? null
+                                : patch.estado !== undefined
+                                    ? patch.estado
+                                    : this.normalizeBoxEstado(c.estado) ?? 'adentro',
                             pendienteAt: pendDate,
                             llegadaZonaAt: llegDate,
                             ingresoBoxAt: nextIngDate,
@@ -1083,6 +1309,8 @@ class HotRamBaseService {
                                 : Array.isArray(c.usuarios_ids)
                                     ? c.usuarios_ids
                                     : [],
+                            encargadoId: c.encargado_id || null,
+                            encargadoAt: c.encargado_at ? new Date(String(c.encargado_at)) : null,
                         })
                             .returning();
                         await tx.delete(schema_js_1.procesosCold).where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, procesoId));
@@ -1148,6 +1376,7 @@ class HotRamBaseService {
                     ingresoBoxAt: null,
                     salidaAt: null,
                     boxId: null,
+                    estado: null,
                     zoneId: targetZoneId,
                     updatedAt: (0, drizzle_orm_1.sql) `now()`,
                 })
@@ -1224,6 +1453,59 @@ class HotRamBaseService {
             const updates = {
                 updatedAt: (0, drizzle_orm_1.sql) `now()`,
             };
+            if (patch.origen === 'taller') {
+                const actorMeta = await this.resolveTallerActorMeta(patch.actorUsuarioId, index);
+                if (patch.zoneId !== undefined && patch.zoneId !== current.zone_id) {
+                    throw new ForbiddenError('Permiso denegado: usuarios de taller no pueden reasignar zone_id entre zonas.');
+                }
+                const currentUsers = Array.isArray(current.usuarios_ids) ? current.usuarios_ids : [];
+                const currentUsersSet = new Set(currentUsers);
+                const patchUsersArr = patch.usuariosIds ?? [];
+                const selfId = actorMeta?.id || patch.actorUsuarioId || null;
+                const isSameUsersList = patch.usuariosIds !== undefined &&
+                    new Set(patchUsersArr).size === currentUsersSet.size &&
+                    patchUsersArr.every((uid) => currentUsersSet.has(uid));
+                const isSelfStartAdd = patch.action === 'INICIAR' &&
+                    currentUsers.every((uid) => patchUsersArr.includes(uid)) &&
+                    patchUsersArr.every((uid) => currentUsersSet.has(uid) || (selfId !== null && uid === selfId));
+                const isEditingUsuarios = patch.usuariosIds !== undefined && !isSameUsersList && !isSelfStartAdd;
+                // Auto-ubicación por UUID del usuario (/db-render-arch C1 Hot RAM):
+                // Un operario puede auto-ubicarse en su propio actorMeta.box_id (si pertenece a la zona actual)
+                // al ejecutar INICIAR o REABRIR, sin requerir encargado_zona ni alterar encargado_id/at.
+                const actorOwnBoxInZone = actorMeta?.rol === 'operario' &&
+                    actorMeta.box_id &&
+                    index.boxesMap.get(actorMeta.box_id)?.zone_id === current.zone_id
+                    ? actorMeta.box_id
+                    : null;
+                const isSelfBoxStartOrReopen = (patch.action === 'INICIAR' || patch.action === 'REABRIR') &&
+                    actorOwnBoxInZone !== null &&
+                    patch.boxId === actorOwnBoxInZone;
+                const isEditingBox = patch.boxId !== undefined &&
+                    patch.boxId !== current.box_id &&
+                    !isSelfBoxStartOrReopen;
+                if (isEditingUsuarios || isEditingBox) {
+                    if (!actorMeta || actorMeta.rol !== 'encargado_zona') {
+                        throw new ForbiddenError('Permiso denegado: solo el rol encargado_zona puede editar usuarios_ids o box_id en procesos.');
+                    }
+                    if (!actorMeta.zone_id || actorMeta.zone_id !== current.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el encargado_zona solo puede editar procesos dentro de su zona asignada.');
+                    }
+                    if (patch.boxId) {
+                        const targetBoxInfo = index.boxesMap.get(patch.boxId);
+                        if (!targetBoxInfo || targetBoxInfo.zone_id !== actorMeta.zone_id) {
+                            throw new ForbiddenError('Permiso denegado: el box destino no pertenece a la zona del encargado.');
+                        }
+                    }
+                    updates.encargadoId = actorMeta.id;
+                    updates.encargadoAt = (0, drizzle_orm_1.sql) `now()`;
+                }
+                // Si el operario inicia o reabre sin enviar boxId explícito, auto-asignar su propio box_id por UUID
+                if (!patch.boxId &&
+                    (patch.action === 'INICIAR' || patch.action === 'REABRIR') &&
+                    actorOwnBoxInZone) {
+                    updates.boxId = actorOwnBoxInZone;
+                }
+            }
             if (patch.boxId) {
                 const bInfo = index.boxesMap.get(patch.boxId);
                 updates.boxId = patch.boxId;
@@ -1234,7 +1516,11 @@ class HotRamBaseService {
                 updates.zoneId = patch.zoneId;
             }
             if (patch.usuariosIds !== undefined) {
-                updates.usuariosIds = patch.usuariosIds;
+                const effectiveZoneId = updates.zoneId || current.zone_id;
+                updates.usuariosIds = await this.sanitizeAndValidateUsuariosIds(patch.usuariosIds, effectiveZoneId, patch.origen === 'taller', index);
+            }
+            if (patch.estado !== undefined) {
+                updates.estado = patch.estado;
             }
             let pendingHold = null;
             let lastNoteText = null;
@@ -1254,9 +1540,16 @@ class HotRamBaseService {
                 }
                 if (targetEstado === 'LLEGADA') {
                     updates.ingresoBoxAt = null;
+                    updates.estado = null;
                 }
-                else if (!current.ingreso_box_at) {
-                    updates.ingresoBoxAt = (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`;
+                else {
+                    if (!current.ingreso_box_at) {
+                        updates.ingresoBoxAt = (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`;
+                    }
+                    updates.estado =
+                        patch.estado !== undefined
+                            ? patch.estado
+                            : this.normalizeBoxEstado(current.estado) ?? 'adentro';
                 }
             }
             else if (patch.action === 'INICIAR') {
@@ -1272,10 +1565,15 @@ class HotRamBaseService {
                 if (!current.ingreso_box_at) {
                     updates.ingresoBoxAt = (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`;
                 }
+                updates.estado =
+                    patch.estado !== undefined
+                        ? patch.estado
+                        : this.normalizeBoxEstado(current.estado) ?? 'adentro';
             }
             else if (patch.action === 'DESHACER_INICIO') {
                 updates.ingresoBoxAt = null;
                 updates.salidaAt = null;
+                updates.estado = null;
                 if (!current.llegada_zona_at) {
                     updates.llegadaZonaAt = current.pendiente_at;
                 }
@@ -1329,6 +1627,10 @@ class HotRamBaseService {
                 tractor_id: row.tractorId,
                 semi_id: row.semiId,
                 box_name: boxInfo?.box_name || '',
+                estado: this.normalizeBoxEstado(row.estado),
+                encargado_id: row.encargadoId || null,
+                encargado_nombre: row.encargadoId ? index.usersMap.get(row.encargadoId) || null : null,
+                encargado_at: row.encargadoAt ? row.encargadoAt.toISOString() : null,
                 llegada_at: (row.llegadaZonaAt || row.pendienteAt).toISOString(),
                 inicio_at: row.ingresoBoxAt ? row.ingresoBoxAt.toISOString() : null,
                 salida_at: row.salidaAt ? row.salidaAt.toISOString() : null,
@@ -1546,9 +1848,38 @@ class HotRamBaseService {
     async actualizarHold(holdId, patch) {
         const { index } = await this.ensureRuntimeIndex();
         const updated = await index_js_1.db.transaction(async (tx) => {
+            const lockedRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos WHERE id = ${holdId}::uuid FOR UPDATE`);
+            if (lockedRes.rows.length === 0) {
+                throw new NotFoundError(`Preasignación ${holdId} no encontrada en base.procesos.`);
+            }
+            const current = lockedRes.rows[0];
             const updates = {
                 updatedAt: (0, drizzle_orm_1.sql) `now()`,
             };
+            if (patch.origen === 'taller') {
+                const actorMeta = await this.resolveTallerActorMeta(patch.actorUsuarioId, index);
+                if (patch.zoneId !== undefined && patch.zoneId !== current.zone_id) {
+                    throw new ForbiddenError('Permiso denegado: usuarios de taller no pueden reasignar zone_id entre zonas.');
+                }
+                const isEditingBox = patch.boxId !== undefined && patch.boxId !== current.box_id;
+                const isEditingUsuarios = patch.usuariosIds !== undefined;
+                if (isEditingBox || isEditingUsuarios) {
+                    if (!actorMeta || actorMeta.rol !== 'encargado_zona') {
+                        throw new ForbiddenError('Permiso denegado: solo el rol encargado_zona puede editar usuarios_ids o box_id en preasignaciones.');
+                    }
+                    if (!actorMeta.zone_id || actorMeta.zone_id !== current.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el encargado_zona solo puede editar preasignaciones dentro de su zona asignada.');
+                    }
+                    if (patch.boxId) {
+                        const targetBoxInfo = index.boxesMap.get(patch.boxId);
+                        if (!targetBoxInfo || targetBoxInfo.zone_id !== actorMeta.zone_id) {
+                            throw new ForbiddenError('Permiso denegado: el box destino no pertenece a la zona del encargado.');
+                        }
+                    }
+                    updates.encargadoId = actorMeta.id;
+                    updates.encargadoAt = (0, drizzle_orm_1.sql) `now()`;
+                }
+            }
             if (patch.zoneId !== undefined)
                 updates.zoneId = patch.zoneId;
             if (patch.boxId !== undefined) {
@@ -1559,8 +1890,10 @@ class HotRamBaseService {
                         updates.zoneId = bInfo.zone_id;
                 }
             }
-            if (patch.usuariosIds !== undefined)
-                updates.usuariosIds = patch.usuariosIds;
+            if (patch.usuariosIds !== undefined) {
+                const effectiveZoneId = updates.zoneId || current.zone_id;
+                updates.usuariosIds = await this.sanitizeAndValidateUsuariosIds(patch.usuariosIds, effectiveZoneId, patch.origen === 'taller', index);
+            }
             const [row] = await tx
                 .update(schema_js_1.procesos)
                 .set(updates)
@@ -1612,15 +1945,25 @@ class HotRamBaseService {
      * Activa una tarjeta PREASIGNADO -> ESPERANDO A SER INGRESADO A BOX (llegada_zona_at) o TRABAJANDO (ingreso_box_at)
      * mediante 1 solo UPDATE in-place preservando el mismo UUID!
      */
-    async activarHold(holdId, boxId, iniciarInmediato = false, _actorUsuarioId) {
+    async activarHold(holdId, boxId, iniciarInmediato = false, actorUsuarioId, estado) {
         const { index } = await this.ensureRuntimeIndex();
+        const actorMeta = actorUsuarioId
+            ? await this.resolveTallerActorMeta(actorUsuarioId, index)
+            : null;
         const res = await index_js_1.db.transaction(async (tx) => {
             const locked = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos WHERE id = ${holdId}::uuid FOR UPDATE`);
             if (locked.rows.length === 0) {
                 throw new NotFoundError(`Preasignación (${holdId}) no encontrada en base.procesos`);
             }
             const hold = locked.rows[0];
-            let targetBoxId = boxId || hold.box_id || null;
+            // Auto-ubicación por UUID del usuario (/db-render-arch C1 Hot RAM):
+            // Si el actor es un operario con box_id en la zona del hold, ubica automáticamente en su box.
+            const actorOwnBoxInZone = actorMeta?.rol === 'operario' &&
+                actorMeta.box_id &&
+                index.boxesMap.get(actorMeta.box_id)?.zone_id === hold.zone_id
+                ? actorMeta.box_id
+                : null;
+            let targetBoxId = actorOwnBoxInZone || boxId || hold.box_id || null;
             if (!targetBoxId) {
                 const firstZoneBox = Array.from(index.boxesMap.entries()).find(([, b]) => b.zone_id === hold.zone_id);
                 if (firstZoneBox)
@@ -1648,11 +1991,17 @@ class HotRamBaseService {
                 })
                     .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.ne)(schema_js_1.procesos.id, hold.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)));
             }
+            const existingUsers = Array.isArray(hold.usuarios_ids) ? hold.usuarios_ids : [];
+            const nextUsuariosIds = iniciarInmediato && actorMeta?.rol === 'operario' && !existingUsers.includes(actorMeta.id)
+                ? [...existingUsers, actorMeta.id]
+                : existingUsers;
             const [activated] = await tx
                 .update(schema_js_1.procesos)
                 .set({
                 zoneId: boxInfo.zone_id,
                 boxId: targetBoxId,
+                estado: iniciarInmediato ? estado ?? 'adentro' : null,
+                usuariosIds: nextUsuariosIds,
                 llegadaZonaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), ${schema_js_1.procesos.pendienteAt})`,
                 ingresoBoxAt: iniciarInmediato
                     ? (0, drizzle_orm_1.sql) `GREATEST(clock_timestamp(), ${schema_js_1.procesos.pendienteAt})`
@@ -1671,6 +2020,7 @@ class HotRamBaseService {
                 tractor_id: activated.tractorId,
                 semi_id: activated.semiId,
                 box_id: activated.boxId,
+                estado: this.normalizeBoxEstado(activated.estado),
                 llegada_at: (activated.llegadaZonaAt || activated.pendienteAt).toISOString(),
                 inicio_at: activated.ingresoBoxAt ? activated.ingresoBoxAt.toISOString() : null,
                 salida_at: activated.salidaAt ? activated.salidaAt.toISOString() : null,
@@ -1702,6 +2052,7 @@ class HotRamBaseService {
                 auth_user_id: authRes.auth_user_id ? String(authRes.auth_user_id) : String(authRes.id),
                 email: String(authRes.email || ''),
                 nombre_usuario: String(authRes.nombre_usuario),
+                rol: (authRes.rol === 'encargado_zona' ? 'encargado_zona' : 'operario'),
                 box_id: authRes.box_id ? String(authRes.box_id) : null,
                 box_name: String(authRes.box_name || ''),
                 zone_id: authRes.zone_id ? String(authRes.zone_id) : null,
@@ -1722,7 +2073,14 @@ class HotRamBaseService {
                 error: verifyRes.error || 'Acceso denegado: el usuario no figura en base.usuarios_taller.',
             };
         }
-        return { authorized: true, user: verifyRes.user };
+        const rawUser = verifyRes.user;
+        return {
+            authorized: true,
+            user: {
+                ...rawUser,
+                rol: (rawUser.rol === 'encargado_zona' ? 'encargado_zona' : 'operario'),
+            },
+        };
     }
     async loginUserCoordinacion(nombreUsuario, password) {
         const cleanUser = nombreUsuario.trim();

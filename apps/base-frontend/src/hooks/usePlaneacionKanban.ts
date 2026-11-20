@@ -89,6 +89,9 @@ export function usePlaneacionKanban() {
         salida_at: null,
         usuarios_ids: h.usuarios_ids || [],
         usuarios_nombres: h.usuarios_nombres || [],
+        encargado_id: h.encargado_id ?? null,
+        encargado_nombre: h.encargado_nombre ?? null,
+        encargado_at: h.encargado_at ?? null,
         notes:
           h.notes && h.notes.length > 0
             ? h.notes
@@ -429,6 +432,47 @@ export function usePlaneacionKanban() {
     [queryClient]
   );
 
+  const optimisticUpdateUsuarios = useCallback(
+    (
+      targetId: string,
+      isHold: boolean,
+      usuariosIds: string[],
+      usuariosNombres: string[]
+    ) => {
+      const prev = queryClient.getQueryData<BoardResponse>(['planeacion', 'board']);
+      if (!prev) return undefined;
+
+      queryClient.setQueryData<BoardResponse>(['planeacion', 'board'], {
+        ...prev,
+        holds: isHold
+          ? (prev.holds || []).map((h) =>
+              h.hold_id === targetId
+                ? {
+                    ...h,
+                    usuarios_ids: usuariosIds,
+                    usuarios_nombres: usuariosNombres,
+                  }
+                : h
+            )
+          : prev.holds,
+        activos: !isHold
+          ? (prev.activos || []).map((a) =>
+              a.proceso_id === targetId
+                ? {
+                    ...a,
+                    usuarios_ids: usuariosIds,
+                    usuarios_nombres: usuariosNombres,
+                  }
+                : a
+            )
+          : prev.activos,
+      });
+
+      return prev;
+    },
+    [queryClient]
+  );
+
   const rollbackBoard = useCallback(
     (previousSnapshot: BoardResponse | undefined) => {
       if (previousSnapshot) {
@@ -464,6 +508,7 @@ export function usePlaneacionKanban() {
     optimisticCloneActiveToHold,
     optimisticCloneHoldToZone,
     optimisticRemoveCard,
+    optimisticUpdateUsuarios,
     rollbackBoard,
   };
 }

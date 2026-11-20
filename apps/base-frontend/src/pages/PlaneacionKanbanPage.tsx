@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ArrowUpDown, CheckCircle2, LogOut, Plus, RefreshCw, Search } from 'lucide-react';
 import { usePlaneacionKanban } from '../hooks/usePlaneacionKanban';
 import { AutoScrollColumn } from '../components/common/AutoScrollColumn';
@@ -6,10 +6,12 @@ import { UnitPlaneacionCard } from '../components/kanban/UnitPlaneacionCard';
 import { UnitPlaneacionDeployedModal } from '../components/kanban/UnitPlaneacionDeployedModal';
 import { NewIngresoModal } from '../components/kanban/NewIngresoModal';
 import {
+  actualizarHold,
   actualizarProceso,
   crearHold,
   eliminarHold,
 } from '../services/planeacionApi';
+import type { PlaneacionCard, PlaneacionCatalog } from '../types/planeacion';
 
 export const PlaneacionKanbanPage: React.FC = () => {
   const {
@@ -30,6 +32,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
     optimisticCloneActiveToHold,
     optimisticCloneHoldToZone,
     optimisticRemoveCard,
+    optimisticUpdateUsuarios,
     rollbackBoard,
   } = usePlaneacionKanban();
 
@@ -38,6 +41,64 @@ export const PlaneacionKanbanPage: React.FC = () => {
   const [dragOverPreasignadoZoneId, setDragOverPreasignadoZoneId] = useState<string | null>(null);
   const [isDragOverEgreso, setIsDragOverEgreso] = useState(false);
   const [isNewIngresoOpen, setIsNewIngresoOpen] = useState(false);
+  const [openAssignCardId, setOpenAssignCardId] = useState<string | null>(null);
+
+  const usuariosByZone = useMemo(() => {
+    const map = new Map<string, PlaneacionCatalog['usuarios']>();
+    for (const u of catalog.usuarios || []) {
+      if (u.rol === 'coordinacion' || !u.zone_id) continue;
+      const list = map.get(u.zone_id);
+      if (list) list.push(u);
+      else map.set(u.zone_id, [u]);
+    }
+    return map;
+  }, [catalog.usuarios]);
+
+  const handleAssignUsuarios = useCallback(
+    async (card: PlaneacionCard, nextUserIds: string[]) => {
+      const isHold = Boolean(card.hold_id || card.etapa_ciclo === 'PLANIFICADO_HOLD');
+      const targetId = isHold ? card.hold_id || card.proceso_id : card.proceso_id;
+      const nextUserNames = nextUserIds.map(
+        (uid) =>
+          (catalog.usuarios || []).find((u) => u.id === uid)?.nombre_usuario || 'Operario'
+      );
+
+      const previousSnapshot = optimisticUpdateUsuarios(
+        targetId,
+        isHold,
+        nextUserIds,
+        nextUserNames
+      );
+
+      try {
+        if (isHold) {
+          await actualizarHold(targetId, { usuariosIds: nextUserIds });
+        } else {
+          await actualizarProceso(targetId, { usuariosIds: nextUserIds });
+        }
+      } catch (err) {
+        rollbackBoard(previousSnapshot);
+        throw err;
+      }
+    },
+    [catalog.usuarios, optimisticUpdateUsuarios, rollbackBoard]
+  );
+
+  const renderUnitCard = (card: PlaneacionCard) => (
+    <UnitPlaneacionCard
+      key={card.proceso_id}
+      card={card}
+      zoneUsuarios={usuariosByZone.get(card.zone_id) || []}
+      onAssignUsuarios={handleAssignUsuarios}
+      onAssignOpenChange={(isOpen) =>
+        setOpenAssignCardId((prev) =>
+          isOpen ? card.proceso_id : prev === card.proceso_id ? null : prev
+        )
+      }
+      onClick={(c) => setSelectedProcesoId(c.proceso_id)}
+      onNoteAdded={refresh}
+    />
+  );
 
   const extractDragPayload = (e: React.DragEvent) => {
     try {
@@ -318,7 +379,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                   <AutoScrollColumn
                     itemsCount={col.cards.length}
                     isHovered={hoveredColId === col.id}
-                    isPaused={selectedProcesoId !== null}
+                    isPaused={selectedProcesoId !== null || openAssignCardId !== null}
                     ariaLabel={`Zona ${col.title}`}
                     className="flex flex-col gap-2.5 pr-0.5"
                   >
@@ -333,14 +394,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                           sin unidades
                         </div>
                       ) : (
-                        salidaCards.map((card) => (
-                          <UnitPlaneacionCard
-                            key={card.proceso_id}
-                            card={card}
-                            onClick={(c) => setSelectedProcesoId(c.proceso_id)}
-                            onNoteAdded={refresh}
-                          />
-                        ))
+                        salidaCards.map(renderUnitCard)
                       )}
                     </div>
 
@@ -358,14 +412,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                           sin unidades
                         </div>
                       ) : (
-                        inicioCards.map((card) => (
-                          <UnitPlaneacionCard
-                            key={card.proceso_id}
-                            card={card}
-                            onClick={(c) => setSelectedProcesoId(c.proceso_id)}
-                            onNoteAdded={refresh}
-                          />
-                        ))
+                        inicioCards.map(renderUnitCard)
                       )}
                     </div>
 
@@ -385,14 +432,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                           sin unidades
                         </div>
                       ) : (
-                        reservadoCards.map((card) => (
-                          <UnitPlaneacionCard
-                            key={card.proceso_id}
-                            card={card}
-                            onClick={(c) => setSelectedProcesoId(c.proceso_id)}
-                            onNoteAdded={refresh}
-                          />
-                        ))
+                        reservadoCards.map(renderUnitCard)
                       )}
                     </div>
 
@@ -432,14 +472,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                           sin unidades
                         </div>
                       ) : (
-                        preasignadoCards.map((card) => (
-                          <UnitPlaneacionCard
-                            key={card.proceso_id}
-                            card={card}
-                            onClick={(c) => setSelectedProcesoId(c.proceso_id)}
-                            onNoteAdded={refresh}
-                          />
-                        ))
+                        preasignadoCards.map(renderUnitCard)
                       )}
                     </div>
                   </AutoScrollColumn>
@@ -496,6 +529,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
         catalog={catalog}
         onClose={() => setSelectedProcesoId(null)}
         onUpdated={refresh}
+        onAssignUsuarios={handleAssignUsuarios}
       />
 
       {/* Modal Nuevo Ingreso a Box directo */}

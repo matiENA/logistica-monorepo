@@ -1,5 +1,7 @@
 export type EstadoProceso = 'PREASIGNADO' | 'EN_ESPERA' | 'EN_PROCESO' | 'FINALIZADO';
 
+export type EstadoBox = 'adentro' | 'afuera';
+
 export interface ProcesoNota {
   id?: string;
   usuario_id: string | null;
@@ -19,7 +21,7 @@ export interface UsuarioTallerSession {
   box_name: string;
   zone_id: string | null;
   zone_name: string;
-  rol?: 'taller' | 'coordinacion';
+  rol?: 'operario' | 'encargado_zona' | 'taller' | 'coordinacion';
 }
 
 export interface UsuarioCoordinacionSession {
@@ -47,9 +49,13 @@ export interface PlaneacionHold {
   zone_name: string;
   box_id: string | null;
   box_name: string;
+  estado?: EstadoBox | null;
   orden: number;
   usuarios_ids: string[];
   usuarios_nombres: string[];
+  encargado_id?: string | null;
+  encargado_nombre?: string | null;
+  encargado_at?: string | null;
   nota_planificacion: string | null;
   notes?: ProcesoNota[];
   proceso_origen_id?: string | null;
@@ -77,6 +83,7 @@ export interface PlaneacionCard {
   modalidad_tracking: 'EQUIPO_ACOPLADO' | 'SOLO_TRACTOR' | 'SOLO_SEMI' | 'UNIDAD';
   box_id: string;
   box_name: string;
+  estado?: EstadoBox | null;
   zone_id: string;
   zone_name: string;
   estado_proceso: EstadoProceso;
@@ -85,6 +92,9 @@ export interface PlaneacionCard {
   salida_at: string | null;
   usuarios_ids: string[];
   usuarios_nombres: string[];
+  encargado_id?: string | null;
+  encargado_nombre?: string | null;
+  encargado_at?: string | null;
   notes: ProcesoNota[];
   salida_previa_at?: string | null;
   salida_origen_box?: string | null;
@@ -122,7 +132,14 @@ export interface PlaneacionUnidadDetalle {
 export interface PlaneacionCatalog {
   zones: Array<{ id: string; zone_name: string }>;
   boxes: Array<{ id: string; box_name: string; zone_id: string; zone_name: string }>;
-  usuarios: Array<{ id: string; nombre_usuario: string; box_id: string | null; box_name: string | null }>;
+  usuarios: Array<{
+    id: string;
+    nombre_usuario: string;
+    rol?: 'operario' | 'encargado_zona' | 'coordinacion';
+    box_id: string | null;
+    box_name: string | null;
+    zone_id?: string | null;
+  }>;
   unidades: Array<{
     unidad_id: string;
     n_ute: string;
@@ -133,11 +150,35 @@ export interface PlaneacionCatalog {
   }>;
 }
 
+export interface TallerBoxSlot {
+  box_id: string;
+  box_name: string;
+  adentro: PlaneacionCard[];
+  afuera: PlaneacionCard[];
+}
+
+export interface TallerZoneRenderMap {
+  zone_id: string;
+  zone_name: string;
+  etapa_labels?: {
+    reservado: 'RESERVADO';
+    trabajando: string;
+    terminado: 'TERMINADO';
+    pendiente: 'PENDIENTE';
+  };
+  boxes: TallerBoxSlot[];
+  sin_box?: {
+    adentro: PlaneacionCard[];
+    afuera: PlaneacionCard[];
+  };
+}
+
 export interface BoardResponse {
   success: boolean;
   activos: PlaneacionCard[];
   holds?: PlaneacionHold[];
   catalog: PlaneacionCatalog;
+  taller_zone_map?: TallerZoneRenderMap | null;
   updatedAt: number;
 }
 
@@ -154,6 +195,8 @@ export interface TrayectoriaStep {
   duracion_trabajo_min: number | null;
   duracion_total_min: number | null;
   usuarios_nombres: string[];
+  encargado_nombre?: string | null;
+  encargado_at?: string | null;
   nota_planificacion: string | null;
   notes_count: number;
   ultima_nota: string | null;

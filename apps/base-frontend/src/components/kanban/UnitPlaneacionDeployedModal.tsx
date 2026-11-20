@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquarePlus, StickyNote, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, MessageSquarePlus, StickyNote, User, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type {
   PlaneacionCard,
@@ -7,12 +7,14 @@ import type {
 } from '../../types/planeacion';
 import { actualizarHold, agregarNotaProceso } from '../../services/planeacionApi';
 import { UnitLicensePlate } from '../common/UnitLicensePlate';
+import { OperariosAssignDropdownCard } from '../common/OperariosAssignDropdownCard';
 
 interface UnitPlaneacionDeployedModalProps {
   card: PlaneacionCard | null;
   catalog?: PlaneacionCatalog;
   onClose: () => void;
   onUpdated: () => void;
+  onAssignUsuarios?: (card: PlaneacionCard, nextUserIds: string[]) => Promise<void>;
 }
 
 function formatDateTime(iso: string | null | undefined): string {
@@ -30,17 +32,32 @@ function formatDateTime(iso: string | null | undefined): string {
 
 export const UnitPlaneacionDeployedModal: React.FC<UnitPlaneacionDeployedModalProps> = ({
   card,
+  catalog,
   onClose,
   onUpdated,
+  onAssignUsuarios,
 }) => {
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isAssignOpen, setIsAssignOpen] = useState(false);
+  const assignBtnRef = useRef<HTMLButtonElement | null>(null);
   const notesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const zoneUsuarios = useMemo(() => {
+    if (!card || !catalog?.usuarios) return [];
+    return catalog.usuarios.filter(
+      (u) => u.rol !== 'coordinacion' && u.zone_id === card.zone_id
+    );
+  }, [card, catalog?.usuarios]);
 
   useEffect(() => {
     if (!card) return;
     setNoteText('');
   }, [card]);
+
+  useEffect(() => {
+    setIsAssignOpen(false);
+  }, [card?.proceso_id]);
 
   useEffect(() => {
     if (notesContainerRef.current) {
@@ -50,11 +67,11 @@ export const UnitPlaneacionDeployedModal: React.FC<UnitPlaneacionDeployedModalPr
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !isAssignOpen) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, isAssignOpen]);
 
   if (!card) return null;
 
@@ -136,6 +153,47 @@ export const UnitPlaneacionDeployedModal: React.FC<UnitPlaneacionDeployedModalPr
             <span className="text-[11px] font-mono text-zinc-500 bg-zinc-200/70 px-2 py-0.5 rounded-full shrink-0">
               {card.notes.length} {card.notes.length === 1 ? 'nota' : 'notas'}
             </span>
+
+            {/* Trigger Dropdown Card de Operarios */}
+            {onAssignUsuarios && (
+              <div className="shrink-0">
+                <button
+                  ref={assignBtnRef}
+                  type="button"
+                  onClick={() => setIsAssignOpen((prev) => !prev)}
+                  aria-expanded={isAssignOpen}
+                  aria-haspopup="dialog"
+                  aria-label="Asignar operarios disponibles en la zona"
+                  className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 border border-[#CBD5E1] hover:border-[#94A3B8] text-[#0F172A] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-1"
+                >
+                  <User size={14} strokeWidth={2} aria-hidden="true" focusable="false" className="text-emerald-700" />
+                  <span>
+                    Operarios
+                    {card.usuarios_nombres.length > 0 ? ` (${card.usuarios_nombres.length})` : ''}
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    strokeWidth={2}
+                    aria-hidden="true"
+                    focusable="false"
+                    className={`transition-transform ${isAssignOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                <OperariosAssignDropdownCard
+                  open={isAssignOpen}
+                  anchorRef={assignBtnRef}
+                  onClose={() => setIsAssignOpen(false)}
+                  tractorPlate={card.tractor_plate}
+                  semiPlate={card.semi_plate}
+                  nUte={card.n_ute}
+                  availableUsuarios={zoneUsuarios}
+                  selectedUserIds={card.usuarios_ids || []}
+                  onCommitUsuarios={(nextIds) => onAssignUsuarios(card, nextIds)}
+                  theme="light"
+                />
+              </div>
+            )}
           </div>
 
           <button
@@ -147,6 +205,22 @@ export const UnitPlaneacionDeployedModal: React.FC<UnitPlaneacionDeployedModalPr
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Chips limpios de operarios asignados (0 UUIDs) */}
+        {card.usuarios_nombres.length > 0 && (
+          <div className="px-6 py-2 border-b border-zinc-200/80 bg-white flex items-center gap-1.5 flex-wrap shrink-0">
+            <span className="text-[11px] font-bold text-[#0F172A] mr-1">Asignados:</span>
+            {card.usuarios_nombres.map((uname, idx) => (
+              <span
+                key={`${uname}-${idx}`}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[12px] font-normal text-zinc-900"
+              >
+                <User size={12} strokeWidth={1.75} aria-hidden="true" focusable="false" className="text-emerald-700" />
+                <span>{uname}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Cuerpo Deployed: Solo las Notas del Proceso */}
         <div
