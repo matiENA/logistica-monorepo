@@ -104,7 +104,7 @@ export const LibresRow: React.FC<LibresRowProps> = ({
       }));
 
   return (
-    <section className="w-full mb-3 shrink-0">
+    <section className="w-full mb-3 shrink-0 relative z-30">
       {/* Contenedor principal sin clipping vertical: renderización de terminales dentro de class="flex items-center gap-3 w-full" */}
       <div ref={rowContainerRef} className="flex items-center gap-3 w-full relative">
         {/* Botón Quick Add Libre */}

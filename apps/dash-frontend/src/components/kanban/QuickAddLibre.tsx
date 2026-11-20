@@ -100,10 +100,10 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
     <div
       ref={containerRef}
       aria-hidden={modoCartelera}
-      className={`relative shrink-0 flex items-center justify-center h-[65px] transition-[width,opacity,transform,margin] duration-300 ease-out motion-reduce:transition-none ${
+      className={`relative shrink-0 flex items-center justify-center h-[65px] transition-[width,opacity,margin] duration-300 ease-out motion-reduce:transition-none ${
         modoCartelera
-          ? 'w-0 -mr-3 opacity-0 scale-90 pointer-events-none overflow-hidden'
-          : 'w-[65px] mr-0 opacity-100 scale-100 pointer-events-auto'
+          ? 'w-0 -mr-3 opacity-0 pointer-events-none overflow-hidden'
+          : 'w-[65px] mr-0 opacity-100 pointer-events-auto z-30'
       }`}
     >
       <button
@@ -111,23 +111,27 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
         onClick={handleToggle}
         disabled={enviando || modoCartelera}
         tabIndex={modoCartelera ? -1 : 0}
-        className="w-[65px] h-full rounded-xl border-2 border-cyan-400 text-cyan-500 hover:bg-cyan-400 hover:text-black transition-all flex items-center justify-center group focus:outline-none shadow-sm cursor-pointer z-10 bg-white dark:bg-slate-900 active:scale-95 disabled:opacity-50"
+        className={`w-[65px] h-full rounded-xl border-2 border-cyan-400 text-cyan-500 hover:bg-cyan-400 hover:text-black transition-all duration-300 ease-out motion-reduce:transition-none flex items-center justify-center group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 shadow-sm cursor-pointer z-10 bg-white dark:bg-slate-900 active:scale-95 disabled:opacity-50 ${
+          modoCartelera ? 'scale-90' : 'scale-100'
+        }`}
         title="Agregar Libre Rápido (En 1 Clic)"
+        aria-label="Agregar Libre Rápido"
+        aria-expanded={abierto}
       >
         <Plus className="w-6 h-6 stroke-[2.8] transition-transform duration-200 group-hover:scale-110" />
       </button>
 
       {abierto && !modoCartelera && (
-        <div className="absolute top-[75px] left-0 w-72 md:w-80 bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-800 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in duration-150">
-          <div className="relative flex items-center border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
-            <Search className="w-4 h-4 text-slate-400 ml-3 shrink-0 stroke-[2.2]" />
+        <div className="absolute top-[75px] left-0 w-72 md:w-80 bg-white dark:bg-slate-900 border border-cyan-300 dark:border-cyan-700 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in duration-150">
+          <div className="relative flex items-center border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 focus-within:ring-2 focus-within:ring-inset focus-within:ring-cyan-500">
+            <Search className="w-4 h-4 text-slate-400 ml-3 shrink-0 stroke-[2]" />
             <input
               ref={inputRef}
               type="text"
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               placeholder="BUSCAR PARA LIBERAR..."
-              className="w-full bg-transparent p-3 pl-2 text-xs font-black text-slate-800 dark:text-slate-200 outline-none uppercase placeholder-slate-400"
+              className="w-full bg-transparent p-3 pl-2 text-xs font-black text-slate-800 dark:text-slate-200 focus:outline-none uppercase placeholder-slate-400"
             />
           </div>
 
