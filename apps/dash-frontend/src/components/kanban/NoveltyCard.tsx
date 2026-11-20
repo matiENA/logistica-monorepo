@@ -94,6 +94,17 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
+  useEffect(() => {
+    if (modoCartelera) {
+      setIsHovered(false);
+      setIsPinned(false);
+      setDropTerminalAbierto(false);
+      setDropServicioAbierto(false);
+      setDropMencionAbierto(false);
+      setTextoMencion('');
+    }
+  }, [modoCartelera]);
+
   const handleCardClick = (e: React.MouseEvent) => {
     if (modoCartelera) return;
     const target = e.target as HTMLElement;
@@ -563,32 +574,40 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
             {novedad.nom || 'SIN CONDUCTOR'}
           </h3>
 
-          {!modoCartelera && (
-            <div className="flex items-center gap-1.5 shrink-0 -mt-1 -mr-1">
-              <button
-                onClick={handleResolverClick}
-                disabled={novedad.resuelto}
-                className={`btn-card-resolve w-7 h-7 rounded-lg border border-transparent shrink-0 transition-all flex items-center justify-center ${
-                  novedad.resuelto
-                    ? 'bg-emerald-500/20 text-emerald-500 cursor-default'
-                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500 hover:text-white text-slate-400 dark:text-slate-500 cursor-pointer active:scale-95'
-                }`}
-                title={novedad.resuelto ? 'Resuelto' : 'Marcar como resuelto'}
-              >
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-              </button>
+          <div
+            aria-hidden={modoCartelera}
+            className={`flex items-center gap-1.5 shrink-0 -mt-1 -mr-1 transition-[opacity,transform,max-width] duration-300 ease-out motion-reduce:transition-none ${
+              modoCartelera
+                ? 'opacity-0 scale-90 max-w-0 overflow-hidden pointer-events-none'
+                : 'opacity-100 scale-100 max-w-[76px] pointer-events-auto'
+            }`}
+          >
+            <button
+              onClick={handleResolverClick}
+              disabled={novedad.resuelto || modoCartelera}
+              tabIndex={modoCartelera ? -1 : 0}
+              className={`btn-card-resolve w-7 h-7 rounded-lg border border-transparent shrink-0 transition-all flex items-center justify-center ${
+                novedad.resuelto
+                  ? 'bg-emerald-500/20 text-emerald-500 cursor-default'
+                  : 'bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500 hover:text-white text-slate-400 dark:text-slate-500 cursor-pointer active:scale-95'
+              }`}
+              title={novedad.resuelto ? 'Resuelto' : 'Marcar como resuelto'}
+            >
+              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+            </button>
 
-              {onEditar && (
-                <button
-                  onClick={() => onEditar(novedad)}
-                  className="btn-card-edit w-7 h-7 rounded-lg border border-transparent shrink-0 transition-all flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:text-indigo-500 dark:hover:text-indigo-400 text-slate-400 dark:text-slate-500 cursor-pointer active:scale-95 text-xs"
-                  title="Editar detalle"
-                >
-                  <Pencil className="w-3.5 h-3.5 stroke-[2]" />
-                </button>
-              )}
-            </div>
-          )}
+            {onEditar && (
+              <button
+                onClick={() => onEditar(novedad)}
+                disabled={modoCartelera}
+                tabIndex={modoCartelera ? -1 : 0}
+                className="btn-card-edit w-7 h-7 rounded-lg border border-transparent shrink-0 transition-all flex items-center justify-center bg-slate-100 dark:bg-slate-800 hover:text-indigo-500 dark:hover:text-indigo-400 text-slate-400 dark:text-slate-500 cursor-pointer active:scale-95 text-xs"
+                title="Editar detalle"
+              >
+                <Pencil className="w-3.5 h-3.5 stroke-[2]" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Badges operativos (Servicio, UTE, Tractor, Fecha Objetivo) */}
@@ -685,11 +704,20 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
         </span>
 
         {/* Input Menciones Inline */}
-        {!modoCartelera && userCanEdit && (
-          <div className="relative inline-block mention-input-wrapper">
+        {userCanEdit && (
+          <div
+            aria-hidden={modoCartelera}
+            className={`relative inline-block mention-input-wrapper transition-[max-width,opacity] duration-300 ease-out motion-reduce:transition-none ${
+              modoCartelera
+                ? 'max-w-0 opacity-0 overflow-hidden pointer-events-none'
+                : 'max-w-[110px] opacity-100 pointer-events-auto'
+            }`}
+          >
             <input
               type="text"
               value={textoMencion}
+              disabled={modoCartelera}
+              tabIndex={modoCartelera ? -1 : 0}
               onChange={(e) => {
                 setTextoMencion(e.target.value);
                 setDropMencionAbierto(true);
@@ -699,7 +727,7 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
               className="bg-transparent border border-dashed border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:text-slate-300 w-16 outline-none focus:border-indigo-400 focus:w-24 transition-all placeholder:text-slate-400"
             />
 
-            {dropMencionAbierto && usuariosFiltrados.length > 0 && (
+            {dropMencionAbierto && !modoCartelera && usuariosFiltrados.length > 0 && (
               <div className="absolute z-50 bottom-full left-0 mb-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-2xl max-h-32 overflow-y-auto w-36 p-1">
                 {usuariosFiltrados.map((u) => (
                   <div
@@ -726,10 +754,17 @@ export const NoveltyCard: React.FC<NoveltyCardProps> = ({
             className="bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md font-black uppercase flex items-center gap-1"
           >
             @{m}
-            {!modoCartelera && userCanEdit && onQuitarMencion && (
+            {userCanEdit && onQuitarMencion && (
               <button
                 onClick={() => onQuitarMencion(novedad.id, m)}
-                className="btn-mention-remove ml-1 hover:text-rose-500 transition-colors cursor-pointer inline-flex items-center"
+                disabled={modoCartelera}
+                tabIndex={modoCartelera ? -1 : 0}
+                aria-hidden={modoCartelera}
+                className={`btn-mention-remove hover:text-rose-500 transition-[max-width,margin,opacity,color] duration-300 ease-out motion-reduce:transition-none cursor-pointer inline-flex items-center ${
+                  modoCartelera
+                    ? 'max-w-0 ml-0 opacity-0 overflow-hidden pointer-events-none'
+                    : 'max-w-4 ml-1 opacity-100 pointer-events-auto'
+                }`}
                 title="Quitar mención"
               >
                 <X className="w-2.5 h-2.5 stroke-[2.5]" />

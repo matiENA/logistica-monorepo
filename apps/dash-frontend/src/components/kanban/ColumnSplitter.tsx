@@ -9,9 +9,8 @@ interface ColumnSplitterProps {
 export const ColumnSplitter: React.FC<ColumnSplitterProps> = ({ leftKey, rightKey }) => {
   const { modoCartelera, setColumnWidth } = useDashStore();
 
-  if (modoCartelera) return null;
-
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (modoCartelera) return;
     e.preventDefault();
 
     const leftCol = document.querySelector(`[data-cat="${leftKey}"]`) as HTMLElement;
@@ -77,7 +76,12 @@ export const ColumnSplitter: React.FC<ColumnSplitterProps> = ({ leftKey, rightKe
       onTouchStart={handleMouseDown}
       data-left={leftKey}
       data-right={rightKey}
-      className="col-splitter w-2.5 h-full cursor-col-resize shrink-0 flex items-center justify-center group z-20 hover:bg-indigo-500/20 active:bg-indigo-500/40 transition-colors rounded-full -mx-1"
+      aria-hidden={modoCartelera}
+      className={`col-splitter h-full shrink-0 flex items-center justify-center group z-20 rounded-full transition-[width,opacity,margin] duration-300 ease-out motion-reduce:transition-none ${
+        modoCartelera
+          ? 'w-0 mx-0 opacity-0 pointer-events-none overflow-hidden'
+          : 'w-2.5 -mx-1 opacity-100 cursor-col-resize hover:bg-indigo-500/20 active:bg-indigo-500/40'
+      }`}
       title="Arrastrar para ajustar proporción de columnas"
     >
       <div className="w-0.5 h-8 bg-slate-400/40 group-hover:bg-indigo-400 rounded-full transition-colors"></div>

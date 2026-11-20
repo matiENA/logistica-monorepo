@@ -8,6 +8,9 @@ interface DashState {
 
   // Modo Cartelera / TV
   modoCartelera: boolean;
+  modoCarteleraOrigen: 'manual' | 'idle';
+  vistaPreviaAntesDeCartelera: VistaTab | null;
+  setModoCartelera: (activo: boolean, options?: { persistir?: boolean; origen?: 'manual' | 'idle' }) => void;
   toggleModoCartelera: () => void;
 
   // Modo Oscuro / Claro
@@ -86,23 +89,62 @@ const getInitialDarkMode = (): boolean => {
   }
 };
 
-export const useDashStore = create<DashState>((set) => ({
+export const useDashStore = create<DashState>((set, get) => ({
   vistaActual: 'todas',
   setVistaActual: (vista) => set({ vistaActual: vista }),
 
   modoCartelera: typeof window !== 'undefined' ? localStorage.getItem('modo_cartelera') === 'true' : false,
-  toggleModoCartelera: () =>
-    set((state) => {
-      const nuevo = !state.modoCartelera;
-      localStorage.setItem('modo_cartelera', nuevo ? 'true' : 'false');
-      localStorage.setItem('vista_solida', nuevo ? 'true' : 'false');
-      if (nuevo) {
+  modoCarteleraOrigen: 'manual',
+  vistaPreviaAntesDeCartelera: null,
+  setModoCartelera: (activo, options) => {
+    const persistir = options?.persistir ?? true;
+    const origen = options?.origen ?? 'manual';
+
+    if (persistir && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('modo_cartelera', activo ? 'true' : 'false');
+        localStorage.setItem('vista_solida', activo ? 'true' : 'false');
+      } catch {}
+    }
+
+    if (typeof document !== 'undefined') {
+      if (activo) {
         document.documentElement.classList.add('modo-cartelera', 'vista-solida');
       } else {
         document.documentElement.classList.remove('modo-cartelera', 'vista-solida');
       }
-      return { modoCartelera: nuevo };
-    }),
+    }
+
+    set((state) => {
+      if (activo) {
+        const guardarVistaPrevia = origen === 'idle' && state.vistaActual !== 'todas';
+        const vistaActual = guardarVistaPrevia ? 'todas' : state.vistaActual;
+        const vistaPreviaAntesDeCartelera = guardarVistaPrevia
+          ? state.vistaActual
+          : origen === 'manual'
+          ? null
+          : state.vistaPreviaAntesDeCartelera;
+
+        return {
+          modoCartelera: true,
+          modoCarteleraOrigen: origen,
+          vistaActual,
+          vistaPreviaAntesDeCartelera
+        };
+      }
+
+      return {
+        modoCartelera: false,
+        modoCarteleraOrigen: 'manual',
+        vistaActual: state.vistaPreviaAntesDeCartelera ?? state.vistaActual,
+        vistaPreviaAntesDeCartelera: null
+      };
+    });
+  },
+  toggleModoCartelera: () => {
+    const actual = get().modoCartelera;
+    get().setModoCartelera(!actual, { persistir: true, origen: 'manual' });
+  },
 
   darkMode: getInitialDarkMode(),
   toggleDarkMode: () =>

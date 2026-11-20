@@ -53,6 +53,13 @@ export const LibresRow: React.FC<LibresRowProps> = ({
   // Autoscroll para modo cartelera (TV)
   useAutoScroll('carrusel-cat-libres', [novedadesLibres.length]);
 
+  // Limpiar menú de terminal al entrar a modo cartelera
+  useEffect(() => {
+    if (modoCartelera) {
+      setTerminalMenu(null);
+    }
+  }, [modoCartelera]);
+
   // Cerrar menú al hacer clic fuera del dropdown
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

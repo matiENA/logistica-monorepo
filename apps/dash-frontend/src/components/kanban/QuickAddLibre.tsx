@@ -32,7 +32,14 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  if (modoCartelera || !puedeEditar(sesion)) return null;
+  useEffect(() => {
+    if (modoCartelera) {
+      setAbierto(false);
+      setBusqueda('');
+    }
+  }, [modoCartelera]);
+
+  if (!puedeEditar(sesion)) return null;
 
   const handleToggle = () => {
     if (!sesion || !sesion.usuario) {
@@ -90,18 +97,27 @@ export const QuickAddLibre: React.FC<QuickAddLibreProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="relative shrink-0 flex items-center justify-center h-[65px]">
+    <div
+      ref={containerRef}
+      aria-hidden={modoCartelera}
+      className={`relative shrink-0 flex items-center justify-center h-[65px] transition-[width,opacity,transform,margin] duration-300 ease-out motion-reduce:transition-none ${
+        modoCartelera
+          ? 'w-0 -mr-3 opacity-0 scale-90 pointer-events-none overflow-hidden'
+          : 'w-[65px] mr-0 opacity-100 scale-100 pointer-events-auto'
+      }`}
+    >
       <button
         id="btn-quick-libre"
         onClick={handleToggle}
-        disabled={enviando}
+        disabled={enviando || modoCartelera}
+        tabIndex={modoCartelera ? -1 : 0}
         className="w-[65px] h-full rounded-xl border-2 border-cyan-400 text-cyan-500 hover:bg-cyan-400 hover:text-black transition-all flex items-center justify-center group focus:outline-none shadow-sm cursor-pointer z-10 bg-white dark:bg-slate-900 active:scale-95 disabled:opacity-50"
         title="Agregar Libre Rápido (En 1 Clic)"
       >
         <Plus className="w-6 h-6 stroke-[2.8] transition-transform duration-200 group-hover:scale-110" />
       </button>
 
-      {abierto && (
+      {abierto && !modoCartelera && (
         <div className="absolute top-[75px] left-0 w-72 md:w-80 bg-white dark:bg-slate-900 border border-cyan-200 dark:border-cyan-800 rounded-2xl shadow-2xl z-50 overflow-hidden flex flex-col animate-in fade-in duration-150">
           <div className="relative flex items-center border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
             <Search className="w-4 h-4 text-slate-400 ml-3 shrink-0 stroke-[2.2]" />

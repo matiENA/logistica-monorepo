@@ -29,3 +29,12 @@
 - **Módulos Backend (`node_backend/planeacion`)**: PASS (Exit Code 0, Live en `diaria-operativas`)
 - **Build & Deploy `coordinacion`**: PASS (Live en `https://coordinacion-06ce.onrender.com`)
 - **Build & Deploy `taller`**: PASS (Live en `https://taller-jdzi.onrender.com`)
+
+## 6. Variación 2026-11-19 (`dash-frontend` — Idle Cartelera 60s + Smooth Transitions)
+- **Objetivo**: Auto-transición tras 60s sin interacción hacia `modoCartelera`, retorno Opción B (clic/tap o tecla, ignorando `mousemove`) y transiciones CSS *smooth* sin layout shift.
+- **Clasificación (`/db-render-arch`)**: 100% **Capa C0** (Zustand + CSS; 0 queries DB, 0 Egress extra, 0 reconexiones Socket.IO, 0 variables `.env` nuevas).
+- **Archivos**:
+  - `apps/dash-frontend/src/hooks/useIdleCartelera.ts` (nuevo)
+  - `apps/dash-frontend/src/store/useDashStore.ts`, `apps/dash-frontend/src/App.tsx`, `apps/dash-frontend/src/index.css`
+  - `apps/dash-frontend/src/components/layout/Header.tsx`, `apps/dash-frontend/src/components/kanban/{QuickAddLibre,ColumnSplitter,LibresRow,NoveltyCard}.tsx`
+  - `apps/dash-frontend/UPDATE_2026-11-19_IDLE_CARTELERA.md` (nuevo)

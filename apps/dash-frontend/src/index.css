@@ -43,21 +43,45 @@ body {
   box-shadow: 0 0 25px -5px rgba(99, 102, 241, 0.25);
 }
 
-/* Modo Cartelera / Vista Sólida (Deshabilita edición en TV/Monitores pasivos) */
+/* Modo Cartelera / Vista Sólida (Transición suave y deshabilitación de edición en TV/Monitores pasivos) */
+.btn-card-edit,
+.btn-card-resolve,
+.btn-card-terminal,
+.btn-card-servicio,
+.mention-input-wrapper,
+.btn-mention-remove,
+#btn-fab-nueva {
+  transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    max-width 300ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .modo-cartelera .btn-card-edit,
 .modo-cartelera .btn-card-resolve,
 .modo-cartelera .btn-card-terminal,
 .modo-cartelera .btn-card-servicio,
-.modo-cartelera #btn-quick-libre,
 .modo-cartelera .mention-input-wrapper,
 .modo-cartelera #btn-fab-nueva,
 .modo-cartelera .btn-mention-remove {
-  display: none !important;
+  opacity: 0 !important;
+  transform: scale(0.92);
   pointer-events: none !important;
 }
 
 .modo-cartelera article {
   cursor: default !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-card-edit,
+  .btn-card-resolve,
+  .btn-card-terminal,
+  .btn-card-servicio,
+  .mention-input-wrapper,
+  .btn-mention-remove,
+  #btn-fab-nueva {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Input date icon visible */

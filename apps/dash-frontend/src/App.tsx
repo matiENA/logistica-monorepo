@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useDash } from './hooks/useDash';
+import { useIdleCartelera } from './hooks/useIdleCartelera';
 import { useDashStore } from './store/useDashStore';
 import { Header } from './components/layout/Header';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
@@ -35,6 +36,8 @@ export const App: React.FC = () => {
     modoCartelera,
     darkMode
   } = useDashStore();
+
+  useIdleCartelera(60_000);
 
   useEffect(() => {
     // Sincronizar clases modo-cartelera en documentElement
