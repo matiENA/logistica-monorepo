@@ -91,7 +91,7 @@ from credentials_helper import get_google_credentials
 
 # Parámetros y Constantes
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://rsvajuxihvmpmrmlcbul.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY", "sb_publishable_n97mVkSclRpuv_OsseO3gg_BjR9QT3R")
 
 # IDs oficiales y pestañas de respaldo (rotación #idmensual)
 OCTUBRE_MOV_ID = "14Mb5rD853zxDkaLDS-IrW-OBDTDBjuJxn_3olXeWlkc"
@@ -110,7 +110,64 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+BAJA_DIAGRAMA_UUID = "77f25961-a989-46a7-b710-1e1c83c2cdbe"
 NOTA_BAJA_HEADER_PREFIX = "⚠️ BAJA DE DIAGRAMA"
+NOTE_SEPARATOR = "\n──────────\n"
+
+TIPO_EMOJI_MAP = {
+    "BAJA_DIAGRAMA": "⚠️",
+    "CERTIFICACION_UNIDAD": "📋",
+    "REPARACION": "🔧",
+    "ESTADO_DEMORA": "⏱️",
+    "EXAMEN_CHOFER": "🩺",
+}
+
+TIPO_ORDEN_FALLBACK = {
+    "BAJA_DIAGRAMA": 0,
+    "CERTIFICACION_UNIDAD": 3,
+    "REPARACION": 4,
+    "ESTADO_DEMORA": 5,
+    "EXAMEN_CHOFER": 6,
+}
+
+
+def get_tipo_prioridad(tipo_codigo: Optional[str], tipo_orden: Any = None, tipo_id: Optional[str] = None) -> int:
+    """Retorna prioridad jerárquica (BAJA_DIAGRAMA siempre 0 = primero arriba)."""
+    code = str(tipo_codigo or "").strip().upper()
+    tid = str(tipo_id or "").strip().lower()
+    if code == "BAJA_DIAGRAMA" or tid == BAJA_DIAGRAMA_UUID:
+        return 0
+    if tipo_orden is not None:
+        try:
+            ord_val = int(tipo_orden)
+            if ord_val > 0:
+                return ord_val
+        except Exception:
+            pass
+    return TIPO_ORDEN_FALLBACK.get(code, 50)
+
+
+def get_tipo_emoji(tipo_codigo: Optional[str]) -> str:
+    code = str(tipo_codigo or "").strip().upper()
+    return TIPO_EMOJI_MAP.get(code, "📌")
+
+
+def compose_cell_hover_notes(entries: List[Dict[str, Any]]) -> str:
+    """Compone múltiples notas activas en una misma celda con BAJA_DIAGRAMA siempre primero."""
+    dedup: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        note = entry.get("note") or ""
+        if not note:
+            continue
+        nid = entry.get("novedad_id")
+        key = f"id_{nid}" if nid is not None else f"txt_{note}"
+        dedup[key] = entry
+
+    ordered = sorted(
+        dedup.values(),
+        key=lambda e: (int(e.get("prioridad", 50)), -(int(e.get("novedad_id") or 0)))
+    )
+    return NOTE_SEPARATOR.join(e["note"] for e in ordered)
 
 
 def normalizar_texto(texto: Optional[str]) -> str:
@@ -207,16 +264,26 @@ def resolver_hoja_para_fecha(dt: date, config: Dict[str, Any]) -> Tuple[str, str
     return mes_actual.get("movimientos_id", NOVIEMBRE_MOV_ID), mes_actual.get("tab_movimientos", NOVIEMBRE_TAB_NAME)
 
 
-def format_baja_note(tipo_titulo: str, fecha_obj_str: str, detalle: str) -> str:
-    """Formatea la nota para inyección en la celda."""
-    f_parts = str(fecha_obj_str).strip().split("T")[0].split("-")
-    if len(f_parts) == 3:
-        f_display = f"{f_parts[2]}/{f_parts[1]}/{f_parts[0]}"
-    else:
-        f_display = fecha_obj_str
+def format_baja_note(
+    tipo_titulo: str,
+    fecha_obj_str: Optional[str],
+    detalle: str,
+    tipo_codigo: str = "BAJA_DIAGRAMA"
+) -> str:
+    """Formatea la nota para inyección en la celda (soporta fecha_objetivo nula -> Activa)."""
+    f_display = ""
+    if fecha_obj_str and str(fecha_obj_str).strip():
+        clean = str(fecha_obj_str).strip().split("T")[0]
+        f_parts = clean.split("-")
+        if len(f_parts) == 3:
+            f_display = f"{f_parts[2]}/{f_parts[1]}/{f_parts[0]}"
+        else:
+            f_display = clean
 
-    titulo = tipo_titulo or "BAJA DE DIAGRAMA"
-    lines = [f"⚠️ {titulo.upper()} (Hasta: {f_display})"]
+    emoji = get_tipo_emoji(tipo_codigo)
+    titulo = (tipo_titulo or "BAJA DE DIAGRAMA").strip().upper()
+    header = f"{emoji} {titulo} (Hasta: {f_display})" if f_display else f"{emoji} {titulo} (Activa)"
+    lines = [header]
     if detalle and detalle.strip():
         lines.append(f"Detalle: {detalle.strip()}")
     return "\n".join(lines)
@@ -239,7 +306,7 @@ class BajasDiagramaSync:
             self._creds.refresh(Request())
 
     def fetch_novedades_bajas(self) -> List[Dict[str, Any]]:
-        """Consulta novedades con imprime_nota_movimientos=true (por relación UUID tipos_novedad) desde Supabase."""
+        """Consulta novedades activas con imprime_nota_movimientos=true (todas excepto LIBRES, incluyendo sin fecha_objetivo)."""
         url = f"{SUPABASE_URL}/rest/v1/view_dash_novedades"
         headers = {
             "apikey": SUPABASE_KEY,
@@ -251,15 +318,24 @@ class BajasDiagramaSync:
             "imprime_nota_movimientos": "eq.true",
             "resuelto": "eq.false",
             "chofer_id": "not.is.null",
-            "fecha_objetivo": "not.is.null",
             "order": "id.desc"
         }
         res = requests.get(url, headers=headers, params=params, timeout=15)
         if res.status_code != 200:
             print(f"❌ [Supabase] Error en consulta de novedades: {res.status_code} - {res.text}")
             return []
-        data = res.json()
-        print(f"📥 [Supabase] Se recuperaron {len(data)} novedades activas con imprime_nota_movimientos=true.")
+        raw_data = res.json() or []
+        data = [
+            row for row in raw_data
+            if str(row.get("tipo_novedad") or "").strip().upper() != "LIBRES"
+        ]
+        data.sort(
+            key=lambda r: (
+                get_tipo_prioridad(r.get("tipo_novedad"), r.get("tipo_novedad_orden"), r.get("tipo_novedad_id")),
+                -(int(r.get("id") or 0))
+            )
+        )
+        print(f"📥 [Supabase] Se recuperaron {len(data)} novedades activas con imprime_nota_movimientos=true (excl. LIBRES).")
         return data
 
     def get_sheet_id_num(self, spreadsheet_id: str, tab_name: str) -> int:
@@ -405,26 +481,34 @@ class BajasDiagramaSync:
         updates_by_sheet: Dict[str, List[Dict[str, Any]]] = {}
 
         for nov in novedades:
+            tipo_codigo = str(nov.get("tipo_novedad") or "BAJA_DIAGRAMA").strip().upper()
+            if tipo_codigo == "LIBRES":
+                continue
+
             nov_id = nov.get("id")
             chofer_nom = nov.get("chofer_nombre") or nov.get("nom") or ""
             f_obj_str = nov.get("fecha_objetivo")
             detalle = nov.get("detalle") or ""
-            tipo_titulo = nov.get("tipo_novedad_titulo") or nov.get("tipo_novedad") or "BAJA DE DIAGRAMA"
+            tipo_titulo = nov.get("tipo_novedad_titulo") or tipo_codigo
+            prioridad = get_tipo_prioridad(tipo_codigo, nov.get("tipo_novedad_orden"), nov.get("tipo_novedad_id"))
 
-            if not chofer_nom or not f_obj_str:
-                continue
-
-            try:
-                f_obj = datetime.strptime(str(f_obj_str).strip()[:10], "%Y-%m-%d").date()
-            except Exception:
+            if not chofer_nom:
                 continue
 
             f_inicio = hoy
-            if f_inicio > f_obj:
-                continue
+            if f_obj_str and str(f_obj_str).strip():
+                try:
+                    f_obj = datetime.strptime(str(f_obj_str).strip()[:10], "%Y-%m-%d").date()
+                except Exception:
+                    continue
+                if f_inicio > f_obj:
+                    continue
+            else:
+                f_obj_str = None
+                f_obj = hoy
 
             norm_chofer = normalizar_texto(chofer_nom)
-            note_content = format_baja_note(tipo_titulo, f_obj_str, detalle)
+            note_content = format_baja_note(tipo_titulo, f_obj_str, detalle, tipo_codigo=tipo_codigo)
 
             n_ute_nov = re.sub(r"\s+", "", str(nov.get("n_ute") or "").upper())
             trac_nov = re.sub(r"[\s\-_.]", "", str(nov.get("tractor") or "").upper())
@@ -478,6 +562,8 @@ class BajasDiagramaSync:
                             "date": cur_date.isoformat(),
                             "chofer": chofer_nom,
                             "novedad_id": nov_id,
+                            "prioridad": 999,
+                            "is_clear": True,
                             "note": ""
                         })
                         print(f"🧹 [Hover Bajas Sync] Chofer en unidad ({cur_date.isoformat()}) dejó de ser '{chofer_nom}' (actual: '{cell_val_unit or 'VACIO'}'). Nota hover removida de {coord_clear}.")
@@ -508,6 +594,9 @@ class BajasDiagramaSync:
                         "date": cur_date.isoformat(),
                         "chofer": chofer_nom,
                         "novedad_id": nov_id,
+                        "tipo_novedad": tipo_codigo,
+                        "prioridad": prioridad,
+                        "is_clear": False,
                         "note": note_content
                     })
 
@@ -526,12 +615,31 @@ class BajasDiagramaSync:
             tab_name = items[0]["tab_name"]
             print(f"\n🚀 [Google Sheets] Preparando {len(items)} notas para [{tab_name}] (ID: {sheet_id})...")
 
-            # Deduplicación por celda física (la última operación para esa celda prevalece)
-            dedup_items = {}
+            # Composición jerárquica por celda física: BAJA_DIAGRAMA siempre primero;
+            # si hay inyecciones activas en la celda prevalecen sobre limpiezas.
+            cell_buckets: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
             for it in items:
                 k = (it["sheet_id_num"], it["row_0based"], it["col_idx"])
-                dedup_items[k] = it
-            items_final = list(dedup_items.values())
+                if k not in cell_buckets:
+                    cell_buckets[k] = {
+                        "base": it,
+                        "entries": [],
+                        "should_clear": False
+                    }
+                if it.get("is_clear") or not it.get("note"):
+                    cell_buckets[k]["should_clear"] = True
+                else:
+                    cell_buckets[k]["entries"].append(it)
+
+            items_final = []
+            for bucket in cell_buckets.values():
+                base = dict(bucket["base"])
+                if bucket["entries"]:
+                    base["note"] = compose_cell_hover_notes(bucket["entries"])
+                    items_final.append(base)
+                elif bucket["should_clear"]:
+                    base["note"] = ""
+                    items_final.append(base)
 
             if self.dry_run:
                 for it in items_final:

@@ -13,6 +13,8 @@ from sync_bajas_movimientos import (
     index_to_col_letter,
     normalizar_texto,
     format_baja_note,
+    get_tipo_prioridad,
+    compose_cell_hover_notes,
     resolver_hoja_para_fecha,
     OCTUBRE_MOV_ID,
     OCTUBRE_TAB_NAME,
@@ -83,6 +85,30 @@ class TestBajasMovimientos(unittest.TestCase):
         sheet_nov, tab_nov = resolver_hoja_para_fecha(date(2026, 11, 2), dummy_config)
         self.assertEqual(sheet_nov, NOVIEMBRE_MOV_ID)
         self.assertEqual(tab_nov, NOVIEMBRE_TAB_NAME)
+
+    def test_format_sin_fecha_objetivo(self):
+        """Verifica formato para novedades sin fecha_objetivo (ej. REPARACION / ESTADO_DEMORA)."""
+        nota = format_baja_note("Reparaciones requeridas", None, "Pasaje de cisterna", tipo_codigo="REPARACION")
+        self.assertEqual(nota, "🔧 REPARACIONES REQUERIDAS (Activa)\nDetalle: Pasaje de cisterna")
+
+    def test_composicion_jerarquia_baja_siempre_primero(self):
+        """Verifica que BAJA_DIAGRAMA siempre aparezca primero al componer múltiples novedades en la misma celda."""
+        nota_rep = format_baja_note("Reparaciones requeridas", "2026-11-24", "Soldar bicicletero", tipo_codigo="REPARACION")
+        nota_exa = format_baja_note("Exámenes / Vencimientos", "2026-11-24", "Curso licencia", tipo_codigo="EXAMEN_CHOFER")
+        nota_baja = format_baja_note("Baja / Término de diagrama", "2026-11-25", "Curso metanol", tipo_codigo="BAJA_DIAGRAMA")
+
+        # Se pasan desordenadas intencionalmente (REPARACION y EXAMEN antes que BAJA_DIAGRAMA)
+        compuesta = compose_cell_hover_notes([
+            {"novedad_id": 340, "prioridad": get_tipo_prioridad("REPARACION", 4), "note": nota_rep},
+            {"novedad_id": 278, "prioridad": get_tipo_prioridad("EXAMEN_CHOFER", 6), "note": nota_exa},
+            {"novedad_id": 273, "prioridad": get_tipo_prioridad("BAJA_DIAGRAMA", 2), "note": nota_baja},
+        ])
+
+        idx_baja = compuesta.find("⚠️ BAJA / TÉRMINO DE DIAGRAMA")
+        idx_rep = compuesta.find("🔧 REPARACIONES REQUERIDAS")
+        idx_exa = compuesta.find("🩺 EXÁMENES / VENCIMIENTOS")
+        self.assertEqual(idx_baja, 0)
+        self.assertTrue(0 < idx_rep < idx_exa)
 
 
 if __name__ == "__main__":

@@ -474,23 +474,94 @@ async function getDayToChoferColMap(sheetId, tabName, accessToken) {
     return dayMap;
 }
 
+const BAJA_DIAGRAMA_UUID = '77f25961-a989-46a7-b710-1e1c83c2cdbe';
+const MAX_SYNC_REINTENTOS = 5;
+const NOTE_SEPARATOR = '\n──────────\n';
+
 /**
- * Formatea el contenido de la nota emergente (hover note)
+ * Prioridad jerárquica para composición de notas hover en una misma celda.
+ * Regla operativa estricta: BAJA_DIAGRAMA siempre tiene prioridad 0 (primero arriba).
  */
-function formatBajaNote(tipoTitulo, fechaObjStr, detalle) {
-    let fDisplay = fechaObjStr || '';
-    if (fechaObjStr && String(fechaObjStr).includes('-')) {
-        const parts = String(fechaObjStr).split('T')[0].split('-');
-        if (parts.length === 3) {
-            fDisplay = `${parts[2]}/${parts[1]}/${parts[0]}`;
+function getTipoPrioridad(tipoCodigo, tipoOrden = null, tipoId = null) {
+    const code = String(tipoCodigo || '').trim().toUpperCase();
+    const idNorm = String(tipoId || '').trim().toLowerCase();
+    if (code === 'BAJA_DIAGRAMA' || idNorm === BAJA_DIAGRAMA_UUID) {
+        return 0;
+    }
+    const ord = Number(tipoOrden);
+    return Number.isFinite(ord) && ord > 0 ? ord : 50;
+}
+
+/**
+ * Emoji visual por código de tipo de novedad
+ */
+function getTipoEmoji(tipoCodigo) {
+    const code = String(tipoCodigo || '').trim().toUpperCase();
+    switch (code) {
+        case 'BAJA_DIAGRAMA': return '⚠️';
+        case 'CERTIFICACION_UNIDAD': return '📋';
+        case 'REPARACION': return '🔧';
+        case 'ESTADO_DEMORA': return '⏱️';
+        case 'EXAMEN_CHOFER': return '🩺';
+        default: return '📌';
+    }
+}
+
+/**
+ * Formatea el contenido de la nota emergente (hover note) para cualquier tipo de novedad.
+ * Soporta novedades con fecha_objetivo (Hasta: DD/MM/YYYY) y sin fecha_objetivo (Activa).
+ */
+function formatNovedadNote(tipoTitulo, fechaObjStr, detalle, tipoCodigo = 'BAJA_DIAGRAMA') {
+    let fDisplay = '';
+    if (fechaObjStr && String(fechaObjStr).trim()) {
+        const clean = String(fechaObjStr).split('T')[0].trim();
+        if (clean.includes('-')) {
+            const parts = clean.split('-');
+            if (parts.length === 3) {
+                fDisplay = `${parts[2]}/${parts[1]}/${parts[0]}`;
+            } else {
+                fDisplay = clean;
+            }
+        } else {
+            fDisplay = clean;
         }
     }
+    const emoji = getTipoEmoji(tipoCodigo);
     const titulo = String(tipoTitulo || 'BAJA DE DIAGRAMA').trim().toUpperCase();
-    const lines = [`⚠️ ${titulo} (Hasta: ${fDisplay})`];
+    const header = fDisplay ? `${emoji} ${titulo} (Hasta: ${fDisplay})` : `${emoji} ${titulo} (Activa)`;
+    const lines = [header];
     if (detalle && String(detalle).trim()) {
         lines.push(`Detalle: ${String(detalle).trim()}`);
     }
     return lines.join('\n');
+}
+
+/**
+ * Alias de compatibilidad hacia atrás
+ */
+function formatBajaNote(tipoTitulo, fechaObjStr, detalle, tipoCodigo = 'BAJA_DIAGRAMA') {
+    return formatNovedadNote(tipoTitulo, fechaObjStr, detalle, tipoCodigo);
+}
+
+/**
+ * Compone múltiples notas activas sobre una misma celda física respetando jerarquía estricta:
+ * BAJA_DIAGRAMA siempre primero (prioridad 0), luego orden de tipos_novedad ASC e id DESC.
+ */
+function composeCellHoverNotes(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return '';
+    const dedup = new Map();
+    for (const entry of entries) {
+        if (!entry || !entry.note) continue;
+        const key = entry.novedad_id != null ? `id_${entry.novedad_id}` : `txt_${entry.note}`;
+        dedup.set(key, entry);
+    }
+    const sorted = Array.from(dedup.values()).sort((a, b) => {
+        const pa = Number.isFinite(Number(a.prioridad)) ? Number(a.prioridad) : 50;
+        const pb = Number.isFinite(Number(b.prioridad)) ? Number(b.prioridad) : 50;
+        if (pa !== pb) return pa - pb;
+        return (Number(b.novedad_id) || 0) - (Number(a.novedad_id) || 0);
+    });
+    return sorted.map(e => e.note).join(NOTE_SEPARATOR);
 }
 
 /**
@@ -618,8 +689,152 @@ function findDriverRowInColValues(colVals, normChofer) {
 }
 
 /**
+ * Convierte Map<dateStr, info> a objeto JSON plano ordenadamente para persistencia en public.novedades.sync_sheets_celdas
+ */
+function mapDiasToPlainObject(diasMap) {
+    const obj = {};
+    if (!(diasMap instanceof Map)) return obj;
+    const keys = Array.from(diasMap.keys()).sort();
+    for (const k of keys) {
+        const v = diasMap.get(k);
+        if (!v) continue;
+        obj[k] = {
+            status: v.status,
+            coord: v.coord || null,
+            colLetter: v.colLetter || null,
+            colIdx: v.colIdx != null ? v.colIdx : null,
+            row1Based: v.row1Based != null ? v.row1Based : null,
+            sheetId: v.sheetId || null,
+            tabName: v.tabName || null
+        };
+    }
+    return obj;
+}
+
+/**
+ * Hidrata Map<dateStr, info> desde JSONB persistido en public.novedades.sync_sheets_celdas
+ */
+function plainObjectToDiasMap(raw) {
+    const m = new Map();
+    if (!raw || typeof raw !== 'object') return m;
+    for (const [k, v] of Object.entries(raw)) {
+        if (v && typeof v === 'object') {
+            m.set(k, v);
+        }
+    }
+    return m;
+}
+
+/**
+ * Smart Diff UPDATE directo sobre la tabla física public.novedades (0 vistas, 0 WAL/Realtime redundantes).
+ * Solo escribe si cambia estado, hash, celdas o error; nunca altera actualizado_el.
+ */
+async function persistirEstadoSyncNovedad(novedadId, {
+    estado,
+    celdas = undefined,
+    hash = undefined,
+    error = undefined,
+    incrementarReintento = false,
+    resetReintentos = false,
+    marcarSincronizado = false
+} = {}) {
+    if (!db.isConfigured() || novedadId == null) return false;
+    const idClean = Number(novedadId);
+    if (!Number.isFinite(idClean)) return false;
+
+    try {
+        const celdasJson = celdas !== undefined ? JSON.stringify(celdas || {}) : null;
+        const hashVal = hash !== undefined ? (hash === null ? null : String(hash)) : null;
+        const errVal = error !== undefined ? (error ? String(error).slice(0, 500) : null) : null;
+
+        if (incrementarReintento) {
+            const { rowCount } = await db.query(
+                `UPDATE public.novedades
+                 SET sync_sheets_reintentos = LEAST(COALESCE(sync_sheets_reintentos, 0) + 1, 32767),
+                     sync_sheets_estado = CASE
+                         WHEN COALESCE(sync_sheets_reintentos, 0) + 1 >= $2 THEN 'ERROR'
+                         ELSE 'PAUSADO'
+                     END,
+                     sync_sheets_error = $3
+                 WHERE id = $1::bigint`,
+                [idClean, MAX_SYNC_REINTENTOS, errVal]
+            );
+            return rowCount > 0;
+        }
+
+        const { rowCount } = await db.query(
+            `UPDATE public.novedades
+             SET sync_sheets_estado = $2,
+                 sync_sheets_celdas = COALESCE($3::jsonb, sync_sheets_celdas),
+                 sync_sheets_hash = CASE WHEN $4::boolean THEN $5 ELSE sync_sheets_hash END,
+                 sync_sheets_reintentos = CASE WHEN $6::boolean THEN 0 ELSE sync_sheets_reintentos END,
+                 sync_sheets_error = CASE WHEN $7::boolean THEN $8 ELSE sync_sheets_error END,
+                 sync_sheets_at = CASE WHEN $9::boolean THEN NOW() ELSE sync_sheets_at END
+             WHERE id = $1::bigint
+               AND (
+                   sync_sheets_estado IS DISTINCT FROM $2
+                   OR ($3::jsonb IS NOT NULL AND sync_sheets_celdas IS DISTINCT FROM $3::jsonb)
+                   OR ($4::boolean AND sync_sheets_hash IS DISTINCT FROM $5)
+                   OR ($7::boolean AND sync_sheets_error IS DISTINCT FROM $8)
+               )`,
+            [
+                idClean,
+                estado,
+                celdasJson,
+                hash !== undefined,
+                hashVal,
+                Boolean(resetReintentos),
+                error !== undefined,
+                errVal,
+                Boolean(marcarSincronizado)
+            ]
+        );
+        return rowCount > 0;
+    } catch (e) {
+        console.warn(`⚠️ [Hover Sync DB] Error persistiendo estado en novedades#${idClean}:`, e.message);
+        return false;
+    }
+}
+
+/**
+ * Recupera novedades resueltas o editadas que quedaron en PENDIENTE_LIMPIEZA (ej. ante reinicio o pausa)
+ */
+async function fetchPendingCleanups() {
+    if (!db.isConfigured()) return [];
+    try {
+        const { rows } = await db.query(
+            `SELECT
+                n.id,
+                n.chofer_id,
+                UPPER(TRIM(COALESCE(c.nombre, ''))) AS chofer_nombre,
+                n.unidad_id,
+                COALESCE(u.n_ute, '') AS n_ute,
+                UPPER(TRIM(COALESCE(t.patente, ''))) AS tractor,
+                TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS fecha_objetivo,
+                n.sync_sheets_celdas,
+                n.sync_sheets_reintentos
+             FROM public.novedades n
+             LEFT JOIN public.choferes c ON n.chofer_id = c.id
+             LEFT JOIN public.unidades u ON n.unidad_id = u.id
+             LEFT JOIN public.tractores t ON u.tractor_id = t.id
+             WHERE n.sync_sheets_estado = 'PENDIENTE_LIMPIEZA'
+               AND COALESCE(n.sync_sheets_reintentos, 0) < $1
+             ORDER BY n.id DESC
+             LIMIT 100`,
+            [MAX_SYNC_REINTENTOS]
+        );
+        return rows || [];
+    } catch (e) {
+        console.warn('⚠️ [Hover Sync DB] Error consultando PENDIENTE_LIMPIEZA:', e.message);
+        return [];
+    }
+}
+
+/**
  * Consulta en PostgreSQL (o fallback Supabase) las novedades activas cuya relación UUID
- * hacia public.tipos_novedad tenga imprime_nota_movimientos = true.
+ * hacia public.tipos_novedad tenga imprime_nota_movimientos = true (todas excepto LIBRES).
+ * Soporta novedades con fecha_objetivo >= HOY y también fecha_objetivo IS NULL (ej. REPARACION / ESTADO_DEMORA).
+ * Ordena estrictamente con BAJA_DIAGRAMA primero.
  */
 async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId = null) {
     if (db.isConfigured()) {
@@ -640,22 +855,32 @@ async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId
                 n.tipo_novedad_id,
                 tn.codigo AS tipo_novedad,
                 tn.titulo AS tipo_novedad_titulo,
+                COALESCE(tn.orden, 50) AS tipo_novedad_orden,
                 COALESCE(tn.imprime_nota_movimientos, false) AS imprime_nota_movimientos,
                 TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS fecha_objetivo,
                 n.detalle,
-                n.resuelto
+                n.resuelto,
+                n.sync_sheets_estado,
+                n.sync_sheets_celdas,
+                n.sync_sheets_hash,
+                n.sync_sheets_reintentos
              FROM public.novedades n
              JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
              LEFT JOIN public.choferes c ON n.chofer_id = c.id
              LEFT JOIN public.unidades u ON n.unidad_id = u.id
              LEFT JOIN public.tractores t ON u.tractor_id = t.id
              WHERE tn.imprime_nota_movimientos = true
+               AND UPPER(TRIM(tn.codigo)) <> 'LIBRES'
                AND n.resuelto = false
                AND n.chofer_id IS NOT NULL
-               AND n.fecha_objetivo IS NOT NULL
-               AND n.fecha_objetivo >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               AND (
+                   n.fecha_objetivo IS NULL
+                   OR n.fecha_objetivo >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               )
                ${extraWhere}
-             ORDER BY n.id DESC`,
+             ORDER BY (CASE WHEN UPPER(TRIM(tn.codigo)) = 'BAJA_DIAGRAMA' THEN 0 ELSE 1 END) ASC,
+                      COALESCE(tn.orden, 50) ASC,
+                      n.id DESC`,
             params
         );
         return rows || [];
@@ -667,9 +892,9 @@ async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId
             .from('view_dash_novedades')
             .select('*')
             .eq('imprime_nota_movimientos', true)
+            .neq('tipo_novedad', 'LIBRES')
             .eq('resuelto', false)
             .not('chofer_id', 'is', null)
-            .not('fecha_objetivo', 'is', null)
             .order('id', { ascending: false });
 
         if (filterChoferId) {
@@ -678,10 +903,111 @@ async function fetchActiveNovedadesConNota(supabaseClient = null, filterChoferId
 
         const { data, error } = await query;
         if (error) throw new Error(error.message);
-        return data || [];
+        const rows = data || [];
+        rows.sort((a, b) => {
+            const pa = getTipoPrioridad(a.tipo_novedad, a.tipo_novedad_orden, a.tipo_novedad_id);
+            const pb = getTipoPrioridad(b.tipo_novedad, b.tipo_novedad_orden, b.tipo_novedad_id);
+            if (pa !== pb) return pa - pb;
+            return (Number(b.id) || 0) - (Number(a.id) || 0);
+        });
+        return rows;
     }
 
     return [];
+}
+
+/**
+ * Consulta en vivo el estado de sincronización directamente sobre la tabla física public.novedades
+ * (sin vistas adicionales, aprovechando idx_novedades_sync_sheets_activos).
+ */
+async function obtenerEstadoSyncNovedades() {
+    if (!db.isConfigured()) {
+        return {
+            resumen: {},
+            pendientes: [],
+            trackingRam: obtenerEstadoTrackingBajas()
+        };
+    }
+
+    const [{ rows: counts }, { rows: detalle }] = await Promise.all([
+        db.query(
+            `SELECT sync_sheets_estado AS estado, COUNT(*)::int AS cantidad
+             FROM public.novedades
+             GROUP BY sync_sheets_estado
+             ORDER BY sync_sheets_estado`
+        ),
+        db.query(
+            `SELECT
+                n.id AS novedad_id,
+                tn.codigo AS tipo_novedad,
+                tn.titulo AS tipo_novedad_titulo,
+                n.tipo_novedad_id,
+                n.chofer_id,
+                UPPER(TRIM(COALESCE(c.nombre, ''))) AS chofer_nombre,
+                COALESCE(u.n_ute, '') AS n_ute,
+                TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS fecha_objetivo,
+                n.resuelto,
+                n.sync_sheets_estado,
+                n.sync_sheets_reintentos,
+                n.sync_sheets_error,
+                n.sync_sheets_at,
+                n.sync_sheets_celdas
+             FROM public.novedades n
+             JOIN public.tipos_novedad tn ON n.tipo_novedad_id = tn.id
+             LEFT JOIN public.choferes c ON n.chofer_id = c.id
+             LEFT JOIN public.unidades u ON n.unidad_id = u.id
+             WHERE n.sync_sheets_estado IN ('PENDIENTE', 'PENDIENTE_LIMPIEZA', 'PAUSADO', 'PENDIENTE_TIPEO', 'ERROR')
+                OR (n.sync_sheets_estado = 'SINCRONIZADO' AND n.resuelto = false)
+             ORDER BY (CASE WHEN n.sync_sheets_estado IN ('ERROR', 'PAUSADO', 'PENDIENTE_LIMPIEZA', 'PENDIENTE') THEN 0 ELSE 1 END) ASC,
+                      (CASE WHEN UPPER(TRIM(tn.codigo)) = 'BAJA_DIAGRAMA' THEN 0 ELSE 1 END) ASC,
+                      n.id DESC
+             LIMIT 100`
+        )
+    ]);
+
+    const resumen = {};
+    for (const row of counts || []) {
+        resumen[row.estado] = row.cantidad;
+    }
+
+    return {
+        resumen,
+        items: detalle || [],
+        trackingRam: obtenerEstadoTrackingBajas()
+    };
+}
+
+/**
+ * Reanuda manualmente novedades en estado PAUSADO o ERROR reseteando reintentos y disparando sync inmediato.
+ */
+async function reanudarSyncPausados(options = {}) {
+    if (!db.isConfigured()) {
+        return { success: false, error: 'PostgreSQL no configurado' };
+    }
+
+    const { rows } = await db.query(
+        `UPDATE public.novedades
+         SET sync_sheets_estado = CASE
+                 WHEN resuelto = true THEN 'PENDIENTE_LIMPIEZA'
+                 ELSE 'PENDIENTE'
+             END,
+             sync_sheets_reintentos = 0,
+             sync_sheets_error = NULL
+         WHERE sync_sheets_estado IN ('PAUSADO', 'ERROR')
+         RETURNING id, sync_sheets_estado`
+    );
+
+    const reanudados = rows.length;
+    const syncResult = await syncBajasGoogleSheets(null, {
+        forceRefresh: true,
+        dryRun: Boolean(options?.dryRun)
+    });
+
+    return {
+        success: Boolean(syncResult?.success),
+        reanudados,
+        syncResult
+    };
 }
 
 /**
@@ -799,23 +1125,55 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
         }
 
         // =================================================================
-        // ACCIÓN 2: SINCRONIZACIÓN E INYECCIÓN DE NOTAS ACTIVAS
+        // ACCIÓN 2: SINCRONIZACIÓN E INYECCIÓN DE NOTAS ACTIVAS (MULTI-NOVEDAD)
         // =================================================================
         let novedades = [];
         let isFullSweep = false;
+        let recoveredCleanups = 0;
 
         if (
             contextoNovedad &&
-            (contextoNovedad.chofer_id || contextoNovedad.chofer_nombre || contextoNovedad.nom) &&
-            contextoNovedad.fecha_objetivo
+            (contextoNovedad.chofer_id || contextoNovedad.chofer_nombre || contextoNovedad.nom)
         ) {
-            novedades = [contextoNovedad];
+            // Para garantizar composición jerárquica multi-novedad (BAJA_DIAGRAMA siempre primero),
+            // si tenemos chofer_id traemos todas sus novedades activas elegibles desde PostgreSQL.
+            if (contextoNovedad.chofer_id) {
+                const delChofer = await fetchActiveNovedadesConNota(supabaseClient, contextoNovedad.chofer_id);
+                novedades = delChofer.length > 0 ? delChofer : [contextoNovedad];
+            } else {
+                novedades = [contextoNovedad];
+            }
         } else {
             isFullSweep = true;
+
+            // 2.0. Recuperar limpiezas pendientes que hayan quedado en pausa / tras reinicio
+            const pendingCleanups = await fetchPendingCleanups();
+            for (const cleanRow of pendingCleanups) {
+                const cleanRes = await ejecutarLimpiezaNotas(
+                    {
+                        action: 'limpiar',
+                        id: cleanRow.id,
+                        chofer_id: cleanRow.chofer_id,
+                        chofer_nombre: cleanRow.chofer_nombre,
+                        unidad_id: cleanRow.unidad_id,
+                        n_ute: cleanRow.n_ute,
+                        tractor: cleanRow.tractor,
+                        fecha_objetivo: cleanRow.fecha_objetivo,
+                        sync_sheets_celdas: cleanRow.sync_sheets_celdas
+                    },
+                    accessToken,
+                    supabaseClient,
+                    hoy,
+                    dryRun,
+                    { skipResyncOthers: true }
+                );
+                if (cleanRes?.success) recoveredCleanups++;
+            }
+
             novedades = await fetchActiveNovedadesConNota(supabaseClient);
         }
 
-        // En barrido completo, depurar del tracker las novedades que ya no están vigentes
+        // En barrido completo, depurar del tracker en RAM las novedades que ya no están vigentes
         if (isFullSweep) {
             const activeIds = new Set(novedades.map(n => String(n.id)));
             for (const trackedId of Array.from(bajasSyncTracker.keys())) {
@@ -826,39 +1184,65 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
         }
 
         if (novedades.length === 0) {
-            return { success: true, count: 0, pendingDays: 0 };
+            return { success: true, count: 0, pendingDays: 0, recoveredCleanups };
         }
+
+        // Garantizar orden jerárquico: BAJA_DIAGRAMA siempre primero
+        novedades.sort((a, b) => {
+            const pa = getTipoPrioridad(a.tipo_novedad, a.tipo_novedad_orden, a.tipo_novedad_id);
+            const pb = getTipoPrioridad(b.tipo_novedad, b.tipo_novedad_orden, b.tipo_novedad_id);
+            if (pa !== pb) return pa - pb;
+            return (Number(b.id) || 0) - (Number(a.id) || 0);
+        });
 
         // Paso A: Evaluar días por novedad, determinar qué días necesitan lectura fresca o escritura
         const neededColsBySheet = new Map();
         const workPlan = [];
+        const hoyIso = toIsoDateLocal(hoy);
 
         for (const nov of novedades) {
+            // Defensa en profundidad: nunca imprimir LIBRES
+            if (String(nov.tipo_novedad || '').trim().toUpperCase() === 'LIBRES') continue;
+
             let choferNom = nov.chofer_nombre || nov.nom || nov.chofer || '';
             if (!choferNom && nov.chofer_id) {
                 choferNom = await resolveChoferNombreById(nov.chofer_id, supabaseClient);
             }
-            if (!choferNom || !nov.fecha_objetivo) continue;
+            if (!choferNom) continue;
 
             const normChofer = normalizeText(choferNom);
             if (!normChofer) continue;
 
-            const fObjStr = (nov.fecha_objetivo instanceof Date)
-                ? toIsoDateLocal(nov.fecha_objetivo)
-                : String(nov.fecha_objetivo).split('T')[0].trim();
+            let fObjStr = '';
+            let fObj = new Date(hoy.getTime());
+            if (nov.fecha_objetivo) {
+                fObjStr = (nov.fecha_objetivo instanceof Date)
+                    ? toIsoDateLocal(nov.fecha_objetivo)
+                    : String(nov.fecha_objetivo).split('T')[0].trim();
+                const [y, m, d] = fObjStr.split('-').map(Number);
+                if (!y || !m || !d) continue;
+                fObj = new Date(y, m - 1, d);
+                fObj.setHours(0, 0, 0, 0);
+                if (fObj < hoy) continue;
+            } else {
+                // Sin fecha_objetivo (ej. REPARACION / ESTADO_DEMORA): imprime en el día operativo actual (HOY)
+                fObjStr = '';
+                fObj = new Date(hoy.getTime());
+            }
 
-            const [y, m, d] = fObjStr.split('-').map(Number);
-            if (!y || !m || !d) continue;
-            const fObj = new Date(y, m - 1, d);
-            fObj.setHours(0, 0, 0, 0);
-            if (fObj < hoy) continue;
+            const novKey = nov.id != null ? String(nov.id) : `tmp_${normChofer}_${fObjStr || hoyIso}`;
+            const tipoCodigo = nov.tipo_novedad || 'BAJA_DIAGRAMA';
+            const tipoTitulo = nov.tipo_novedad_titulo || tipoCodigo;
+            const prioridad = getTipoPrioridad(tipoCodigo, nov.tipo_novedad_orden, nov.tipo_novedad_id);
+            const noteText = formatNovedadNote(tipoTitulo, fObjStr, nov.detalle, tipoCodigo);
 
-            const novKey = nov.id != null ? String(nov.id) : `tmp_${normChofer}_${fObjStr}`;
-            const tipoTitulo = nov.tipo_novedad_titulo || nov.tipo_novedad || 'BAJA DE DIAGRAMA';
-            const noteText = formatBajaNote(tipoTitulo, fObjStr, nov.detalle);
-
-            const prevTrack = bajasSyncTracker.get(novKey);
-            const noteChanged = !prevTrack || prevTrack.noteHash !== noteText || prevTrack.chofer_nombre !== choferNom;
+            // Hidratar estado previo desde RAM o desde public.novedades.sync_sheets_celdas
+            const prevRam = bajasSyncTracker.get(novKey);
+            const prevDbDias = plainObjectToDiasMap(nov.sync_sheets_celdas);
+            const prevTrackDias = prevRam?.dias || (prevDbDias.size > 0 ? prevDbDias : null);
+            const prevHash = prevRam?.noteHash || nov.sync_sheets_hash || null;
+            const needsRetry = ['PENDIENTE', 'PAUSADO', 'ERROR'].includes(String(nov.sync_sheets_estado || '').toUpperCase());
+            const noteChanged = !prevTrackDias || prevHash !== noteText || needsRetry || (prevRam && prevRam.chofer_nombre !== choferNom);
 
             const daysForNov = [];
             let cur = new Date(hoy.getTime());
@@ -870,7 +1254,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 const colIdx = getColChofer(diaNum);
                 const colLetter = indexToColLetter(colIdx);
 
-                const prevDay = prevTrack?.dias?.get(dateStr);
+                const prevDay = prevTrackDias?.get(dateStr) || null;
                 const alreadySynced = Boolean(
                     !isReconciler &&
                     !forceRefresh &&
@@ -881,9 +1265,8 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 );
 
                 if (!alreadySynced) {
-                    // Invalidar caché selectivamente si el día estaba PENDIENTE_TIPEO, es barrido reconciliador o forzado
                     const cacheKey = `${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`;
-                    if (forceRefresh || isReconciler || !prevDay || prevDay.status === 'PENDIENTE_TIPEO') {
+                    if (forceRefresh || isReconciler || !prevDay || prevDay.status === 'PENDIENTE_TIPEO' || needsRetry) {
                         columnCache.delete(cacheKey);
                     }
 
@@ -918,15 +1301,18 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 novKey,
                 choferNom,
                 normChofer,
-                fObjStr,
+                tipoCodigo,
+                prioridad,
+                fObjStr: fObjStr || hoyIso,
                 noteText,
-                daysForNov
+                daysForNov,
+                touchedSheetIds: new Set()
             });
         }
 
         // Si todas las celdas de todas las novedades activas ya están sincronizadas, salir con 0 llamadas a values:batchGet
         if (neededColsBySheet.size === 0) {
-            return { success: true, count: 0, pendingDays: 0, skippedAlreadySynced: true };
+            return { success: true, count: 0, pendingDays: 0, recoveredCleanups, skippedAlreadySynced: true };
         }
 
         // Paso B: Descargar columnas pendientes en lote
@@ -934,28 +1320,59 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
             await prefetchColumnsBatch(group.sheetId, group.tabName, Array.from(group.cols), accessToken);
         }
 
-        // Paso C: Detectar presencia del chofer, armar batchUpdate y actualizar bajasSyncTracker
-        const updatesBySpreadsheet = new Map();
+        // Paso C: Detectar presencia del chofer, componer notas por celda (jerarquía BAJA_DIAGRAMA primero)
+        const cellOpsBySpreadsheet = new Map();
         const plannedItems = [];
         let pendingDaysCount = 0;
 
+        function getCellBucket(sheetId, tabName, sheetIdNum, r1Based, colIdx) {
+            if (!cellOpsBySpreadsheet.has(sheetId)) {
+                cellOpsBySpreadsheet.set(sheetId, {
+                    tabName,
+                    cells: new Map()
+                });
+            }
+            const sheetGroup = cellOpsBySpreadsheet.get(sheetId);
+            const row0 = r1Based - 1;
+            const cellKey = `${sheetIdNum}_${row0}_${colIdx}`;
+            if (!sheetGroup.cells.has(cellKey)) {
+                sheetGroup.cells.set(cellKey, {
+                    sheetIdNum,
+                    row0,
+                    colIdx,
+                    injectEntries: [],
+                    shouldClear: false
+                });
+            }
+            return sheetGroup.cells.get(cellKey);
+        }
+
         for (const item of workPlan) {
-            const { nov, novKey, choferNom, normChofer, fObjStr, noteText, daysForNov } = item;
+            const { nov, novKey, choferNom, normChofer, tipoCodigo, prioridad, fObjStr, noteText, daysForNov, touchedSheetIds } = item;
             const diasMap = new Map();
 
-            // Atributos de unidad para indexación física en Movimientos
             const cleanUteNov = nov.n_ute ? String(nov.n_ute).trim().toUpperCase().replace(/\s+/g, '') : '';
             const cleanTracNov = nov.tractor ? String(nov.tractor).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
 
             for (const dInfo of daysForNov) {
                 if (dInfo.alreadySynced && dInfo.prevDay) {
                     diasMap.set(dInfo.dateStr, dInfo.prevDay);
+                    // Incluso si ya estaba sincronizada individualmente, si otro item toca esta celda,
+                    // aportar su entrada para preservar la composición jerárquica completa.
+                    if (dInfo.prevDay.row1Based) {
+                        const bucket = getCellBucket(dInfo.sheetId, dInfo.tabName, dInfo.sheetIdNum, dInfo.prevDay.row1Based, dInfo.colIdx);
+                        bucket.injectEntries.push({
+                            novedad_id: nov.id || null,
+                            prioridad,
+                            tipo_novedad: tipoCodigo,
+                            note: noteText
+                        });
+                    }
                     continue;
                 }
 
                 const { mapUteToRow, mapTractorToRow } = await getUnitsRowMap(dInfo.sheetId, dInfo.tabName, accessToken);
 
-                // Determinar fila teórica de la unidad
                 let rowUnit = null;
                 if (cleanUteNov) {
                     rowUnit = mapUteToRow.get(cleanUteNov) || mapUteToRow.get(cleanUteNov.replace(/^0+/, '')) || null;
@@ -967,54 +1384,28 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 const colVals = columnCache.get(`${dInfo.sheetId}_${dInfo.tabName}_${dInfo.colLetter}`) || [];
                 const prevRow = dInfo.prevDay?.row1Based || null;
 
-                function addUpdateRequest(reqObj) {
-                    if (!updatesBySpreadsheet.has(dInfo.sheetId)) {
-                        updatesBySpreadsheet.set(dInfo.sheetId, {
-                            tabName: dInfo.tabName,
-                            requests: []
-                        });
-                    }
-                    updatesBySpreadsheet.get(dInfo.sheetId).requests.push(reqObj);
+                function markClearHoverNote(r1Based) {
+                    if (!r1Based || r1Based < 1) return;
+                    const bucket = getCellBucket(dInfo.sheetId, dInfo.tabName, dInfo.sheetIdNum, r1Based, dInfo.colIdx);
+                    bucket.shouldClear = true;
+                    touchedSheetIds.add(dInfo.sheetId);
                 }
 
-                function clearHoverNote(r1Based) {
+                function markSetHoverNote(r1Based) {
                     if (!r1Based || r1Based < 1) return;
-                    addUpdateRequest({
-                        updateCells: {
-                            range: {
-                                sheetId: dInfo.sheetIdNum,
-                                startRowIndex: r1Based - 1,
-                                endRowIndex: r1Based,
-                                startColumnIndex: dInfo.colIdx,
-                                endColumnIndex: dInfo.colIdx + 1
-                            },
-                            rows: [{ values: [{ note: '' }] }],
-                            fields: 'note'
-                        }
+                    const bucket = getCellBucket(dInfo.sheetId, dInfo.tabName, dInfo.sheetIdNum, r1Based, dInfo.colIdx);
+                    bucket.injectEntries.push({
+                        novedad_id: nov.id || null,
+                        prioridad,
+                        tipo_novedad: tipoCodigo,
+                        note: noteText
                     });
-                }
-
-                function setHoverNote(r1Based) {
-                    if (!r1Based || r1Based < 1) return;
-                    addUpdateRequest({
-                        updateCells: {
-                            range: {
-                                sheetId: dInfo.sheetIdNum,
-                                startRowIndex: r1Based - 1,
-                                endRowIndex: r1Based,
-                                startColumnIndex: dInfo.colIdx,
-                                endColumnIndex: dInfo.colIdx + 1
-                            },
-                            rows: [{ values: [{ note: noteText }] }],
-                            fields: 'note'
-                        }
-                    });
+                    touchedSheetIds.add(dInfo.sheetId);
                 }
 
                 let targetRow = null;
 
                 // 1. REGLA CLAVE: "header nombre > fk chofer_id"
-                // Si la novedad pertenece a una unidad en Movimientos (ej. Unidad 342)
                 if (rowUnit !== null) {
                     const cellValAtUnit = (rowUnit <= colVals.length) ? colVals[rowUnit - 1] : '';
                     const sameDriverAtUnit = isDriverMatch(cellValAtUnit, normChofer);
@@ -1022,11 +1413,8 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                     if (sameDriverAtUnit) {
                         targetRow = rowUnit;
                     } else {
-                        // Si en la unidad el chofer deja de ser el mismo (ej. Unidad 342 del 15 al 16,
-                        // donde el día 16 se insertó otro chofer en la fecha contigua o la celda cambió),
-                        // se borra la nota hover de esa unidad para evitar persistencia errónea.
-                        clearHoverNote(rowUnit);
-                        console.log(`🧹 [Hover Bajas Sync] Chofer en unidad [${cleanUteNov || cleanTracNov || rowUnit}] (${dInfo.dateStr}) dejó de ser '${choferNom}' (actual: '${cellValAtUnit || 'VACÍO'}'). Nota hover eliminada de ${dInfo.colLetter}${rowUnit}.`);
+                        markClearHoverNote(rowUnit);
+                        console.log(`🧹 [Hover Sync] Chofer en unidad [${cleanUteNov || cleanTracNov || rowUnit}] (${dInfo.dateStr}) dejó de ser '${choferNom}' (actual: '${cellValAtUnit || 'VACÍO'}'). Nota hover eliminada de ${dInfo.colLetter}${rowUnit}.`);
                     }
                 }
 
@@ -1042,15 +1430,15 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 if (prevRow !== null && prevRow !== targetRow) {
                     const cellValAtPrev = (prevRow <= colVals.length) ? colVals[prevRow - 1] : '';
                     if (!isDriverMatch(cellValAtPrev, normChofer)) {
-                        clearHoverNote(prevRow);
-                        console.log(`🧹 [Hover Bajas Sync] Celda previa ${dInfo.colLetter}${prevRow} (${dInfo.dateStr}) ya no contiene a '${choferNom}'. Nota hover eliminada.`);
+                        markClearHoverNote(prevRow);
+                        console.log(`🧹 [Hover Sync] Celda previa ${dInfo.colLetter}${prevRow} (${dInfo.dateStr}) ya no contiene a '${choferNom}'. Nota hover eliminada.`);
                     }
                 }
 
-                // 4. Asignar estado e inyectar nota si corresponde
+                // 4. Asignar estado e inyectar nota compuesta si corresponde
                 if (targetRow !== null) {
                     const coord = `${dInfo.colLetter}${targetRow}`;
-                    console.log(`📍 [Hover Bajas Sync] Chofer '${choferNom}' activo en [${dInfo.tabName}] ${coord} (${dInfo.dateStr})`);
+                    console.log(`📍 [Hover Sync] [${tipoCodigo}] Chofer '${choferNom}' activo en [${dInfo.tabName}] ${coord} (${dInfo.dateStr})`);
 
                     diasMap.set(dInfo.dateStr, {
                         status: 'SINCRONIZADO',
@@ -1065,6 +1453,8 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
 
                     plannedItems.push({
                         novedad_id: nov.id || null,
+                        tipo_novedad: tipoCodigo,
+                        prioridad,
                         chofer: choferNom,
                         date: dInfo.dateStr,
                         coord,
@@ -1072,7 +1462,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                         note: noteText
                     });
 
-                    setHoverNote(targetRow);
+                    markSetHoverNote(targetRow);
                 } else {
                     pendingDaysCount++;
                     diasMap.set(dInfo.dateStr, {
@@ -1086,16 +1476,18 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                         updatedAt: new Date().toISOString()
                     });
                     if (!isReconciler) {
-                        console.log(`⏳ [Hover Bajas Sync] Día ${dInfo.dateStr} en espera (PENDIENTE_TIPEO): '${choferNom}' no presente en columna ${dInfo.colLetter}`);
+                        console.log(`⏳ [Hover Sync] [${tipoCodigo}] Día ${dInfo.dateStr} en espera (PENDIENTE_TIPEO): '${choferNom}' no presente en columna ${dInfo.colLetter}`);
                     }
                 }
             }
+
+            item.diasMap = diasMap;
 
             if (!dryRun && nov.id != null) {
                 bajasSyncTracker.set(novKey, {
                     novedad_id: Number(nov.id),
                     tipo_novedad_id: nov.tipo_novedad_id || null,
-                    tipo_novedad: nov.tipo_novedad || 'BAJA_DIAGRAMA',
+                    tipo_novedad: tipoCodigo,
                     chofer_id: nov.chofer_id || null,
                     chofer_nombre: choferNom,
                     fecha_objetivo: fObjStr,
@@ -1105,35 +1497,71 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
             }
         }
 
+        // Construir solicitudes finales compuestas por celda (BAJA_DIAGRAMA siempre primero)
+        const requestsBySpreadsheet = new Map();
+        const composedPreview = [];
+
+        for (const [sheetId, group] of cellOpsBySpreadsheet.entries()) {
+            const finalRequests = [];
+            for (const bucket of group.cells.values()) {
+                let finalNote = null;
+                if (bucket.injectEntries.length > 0) {
+                    finalNote = composeCellHoverNotes(bucket.injectEntries);
+                } else if (bucket.shouldClear) {
+                    finalNote = '';
+                }
+                if (finalNote === null) continue;
+
+                if (dryRun) {
+                    composedPreview.push({
+                        sheetId,
+                        tabName: group.tabName,
+                        coord: `${indexToColLetter(bucket.colIdx)}${bucket.row0 + 1}`,
+                        novedadesCount: bucket.injectEntries.length,
+                        note: finalNote
+                    });
+                }
+
+                finalRequests.push({
+                    updateCells: {
+                        range: {
+                            sheetId: bucket.sheetIdNum,
+                            startRowIndex: bucket.row0,
+                            endRowIndex: bucket.row0 + 1,
+                            startColumnIndex: bucket.colIdx,
+                            endColumnIndex: bucket.colIdx + 1
+                        },
+                        rows: [{ values: [{ note: finalNote }] }],
+                        fields: 'note'
+                    }
+                });
+            }
+            if (finalRequests.length > 0) {
+                requestsBySpreadsheet.set(sheetId, {
+                    tabName: group.tabName,
+                    requests: finalRequests
+                });
+            }
+        }
+
         if (dryRun) {
             return {
                 success: true,
                 dryRun: true,
-                count: plannedItems.length,
+                count: composedPreview.length,
                 pendingDays: pendingDaysCount,
-                planned: plannedItems
+                recoveredCleanups,
+                planned: plannedItems,
+                composedCells: composedPreview
             };
         }
 
         // Paso D: Aplicar lotes en Google Sheets API con fields: 'note'
         let totalApplied = 0;
-        for (const [sheetId, group] of updatesBySpreadsheet.entries()) {
-            if (group.requests.length === 0) continue;
+        const failedSheets = new Map();
 
-            // Deduplicación O(1) de requests por celda física (última operación manda)
-            const dedupMap = new Map();
-            for (const req of group.requests) {
-                const u = req.updateCells;
-                if (u && u.range) {
-                    const cellKey = `${u.range.sheetId}_${u.range.startRowIndex}_${u.range.startColumnIndex}`;
-                    dedupMap.set(cellKey, req);
-                } else {
-                    dedupMap.set(Math.random().toString(), req);
-                }
-            }
-            const finalRequests = Array.from(dedupMap.values());
-            if (finalRequests.length === 0) continue;
-
+        for (const [sheetId, group] of requestsBySpreadsheet.entries()) {
+            const finalRequests = group.requests;
             const batchSize = 100;
             for (let i = 0; i < finalRequests.length; i += batchSize) {
                 const chunk = finalRequests.slice(i, i + batchSize);
@@ -1150,25 +1578,67 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                     }, 180000, 2);
 
                     if (updateRes && updateRes.ok) {
-                        console.log(`✅ [Hover Bajas Sync] ${chunk.length} nota(s) hover inyectadas en [${group.tabName}].`);
+                        console.log(`✅ [Hover Sync] ${chunk.length} celda(s) hover actualizadas en [${group.tabName}].`);
                         totalApplied += chunk.length;
                     } else if (updateRes) {
                         const errBody = await updateRes.text();
-                        console.warn(`⚠️ [Hover Bajas Sync] Error batchUpdate en ${sheetId}: HTTP ${updateRes.status} - ${errBody}`);
+                        const errMsg = `HTTP ${updateRes.status}: ${errBody.slice(0, 250)}`;
+                        console.warn(`⚠️ [Hover Sync] Error batchUpdate en ${sheetId}: ${errMsg}`);
+                        failedSheets.set(sheetId, errMsg);
                     }
                 } catch (batchErr) {
-                    console.warn(`⚠️ [Hover Bajas Sync] Excepción batchUpdate en ${sheetId}:`, batchErr.message);
+                    console.warn(`⚠️ [Hover Sync] Excepción batchUpdate en ${sheetId}:`, batchErr.message);
+                    failedSheets.set(sheetId, batchErr.message);
                 }
             }
         }
 
+        // Paso E: Persistencia Smart Diff directa en public.novedades (0 writes si nada cambió)
+        for (const item of workPlan) {
+            if (item.nov?.id == null) continue;
+            const sheetErrors = [];
+            for (const sid of item.touchedSheetIds) {
+                if (failedSheets.has(sid)) sheetErrors.push(failedSheets.get(sid));
+            }
+
+            if (sheetErrors.length > 0) {
+                await persistirEstadoSyncNovedad(item.nov.id, {
+                    incrementarReintento: true,
+                    error: sheetErrors.join(' | ')
+                });
+                continue;
+            }
+
+            const diasObj = mapDiasToPlainObject(item.diasMap);
+            let syncCount = 0;
+            let pendCount = 0;
+            for (const info of Object.values(diasObj)) {
+                if (info.status === 'SINCRONIZADO') syncCount++;
+                else pendCount++;
+            }
+
+            const nuevoEstado = (pendCount === 0 && syncCount > 0)
+                ? 'SINCRONIZADO'
+                : (pendCount > 0 ? 'PENDIENTE_TIPEO' : 'PENDIENTE');
+
+            await persistirEstadoSyncNovedad(item.nov.id, {
+                estado: nuevoEstado,
+                celdas: diasObj,
+                hash: item.noteText,
+                resetReintentos: true,
+                error: null,
+                marcarSincronizado: syncCount > 0
+            });
+        }
+
         return {
-            success: true,
+            success: failedSheets.size === 0,
             count: totalApplied,
-            pendingDays: pendingDaysCount
+            pendingDays: pendingDaysCount,
+            recoveredCleanups
         };
     } catch (err) {
-        console.warn('⚠️ [Hover Bajas Sync] Error general durante sincronización:', err.message);
+        console.warn('⚠️ [Hover Sync] Error general durante sincronización:', err.message);
         return { success: false, error: err.message };
     } finally {
         isSyncRunning = false;
@@ -1177,11 +1647,31 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
 
 /**
  * Limpia notas hover (note: '') para una novedad resuelta, cancelada o cuyo rango se acortó.
+ * Lee también sync_sheets_celdas persistidas en public.novedades para sobrevivir a reinicios/pausas
+ * y a novedades sin fecha_objetivo.
  * Si el mismo chofer conserva otra novedad activa con imprime_nota_movimientos = true,
- * re-sincroniza inmediatamente sus días vigentes para no perder la advertencia activa.
+ * re-sincroniza inmediatamente sus días vigentes respetando la jerarquía (BAJA_DIAGRAMA primero).
  */
-async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy, dryRun = false) {
+async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy, dryRun = false, opts = {}) {
     try {
+        // Recuperar tracking previo (RAM y DB) antes de limpiar RAM
+        const prevTrackEntryRam = contexto.id != null ? bajasSyncTracker.get(String(contexto.id)) : null;
+        let persistedCeldas = (contexto.sync_sheets_celdas && typeof contexto.sync_sheets_celdas === 'object')
+            ? contexto.sync_sheets_celdas
+            : null;
+
+        if (!persistedCeldas && contexto.id != null && db.isConfigured()) {
+            try {
+                const { rows } = await db.query(
+                    `SELECT sync_sheets_celdas FROM public.novedades WHERE id = $1::bigint LIMIT 1`,
+                    [contexto.id]
+                );
+                if (rows.length > 0 && rows[0].sync_sheets_celdas) {
+                    persistedCeldas = rows[0].sync_sheets_celdas;
+                }
+            } catch (_) {}
+        }
+
         if (contexto.id != null) {
             limpiarTrackingNovedad(contexto.id);
         }
@@ -1191,19 +1681,22 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             choferNom = await resolveChoferNombreById(contexto.chofer_id, supabaseClient);
         }
 
-        if (!choferNom || !contexto.fecha_objetivo) {
+        const normChofer = normalizeText(choferNom);
+        const persistedDaysMap = plainObjectToDiasMap(persistedCeldas);
+
+        if (!choferNom && persistedDaysMap.size === 0) {
+            if (!dryRun && contexto.id != null && !contexto.desde_fecha) {
+                await persistirEstadoSyncNovedad(contexto.id, {
+                    estado: 'LIMPIADO',
+                    celdas: {},
+                    hash: null,
+                    resetReintentos: true,
+                    error: null,
+                    marcarSincronizado: true
+                });
+            }
             return { success: true, count: 0 };
         }
-
-        const normChofer = normalizeText(choferNom);
-        const fObjStr = (contexto.fecha_objetivo instanceof Date)
-            ? toIsoDateLocal(contexto.fecha_objetivo)
-            : String(contexto.fecha_objetivo).split('T')[0].trim();
-
-        const [y, m, d] = fObjStr.split('-').map(Number);
-        if (!y || !m || !d) return { success: true, count: 0 };
-        const fObj = new Date(y, m - 1, d);
-        fObj.setHours(0, 0, 0, 0);
 
         let fechaInicioLimpieza = new Date(hoy.getTime());
         if (contexto.desde_fecha) {
@@ -1218,23 +1711,68 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             }
         }
 
-        if (fObj < fechaInicioLimpieza) {
+        // Construir conjunto de fechas a limpiar: rango [inicio..fObj] (o HOY si fObj es null) + fechas persistidas
+        const dateSet = new Set();
+        if (contexto.fecha_objetivo) {
+            const fObjStr = (contexto.fecha_objetivo instanceof Date)
+                ? toIsoDateLocal(contexto.fecha_objetivo)
+                : String(contexto.fecha_objetivo).split('T')[0].trim();
+            const [y, m, d] = fObjStr.split('-').map(Number);
+            if (y && m && d) {
+                const fObj = new Date(y, m - 1, d);
+                fObj.setHours(0, 0, 0, 0);
+                let curCheck = new Date(fechaInicioLimpieza.getTime());
+                while (curCheck <= fObj) {
+                    dateSet.add(toIsoDateLocal(curCheck));
+                    curCheck.setDate(curCheck.getDate() + 1);
+                }
+            }
+        } else if (!contexto.desde_fecha) {
+            // Novedad sin fecha_objetivo: limpiar el día operativo actual (HOY)
+            dateSet.add(toIsoDateLocal(hoy));
+        }
+
+        // Agregar fechas persistidas en sync_sheets_celdas (solo >= fechaInicioLimpieza si es recorte parcial)
+        const inicioIso = toIsoDateLocal(fechaInicioLimpieza);
+        for (const [dStr, info] of persistedDaysMap.entries()) {
+            if (!contexto.desde_fecha || dStr >= inicioIso) {
+                if (info?.row1Based || dStr >= inicioIso) {
+                    dateSet.add(dStr);
+                }
+            }
+        }
+
+        if (dateSet.size === 0) {
+            if (!dryRun && contexto.id != null && !contexto.desde_fecha) {
+                await persistirEstadoSyncNovedad(contexto.id, {
+                    estado: 'LIMPIADO',
+                    celdas: {},
+                    hash: null,
+                    resetReintentos: true,
+                    error: null,
+                    marcarSincronizado: true
+                });
+            }
             return { success: true, count: 0 };
         }
 
-        console.log(`🧹 [Hover Bajas Sync] Limpiando notas hover de '${choferNom}' (${toIsoDateLocal(fechaInicioLimpieza)} .. ${fObjStr})...`);
+        const sortedDates = Array.from(dateSet).sort();
+        console.log(`🧹 [Hover Sync] Limpiando notas hover de '${choferNom || contexto.id}' (${sortedDates[0]} .. ${sortedDates[sortedDates.length - 1]})...`);
 
         const neededCols = new Map();
         const scanDays = [];
-        let curCheck = new Date(fechaInicioLimpieza.getTime());
-        while (curCheck <= fObj) {
+        for (const dateStr of sortedDates) {
+            const [cy, cm, cd] = dateStr.split('-').map(Number);
+            if (!cy || !cm || !cd) continue;
+            const curCheck = new Date(cy, cm - 1, cd);
+            curCheck.setHours(0, 0, 0, 0);
+
             const diaNum = curCheck.getDate();
             const baseSheet = resolveSheetForDate(curCheck);
             const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, curCheck, accessToken);
             const colIdx = getColChofer(diaNum);
             const colLetter = indexToColLetter(colIdx);
 
-            // Asegurar lectura fresca al limpiar
             columnCache.delete(`${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`);
 
             const key = `${baseSheet.id}:::${resolvedMeta.tabName}`;
@@ -1244,15 +1782,13 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             neededCols.get(key).cols.add(colLetter);
 
             scanDays.push({
-                dateStr: toIsoDateLocal(curCheck),
+                dateStr,
                 sheetId: baseSheet.id,
                 tabName: resolvedMeta.tabName,
                 sheetIdNum: resolvedMeta.sheetIdNum,
                 colIdx,
                 colLetter
             });
-
-            curCheck.setDate(curCheck.getDate() + 1);
         }
 
         for (const [, group] of neededCols.entries()) {
@@ -1283,16 +1819,19 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             }
 
             // 2. Limpiar fila donde se encuentre actualmente tipeado el chofer
-            const rowFound1Based = findDriverRowInColValues(colVals, normChofer);
+            const rowFound1Based = normChofer ? findDriverRowInColValues(colVals, normChofer) : null;
             if (rowFound1Based !== null) {
                 rowsToClear.add(rowFound1Based);
             }
 
-            // 3. Limpiar fila registrada previamente en el tracker para ese día
-            const prevTrackEntry = contexto.id != null ? bajasSyncTracker.get(String(contexto.id)) : null;
-            const prevDayInfo = prevTrackEntry?.dias?.get(dInfo.dateStr);
-            if (prevDayInfo?.row1Based) {
-                rowsToClear.add(prevDayInfo.row1Based);
+            // 3. Limpiar fila registrada previamente en RAM o en public.novedades.sync_sheets_celdas
+            const prevRamDay = prevTrackEntryRam?.dias?.get(dInfo.dateStr);
+            if (prevRamDay?.row1Based) {
+                rowsToClear.add(prevRamDay.row1Based);
+            }
+            const prevDbDay = persistedDaysMap.get(dInfo.dateStr);
+            if (prevDbDay?.row1Based) {
+                rowsToClear.add(prevDbDay.row1Based);
             }
 
             for (const rClear of rowsToClear) {
@@ -1325,10 +1864,12 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
         }
 
         let totalCleared = 0;
+        let hadError = false;
+        let lastErrMsg = null;
+
         for (const [sheetId, group] of clearRequestsBySheet.entries()) {
             if (group.requests.length === 0) continue;
 
-            // Deduplicación O(1) de celdas a limpiar
             const dedupMap = new Map();
             for (const req of group.requests) {
                 const u = req.updateCells;
@@ -1353,28 +1894,61 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
                     body: JSON.stringify({ requests: finalRequests })
                 }, 180000, 2);
                 if (updateRes && updateRes.ok) {
-                    console.log(`✅ [Hover Bajas Sync] ${finalRequests.length} nota(s) removidas en [${group.tabName}].`);
+                    console.log(`✅ [Hover Sync] ${finalRequests.length} nota(s) removidas en [${group.tabName}].`);
                     totalCleared += finalRequests.length;
+                } else if (updateRes) {
+                    hadError = true;
+                    lastErrMsg = `HTTP ${updateRes.status}: ${(await updateRes.text()).slice(0, 200)}`;
                 }
             } catch (e) {
-                console.warn(`⚠️ [Hover Bajas Sync] Error limpiando notas en ${sheetId}:`, e.message);
+                hadError = true;
+                lastErrMsg = e.message;
+                console.warn(`⚠️ [Hover Sync] Error limpiando notas en ${sheetId}:`, e.message);
             }
         }
 
-        // Protección Multi-Novedad: si el chofer tiene otra novedad activa con imprime_nota_movimientos = true, re-aplicarla
-        if (contexto.chofer_id) {
+        if (contexto.id != null && !contexto.desde_fecha) {
+            if (hadError) {
+                await persistirEstadoSyncNovedad(contexto.id, {
+                    incrementarReintento: true,
+                    error: lastErrMsg || 'Error limpiando notas hover'
+                });
+            } else {
+                await persistirEstadoSyncNovedad(contexto.id, {
+                    estado: 'LIMPIADO',
+                    celdas: {},
+                    hash: null,
+                    resetReintentos: true,
+                    error: null,
+                    marcarSincronizado: true
+                });
+            }
+        }
+
+        // Protección Multi-Novedad: si el chofer tiene otra novedad activa con imprime_nota_movimientos = true,
+        // re-componer inmediatamente sus notas respetando la jerarquía (BAJA_DIAGRAMA primero)
+        if (!opts.skipResyncOthers && contexto.chofer_id) {
             const otrasActivas = await fetchActiveNovedadesConNota(supabaseClient, contexto.chofer_id);
             if (otrasActivas.length > 0) {
                 for (const otra of otrasActivas) {
                     limpiarTrackingNovedad(otra.id);
-                    await syncBajasGoogleSheets(otra, { supabaseClient, forceRefresh: true });
                 }
+                await syncBajasGoogleSheets(
+                    { chofer_id: contexto.chofer_id, chofer_nombre: choferNom },
+                    { supabaseClient, forceRefresh: true }
+                );
             }
         }
 
-        return { success: true, count: totalCleared };
+        return { success: !hadError, count: totalCleared };
     } catch (e) {
-        console.warn('⚠️ [Hover Bajas Sync] Error en ejecutarLimpiezaNotas:', e.message);
+        console.warn('⚠️ [Hover Sync] Error en ejecutarLimpiezaNotas:', e.message);
+        if (contexto?.id != null && !contexto.desde_fecha && !dryRun) {
+            await persistirEstadoSyncNovedad(contexto.id, {
+                incrementarReintento: true,
+                error: e.message
+            });
+        }
         return { success: false, error: e.message };
     }
 }
@@ -1476,11 +2050,18 @@ module.exports = {
     iniciarReconciliadorBajas,
     limpiarTrackingNovedad,
     obtenerEstadoTrackingBajas,
+    obtenerEstadoSyncNovedades,
+    reanudarSyncPausados,
+    persistirEstadoSyncNovedad,
     resolveSheetForDate,
     normalizeText,
     indexToColLetter,
     getColChofer,
     formatBajaNote,
+    formatNovedadNote,
+    composeCellHoverNotes,
+    getTipoPrioridad,
+    getTipoEmoji,
     findDriverRowInColValues,
     isDriverMatch,
     getUnitsRowMap,

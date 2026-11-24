@@ -11,7 +11,9 @@ const {
     syncBajasGoogleSheets,
     queueSyncBajas,
     limpiarTrackingNovedad,
-    obtenerEstadoTrackingBajas
+    obtenerEstadoTrackingBajas,
+    obtenerEstadoSyncNovedades,
+    reanudarSyncPausados
 } = require('./utils/googleSheetsSync');
 
 function sumarUnDiaIso(isoDateStr) {
@@ -678,6 +680,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     : null;
                 const detalleClean = payload.detalle != null ? String(payload.detalle) : '';
                 const prioridadClean = String(payload.prioridad || 'media').trim().toLowerCase();
+                const esElegibleSync = Boolean(tipoObj.imprime_nota_movimientos) && !esLibre && Boolean(choferId);
+                const syncEstadoInicial = esElegibleSync ? 'PENDIENTE' : 'OMITIDO';
 
                 const insRes = await db.query(
                     `INSERT INTO public.novedades (
@@ -690,9 +694,10 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         creado_por_id,
                         terminal_id,
                         tipo_novedad_id,
+                        sync_sheets_estado,
                         creado_el,
                         actualizado_el
-                    ) VALUES ($1, $2, $3::date, $4, false, $5, $6, $7, $8, NOW(), NOW())
+                    ) VALUES ($1, $2, $3::date, $4, false, $5, $6, $7, $8, $9, NOW(), NOW())
                     RETURNING id`,
                     [
                         unidadId,
@@ -702,7 +707,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         prioridadClean,
                         creadoPorId,
                         terminalId,
-                        tipoObj.id
+                        tipoObj.id,
+                        syncEstadoInicial
                     ]
                 );
 
@@ -714,9 +720,9 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ioDash.emit('novedad_cambiada', { id: newId, action: 'nueva' });
                 }
 
-                // Disparador asíncrono de Notas Hover en Google Sheets Movimientos (por UUID -> imprime_nota_movimientos)
-                const debeImprimirNota = Boolean(card?.imprime_nota_movimientos ?? tipoObj.imprime_nota_movimientos);
-                if (debeImprimirNota && (card?.chofer_id || choferId) && (card?.fecha_objetivo || fechaObjClean)) {
+                // Disparador asíncrono de Notas Hover en Google Sheets Movimientos (por UUID -> imprime_nota_movimientos, todas excepto LIBRES)
+                const debeImprimirNota = Boolean(card?.imprime_nota_movimientos ?? tipoObj.imprime_nota_movimientos) && !esLibre;
+                if (debeImprimirNota && (card?.chofer_id || choferId)) {
                     queueSyncBajas({
                         action: 'crear',
                         id: newId,
@@ -728,7 +734,7 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         unidad_id: card?.unidad_id || unidadId,
                         n_ute: card?.n_ute || payload?.n_ute || '',
                         tractor: card?.tractor || payload?.tractor || '',
-                        fecha_objetivo: fechaObjClean || card?.fecha_objetivo,
+                        fecha_objetivo: fechaObjClean || card?.fecha_objetivo || null,
                         detalle: detalleClean
                     });
                 }
@@ -818,6 +824,12 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ? String(payload.prioridad || 'media').trim().toLowerCase()
                     : actual.prioridad;
 
+                const prevImprimia = Boolean(actual.prev_imprime_nota) && String(actual.tipo_codigo || '').toUpperCase() !== 'LIBRES' && !actual.resuelto && Boolean(actual.chofer_id);
+                const nuevoImprimePre = Boolean(targetImprimeNota) && !esLibre && !actual.resuelto && Boolean(targetChoferId);
+                const syncEstadoEdit = nuevoImprimePre
+                    ? 'PENDIENTE'
+                    : (prevImprimia ? 'PENDIENTE_LIMPIEZA' : actual.sync_sheets_estado || 'OMITIDO');
+
                 await db.query(
                     `UPDATE public.novedades
                      SET unidad_id = $1,
@@ -827,8 +839,11 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                          fecha_objetivo = $5::date,
                          detalle = $6,
                          prioridad = $7,
+                         sync_sheets_estado = $8,
+                         sync_sheets_reintentos = CASE WHEN $8 IN ('PENDIENTE', 'PENDIENTE_LIMPIEZA') THEN 0 ELSE sync_sheets_reintentos END,
+                         sync_sheets_error = CASE WHEN $8 IN ('PENDIENTE', 'PENDIENTE_LIMPIEZA') THEN NULL ELSE sync_sheets_error END,
                          actualizado_el = NOW()
-                     WHERE id = $8::bigint`,
+                     WHERE id = $9::bigint`,
                     [
                         targetUnidadId,
                         targetChoferId,
@@ -837,6 +852,7 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         targetFechaObjetivo,
                         targetDetalle,
                         targetPrioridad,
+                        syncEstadoEdit,
                         idClean
                     ]
                 );
@@ -854,9 +870,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     ioDash.emit('novedad_cambiada', { id: card ? card.id : idClean, action: 'editar' });
                 }
 
-                // Sincronización diferencial de Notas Hover (UUID tipos_novedad.imprime_nota_movimientos)
-                const prevImprimia = Boolean(actual.prev_imprime_nota) && !actual.resuelto && Boolean(actual.chofer_id) && Boolean(actual.prev_fecha_iso);
-                const nuevoImprime = Boolean(card?.imprime_nota_movimientos ?? targetImprimeNota) && !Boolean(card?.resuelto ?? actual.resuelto) && Boolean(targetChoferId) && Boolean(targetFechaObjetivo);
+                // Sincronización diferencial de Notas Hover (UUID tipos_novedad.imprime_nota_movimientos, todas excepto LIBRES)
+                const nuevoImprime = Boolean(card?.imprime_nota_movimientos ?? targetImprimeNota) && !esLibre && !Boolean(card?.resuelto ?? actual.resuelto) && Boolean(targetChoferId);
 
                 if (prevImprimia && (!nuevoImprime || String(actual.chofer_id) !== String(targetChoferId))) {
                     limpiarTrackingNovedad(idClean);
@@ -868,9 +883,10 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         unidad_id: actual.unidad_id,
                         n_ute: actual.prev_n_ute || '',
                         tractor: actual.prev_tractor || '',
-                        fecha_objetivo: actual.prev_fecha_iso
+                        fecha_objetivo: actual.prev_fecha_iso || null,
+                        sync_sheets_celdas: actual.sync_sheets_celdas || null
                     });
-                } else if (prevImprimia && nuevoImprime && targetFechaObjetivo < actual.prev_fecha_iso) {
+                } else if (prevImprimia && nuevoImprime && actual.prev_fecha_iso && targetFechaObjetivo && targetFechaObjetivo < actual.prev_fecha_iso) {
                     const desdeRecorte = sumarUnDiaIso(targetFechaObjetivo);
                     if (desdeRecorte && desdeRecorte <= actual.prev_fecha_iso) {
                         queueSyncBajas({
@@ -900,7 +916,7 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         unidad_id: card?.unidad_id || targetUnidadId,
                         n_ute: card?.n_ute || actual.prev_n_ute || '',
                         tractor: card?.tractor || actual.prev_tractor || '',
-                        fecha_objetivo: targetFechaObjetivo,
+                        fecha_objetivo: targetFechaObjetivo || null,
                         detalle: targetDetalle
                     });
                 }
@@ -922,6 +938,27 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                     `UPDATE public.novedades n
                      SET resuelto = true,
                          fecha_resolucion = COALESCE($2::timestamptz, NOW()),
+                         sync_sheets_estado = CASE
+                             WHEN COALESCE(tn.imprime_nota_movimientos, false)
+                                  AND UPPER(TRIM(tn.codigo)) <> 'LIBRES'
+                                  AND n.chofer_id IS NOT NULL
+                             THEN 'PENDIENTE_LIMPIEZA'
+                             ELSE n.sync_sheets_estado
+                         END,
+                         sync_sheets_reintentos = CASE
+                             WHEN COALESCE(tn.imprime_nota_movimientos, false)
+                                  AND UPPER(TRIM(tn.codigo)) <> 'LIBRES'
+                                  AND n.chofer_id IS NOT NULL
+                             THEN 0
+                             ELSE n.sync_sheets_reintentos
+                         END,
+                         sync_sheets_error = CASE
+                             WHEN COALESCE(tn.imprime_nota_movimientos, false)
+                                  AND UPPER(TRIM(tn.codigo)) <> 'LIBRES'
+                                  AND n.chofer_id IS NOT NULL
+                             THEN NULL
+                             ELSE n.sync_sheets_error
+                         END,
                          actualizado_el = NOW()
                      FROM public.tipos_novedad tn
                      WHERE n.id = $1::bigint
@@ -930,6 +967,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                                n.chofer_id,
                                n.unidad_id,
                                TO_CHAR(n.fecha_objetivo, 'YYYY-MM-DD') AS fecha_objetivo_iso,
+                               n.sync_sheets_celdas,
+                               UPPER(TRIM(tn.codigo)) AS tipo_codigo,
                                COALESCE(tn.imprime_nota_movimientos, false) AS imprime_nota_movimientos`,
                     [idClean, fechaResParam]
                 );
@@ -954,8 +993,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
 
                 res.json({ success: true, data: card });
 
-                // Limpieza asíncrona de Notas Hover si la novedad resuelta tenía imprime_nota_movimientos = true
-                if (rowUpdated.imprime_nota_movimientos && rowUpdated.chofer_id && rowUpdated.fecha_objetivo_iso) {
+                // Limpieza asíncrona de Notas Hover si la novedad resuelta tenía imprime_nota_movimientos = true (todas excepto LIBRES)
+                if (rowUpdated.imprime_nota_movimientos && rowUpdated.tipo_codigo !== 'LIBRES' && rowUpdated.chofer_id) {
                     limpiarTrackingNovedad(rowUpdated.id);
                     queueSyncBajas({
                         action: 'limpiar',
@@ -965,7 +1004,8 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
                         unidad_id: card?.unidad_id || rowUpdated.unidad_id,
                         n_ute: card?.n_ute || '',
                         tractor: card?.tractor || '',
-                        fecha_objetivo: rowUpdated.fecha_objetivo_iso
+                        fecha_objetivo: rowUpdated.fecha_objetivo_iso || null,
+                        sync_sheets_celdas: rowUpdated.sync_sheets_celdas || null
                     });
                 }
 
@@ -1127,16 +1167,30 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
         }
     });
 
-    // GET /api/novedades/sync-bajas/estado — Estado en vivo del Pending Days Watcher (SINCRONIZADO vs PENDIENTE_TIPEO)
-    router.get('/sync-bajas/estado', (_req, res) => {
+    // GET /api/novedades/sync-bajas/estado — Estado en vivo directo desde tabla public.novedades + RAM
+    router.get('/sync-bajas/estado', async (_req, res) => {
         try {
-            const estado = obtenerEstadoTrackingBajas();
+            const estadoDb = await obtenerEstadoSyncNovedades();
             return res.json({
                 success: true,
-                count: estado.length,
-                data: estado
+                count: estadoDb.items ? estadoDb.items.length : (estadoDb.trackingRam?.length || 0),
+                resumen: estadoDb.resumen || {},
+                data: estadoDb.items || [],
+                trackingRam: estadoDb.trackingRam || []
             });
         } catch (err) {
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
+        }
+    });
+
+    // POST /api/novedades/sync-bajas/reanudar — Destrabar novedades en PAUSADO o ERROR y re-ejecutar sync
+    router.post('/sync-bajas/reanudar', async (req, res) => {
+        try {
+            const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+            const result = await reanudarSyncPausados({ dryRun });
+            return res.json(result);
+        } catch (err) {
+            console.error("❌ [Novedades] Error en POST /api/novedades/sync-bajas/reanudar:", err.message);
             return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
         }
     });
