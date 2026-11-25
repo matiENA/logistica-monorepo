@@ -1195,7 +1195,88 @@ function createNovedadesRouter(cacheDatosGlobales, _io, ioDash, serviceAccountAu
         }
     });
 
+    // POST /api/novedades/archivar-cold — Ejecuta archivado Hot -> Cold (resueltas >= 15 días desde creado_el)
+    router.post('/archivar-cold', async (req, res) => {
+        try {
+            if (!db.isConfigured()) {
+                return res.status(503).json({ success: false, error: 'PostgreSQL no configurado' });
+            }
+            const dias = Math.max(1, parseInt(req.query.dias || req.body?.dias || '15', 10) || 15);
+            const dryRun = req.query.dryRun === 'true' || req.body?.dryRun === true;
+            const retencion = `${dias} days`;
+
+            if (dryRun) {
+                const preview = await db.query(
+                    `SELECT COUNT(*)::int AS elegibles,
+                            MIN(creado_el) AS oldest_creado_el,
+                            MAX(creado_el) AS newest_creado_el
+                     FROM public.novedades
+                     WHERE resuelto = true
+                       AND creado_el <= (NOW() - $1::interval)
+                       AND COALESCE(sync_sheets_estado, 'OMITIDO') IN ('OMITIDO', 'LIMPIADO')`,
+                    [retencion]
+                );
+                return res.json({ success: true, dryRun: true, retencion, ...preview.rows[0] });
+            }
+
+            const { rows } = await db.query(
+                `SELECT * FROM public.fn_archivar_novedades_cold($1::interval)`,
+                [retencion]
+            );
+            const r = rows[0] || { archived_rows: 0, oldest_creado_el: null, newest_creado_el: null };
+            return res.json({ success: true, retencion, ...r });
+        } catch (err) {
+            console.error("❌ [Novedades Cold] Error en POST /api/novedades/archivar-cold:", err.message);
+            return res.status(500).json({ success: false, error: err.message || 'Error en servidor' });
+        }
+    });
+
     return router;
 }
 
-module.exports = { cargarNovedades, enriquecerNovedadesConFlota, iniciarPollingNovedades, createNovedadesRouter };
+let coldArchiverTimer = null;
+let coldArchiverBootTimer = null;
+
+function iniciarArchivadorNovedadesCold(intervalMs = 24 * 60 * 60 * 1000, retencion = '15 days') {
+    if (process.env.ENABLE_NOVEDADES_COLD_ARCHIVER === 'false') {
+        console.log('🧊 [Novedades Cold] Archivador automático deshabilitado por ENABLE_NOVEDADES_COLD_ARCHIVER=false.');
+        return null;
+    }
+
+    if (coldArchiverTimer) clearInterval(coldArchiverTimer);
+    if (coldArchiverBootTimer) clearTimeout(coldArchiverBootTimer);
+
+    const runArchive = async () => {
+        if (!db.isConfigured()) return;
+        try {
+            const { rows } = await db.query(
+                `SELECT * FROM public.fn_archivar_novedades_cold($1::interval)`,
+                [retencion]
+            );
+            const archived = Number(rows[0]?.archived_rows || 0);
+            if (archived > 0) {
+                console.log(`🧊 [Novedades Cold] ${archived} novedad(es) resueltas (> ${retencion}) archivadas en public.novedades_cold.`);
+            }
+        } catch (err) {
+            console.warn('⚠️ [Novedades Cold] Error en archivado periódico:', err.message);
+        }
+    };
+
+    // Primer chequeo diferido 60s tras boot para no competir con el arranque
+    coldArchiverBootTimer = setTimeout(runArchive, 60 * 1000);
+    if (coldArchiverBootTimer.unref) coldArchiverBootTimer.unref();
+
+    coldArchiverTimer = setInterval(runArchive, intervalMs);
+    if (coldArchiverTimer.unref) coldArchiverTimer.unref();
+
+    console.log(`🧊 [Novedades Cold] Archivador automático activo (cada ${Math.round(intervalMs / 3600000)}h | retención: ${retencion}).`);
+    return coldArchiverTimer;
+}
+
+module.exports = {
+    cargarNovedades,
+    enriquecerNovedadesConFlota,
+    iniciarPollingNovedades,
+    iniciarArchivadorNovedadesCold,
+    createNovedadesRouter
+};

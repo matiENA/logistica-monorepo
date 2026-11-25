@@ -21,7 +21,7 @@ const { Server } = require('socket.io');
 // 📦 MÓDULOS PROPIOS
 // ==============================================================
 const { fetchRango, serviceAccountAuth, ID_SPREADSHEET_MASTER } = require('./utils/shared');
-const { cargarNovedades, createNovedadesRouter } = require('./novedades');
+const { cargarNovedades, iniciarArchivadorNovedadesCold, createNovedadesRouter } = require('./novedades');
 const webhookRouter = require('./webhook');
 const { iniciarCachePolling, iniciarParticionesAutoSync } = require('./cache/builder');
 const { iniciarReconciliadorBajas } = require('./utils/googleSheetsSync');
@@ -127,6 +127,9 @@ iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash);
 
 // 🛰️ Reconciliador auto-reparable de Notas Hover en Google Sheets Movimientos (UUID imprime_nota_movimientos = true)
 iniciarReconciliadorBajas(10 * 60 * 1000);
+
+// 🧊 Archivador automático Hot -> Cold de novedades resueltas (> 15 días desde creado_el)
+iniciarArchivadorNovedadesCold(24 * 60 * 60 * 1000, '15 days');
 
 // ==============================================================
 // 🛣️ RUTAS
