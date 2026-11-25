@@ -18,7 +18,7 @@ interface UnitLicensePlateProps {
   plate: string;
   label: 'Tractor' | 'Semi';
   topBadge?: string | null;
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
   className?: string;
 }
 
@@ -31,12 +31,18 @@ export const UnitLicensePlate: React.FC<UnitLicensePlateProps> = ({
 }) => {
   const hasPlate = Boolean(plate && plate.trim() !== '');
   const formattedPlate = hasPlate ? formatPlateDisplay(plate) : '---';
-  const widthClass = size === 'sm' ? 'w-[104px]' : 'w-[118px]';
-  const textClass = size === 'sm' ? 'text-[12px] py-0.5' : 'text-[13px] py-1';
+  const widthClass =
+    size === 'xs' ? 'w-[80px]' : size === 'sm' ? 'w-[104px]' : 'w-[118px]';
+  const textClass =
+    size === 'xs'
+      ? 'text-[10.5px] py-[1px]'
+      : size === 'sm'
+      ? 'text-[12px] py-0.5'
+      : 'text-[13px] py-1';
 
   return (
     <div
-      className={`flex flex-col items-center ${widthClass} ${className}`}
+      className={`flex flex-col items-center transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${widthClass} ${className}`}
       title={`${label}: ${formattedPlate}`}
     >
       {topBadge ? (

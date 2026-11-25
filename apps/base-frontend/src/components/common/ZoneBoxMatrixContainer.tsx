@@ -1,15 +1,18 @@
 import React from 'react';
+import { User } from 'lucide-react';
+import { useDragAutoScroll } from '../../hooks/useDragAutoScroll';
+import { DragScrollContainer } from './DragScrollContainer';
 import {
   TallerUnitCard,
   type TallerCardItem,
   type TallerColumnId,
 } from '../taller/TallerUnitCard';
-import type { OperarioAssignableItem } from './OperariosAssignDropdownCard';
-import type { EstadoBox } from '../../types/planeacion';
+import type { EstadoBox, ProcesoNota, TallerBoxOperario } from '../../types/planeacion';
 
 export interface ZoneBoxSlotItem {
   boxId: string | null;
   boxName: string;
+  operarios?: TallerBoxOperario[];
   adentro: TallerCardItem[];
   afuera: TallerCardItem[];
 }
@@ -30,11 +33,8 @@ export interface ZoneBoxMatrixContainerProps {
   countClass?: string;
   defaultDropBoxId?: string | null;
   readOnly?: boolean;
-  nowMs: number;
+  nowMs?: number;
   busyIds?: Record<string, boolean>;
-  canManageAssignment?: boolean;
-  sectorBoxes?: Array<{ id: string; box_name: string }>;
-  sectorUsuarios?: OperarioAssignableItem[];
   isDragging?: boolean;
   dragOverTarget?: ZoneDropTarget | null;
   canDropOnTarget?: (target: ZoneDropTarget) => boolean;
@@ -42,11 +42,8 @@ export interface ZoneBoxMatrixContainerProps {
   onTargetDragOver?: (e: React.DragEvent<HTMLElement>, target: ZoneDropTarget) => void;
   onTargetDrop?: (e: React.DragEvent<HTMLElement>, target: ZoneDropTarget) => void;
   onClearDragOver?: (target?: ZoneDropTarget) => void;
-  onAssign?: (
-    item: TallerCardItem,
-    payload: { usuariosIds?: string[]; boxId?: string | null }
-  ) => Promise<void>;
-  onNoteAdded?: () => void;
+  onNoteAdded?: (sync?: { procesoId: string; circuitoId?: string; notes: ProcesoNota[] }) => void;
+  onUndoCard?: (item: TallerCardItem) => void;
   onDragStart?: (e: React.DragEvent<HTMLDivElement>, item: TallerCardItem) => void;
   onDragEnd?: () => void;
 }
@@ -55,17 +52,13 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
   zoneLabel,
   totalCount,
   slots,
-  colSpanClass = 'lg:col-span-5',
+  colSpanClass = 'min-w-0',
   borderIdle = 'border-emerald-500/30 bg-[#0A0E15]/80',
   borderOver = 'border-emerald-400 bg-emerald-500/10',
   countClass = 'text-emerald-300',
   defaultDropBoxId = null,
   readOnly = false,
-  nowMs,
   busyIds = {},
-  canManageAssignment = false,
-  sectorBoxes = [],
-  sectorUsuarios = [],
   isDragging = false,
   dragOverTarget = null,
   canDropOnTarget,
@@ -73,11 +66,39 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
   onTargetDragOver,
   onTargetDrop,
   onClearDragOver,
-  onAssign,
   onNoteAdded,
+  onUndoCard,
   onDragStart,
   onDragEnd,
 }) => {
+  const { setRef: setMatrixScrollRef, nodeRef: matrixScrollRef } =
+    useDragAutoScroll<HTMLDivElement>({
+      horizontal: true,
+      edgeRatio: 1.5 / 7,
+      minEdgePx: 110,
+      edgePx: 250,
+      maxSpeedPxPerSec: 620,
+      leftAllowancePx: 28,
+      rightAllowancePx: 28,
+    });
+
+  const handleMatrixWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = matrixScrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth + 2) return;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+
+    if (!e.shiftKey && e.target instanceof HTMLElement) {
+      const verticalScroller = e.target.closest('.overflow-y-auto') as HTMLElement | null;
+      if (verticalScroller && el.contains(verticalScroller)) {
+        if (verticalScroller.scrollHeight - verticalScroller.clientHeight > 2) {
+          return;
+        }
+      }
+    }
+
+    el.scrollLeft += e.deltaY;
+  };
+
   const resolveTarget = (slotBoxId: string | null, estado: EstadoBox): ZoneDropTarget =>
     resolveDropTarget
       ? resolveDropTarget(slotBoxId, estado)
@@ -96,6 +117,44 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
 
   const noopDragStart = () => {};
   const noopDragEnd = () => {};
+
+  const renderEmptyBoxOperarios = (
+    operarios: TallerBoxOperario[] | undefined,
+    minHeightClass: string
+  ) => {
+    const list = operarios || [];
+    if (list.length === 0) {
+      return (
+        <div
+          className={`h-full ${minHeightClass} flex items-center justify-center text-center px-2 text-zinc-500/60 text-[11px] pointer-events-none select-none`}
+        >
+          <span>Sin operarios</span>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`h-full ${minHeightClass} flex flex-col items-center justify-center gap-1 px-2 py-1 pointer-events-none select-none opacity-45`}
+      >
+        {list.map((op) => (
+          <div
+            key={op.id}
+            className="inline-flex items-center justify-center gap-1.5 max-w-full text-[11px] font-mono font-semibold uppercase tracking-wide text-zinc-300"
+          >
+            <User
+              size={12}
+              strokeWidth={1.75}
+              aria-hidden="true"
+              focusable="false"
+              className="shrink-0 text-zinc-400"
+            />
+            <span className="truncate">{op.nombre_usuario}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <section
@@ -124,7 +183,7 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
               onTargetDrop?.(e, sectionFallbackTarget);
             }
       }
-      className={`h-full min-h-0 min-w-0 rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-colors ${colSpanClass} ${
+      className={`h-full min-h-[280px] md:min-h-0 min-w-0 rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-colors ${colSpanClass} ${
         isOverSection ? borderOver : borderIdle
       }`}
     >
@@ -142,9 +201,12 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
       </div>
 
       {/* Matriz Relacional de Boxes Contenidos en la Zona (Dividers amarillos: Box | Box y ADENTRO / AFUERA) */}
-      <div className="flex-1 min-h-0 flex overflow-x-auto overflow-y-hidden divide-x divide-amber-400/70 no-scrollbar">
+      <div
+        ref={setMatrixScrollRef}
+        onWheel={handleMatrixWheel}
+        className="flex-1 min-h-0 flex overflow-x-auto overflow-y-hidden divide-x divide-amber-400/70 no-scrollbar"
+      >
         {slots.map((slot) => {
-          const totalBoxCount = slot.adentro.length + slot.afuera.length;
           const targetAdentro = resolveTarget(slot.boxId, 'adentro');
           const targetAfuera = resolveTarget(slot.boxId, 'afuera');
 
@@ -167,18 +229,13 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
           return (
             <div
               key={slot.boxId ?? `sin-box-${slot.boxName}`}
-              className="flex-1 min-w-[210px] h-full min-h-0 flex flex-col"
+              className="flex-1 min-w-[195px] h-full min-h-0 flex flex-col"
             >
-              {/* Encabezado de Box */}
-              <div className="px-2.5 pb-2 flex items-center justify-center gap-1.5 shrink-0">
+              {/* Encabezado de Box (sin contador verde duplicado; se conservan contadores ADENTRO y AFUERA) */}
+              <div className="px-2.5 pb-2 flex items-center justify-center shrink-0">
                 <h3 className="font-numeric font-bold text-lg tracking-wide text-white tabular-nums truncate">
                   {slot.boxName}
                 </h3>
-                {totalBoxCount > 0 && (
-                  <span className="font-numeric tabular-nums text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
-                    {totalBoxCount}
-                  </span>
-                )}
               </div>
 
               {/* Mitad Superior: ADENTRO (65%) */}
@@ -225,30 +282,31 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
                   </div>
                 )}
 
-                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5 no-scrollbar">
+                <DragScrollContainer
+                  vertical
+                  edgePx={96}
+                  maxSpeedPxPerSec={520}
+                  topAllowancePx={32}
+                  bottomAllowancePx={0}
+                  className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5 no-scrollbar"
+                >
                   {slot.adentro.length === 0 ? (
-                    <div className="h-full min-h-[72px] flex items-center justify-center text-center px-2 text-zinc-500 text-[11px]">
-                      <span>Sin unidades</span>
-                    </div>
+                    renderEmptyBoxOperarios(slot.operarios, 'min-h-[72px]')
                   ) : (
                     slot.adentro.map((item) => (
                       <TallerUnitCard
                         key={item.id}
                         item={item}
                         compact
-                        nowMs={nowMs}
                         isBusy={Boolean(busyIds[item.id])}
-                        canManageAssignment={!readOnly && canManageAssignment}
-                        sectorBoxes={sectorBoxes}
-                        sectorUsuarios={sectorUsuarios}
-                        onAssign={readOnly ? undefined : onAssign}
                         onNoteAdded={onNoteAdded}
+                        onUndoCard={readOnly ? undefined : onUndoCard}
                         onDragStart={readOnly ? noopDragStart : onDragStart ?? noopDragStart}
                         onDragEnd={readOnly ? noopDragEnd : onDragEnd ?? noopDragEnd}
                       />
                     ))
                   )}
-                </div>
+                </DragScrollContainer>
               </div>
 
               {/* Línea Divisoria Horizontal en Amarillo: ADENTRO / AFUERA */}
@@ -298,30 +356,31 @@ export const ZoneBoxMatrixContainer: React.FC<ZoneBoxMatrixContainerProps> = ({
                   </div>
                 )}
 
-                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5 no-scrollbar">
+                <DragScrollContainer
+                  vertical
+                  edgePx={72}
+                  maxSpeedPxPerSec={480}
+                  topAllowancePx={26}
+                  bottomAllowancePx={14}
+                  className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5 no-scrollbar"
+                >
                   {slot.afuera.length === 0 ? (
-                    <div className="h-full min-h-[56px] flex items-center justify-center text-center px-2 text-zinc-500 text-[11px]">
-                      <span>Sin unidades</span>
-                    </div>
+                    renderEmptyBoxOperarios(slot.operarios, 'min-h-[56px]')
                   ) : (
                     slot.afuera.map((item) => (
                       <TallerUnitCard
                         key={item.id}
                         item={item}
                         compact
-                        nowMs={nowMs}
                         isBusy={Boolean(busyIds[item.id])}
-                        canManageAssignment={!readOnly && canManageAssignment}
-                        sectorBoxes={sectorBoxes}
-                        sectorUsuarios={sectorUsuarios}
-                        onAssign={readOnly ? undefined : onAssign}
                         onNoteAdded={onNoteAdded}
+                        onUndoCard={readOnly ? undefined : onUndoCard}
                         onDragStart={readOnly ? noopDragStart : onDragStart ?? noopDragStart}
                         onDragEnd={readOnly ? noopDragEnd : onDragEnd ?? noopDragEnd}
                       />
                     ))
                   )}
-                </div>
+                </DragScrollContainer>
               </div>
             </div>
           );

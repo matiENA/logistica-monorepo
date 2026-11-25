@@ -39,13 +39,16 @@
   - `apps/dash-frontend/src/components/layout/Header.tsx`, `apps/dash-frontend/src/components/kanban/{QuickAddLibre,ColumnSplitter,LibresRow,NoveltyCard}.tsx`
   - `apps/dash-frontend/UPDATE_2026-11-19_IDLE_CARTELERA.md` (nuevo)
 
-## 7. Variación 2026-11-20 (`base-frontend` + `node_backend/planeacion` — Matriz Box × ADENTRO/AFUERA, Rol `encargado_zona` y `OperariosAssignDropdownCard`)
-- **Objetivo**: Sincronizar cambios locales validados en `localhost:5173` hacia `logistica-monorepo`: rol `encargado_zona` con stamp `encargado_id`/`encargado_at`, estado físico `adentro`/`afuera` en `base.procesos`, matriz dinámica por zona/box y portal de asignación de operarios en `/coordinacion` y `/taller`.
-- **Clasificación (`/db-render-arch`)**: **Capa C1 Hot RAM (`ETag` 304 por `zoneId`) + Write-Through + Capa C0 (micro-buffer 450 ms)**; 0 variables `.env` nuevas.
+## 7. Variación 2026-11-20 / 2026-11-25 (`base-frontend` + `node_backend/planeacion` — Circuitos V3, Dock Idle Horizontal, Drag-Scroll y Confirmación Taller)
+- **Objetivo**: Sincronizar 1:1 cambios locales de `Documents/base` hacia `logistica-monorepo` mediante `npm run sync:monorepo`: tabla maestra `base.circuitos` V3 (alta/baja/desunión), dock horizontal `IdleUnitsHorizontalDock` con `FlyingCardTransition`, login/wall de Coordinación (`CoordinacionLoginWall`/`Modal`), confirmación de movimiento en Taller (`TallerConfirmMoveModal`), `DragScrollContainer`/`useDragAutoScroll` y matriz Box × ADENTRO/AFUERA con divulgación progresiva.
+- **Clasificación (`/db-render-arch`)**: **Capa C1 Hot RAM (`ETag` 304 `-taller-v2-<zoneId>`) + C1 Fast-Path / C2 B-Tree On-Demand (`procesos_notas`, `circuitos`) + Capa C0**; 0 variables `.env` nuevas.
 - **Contratos Actualizados**:
-  - `GET /api/planeacion/board?includeCatalog=0&zoneId=<uuid>` & `GET /api/planeacion/taller-zone-map/:zoneId`: devuelven `taller_zone_map` (`boxes[]` con carriles `adentro`/`afuera`) y `catalog` filtrado por zona (`rol`, `zone_id`).
-  - `PATCH /api/planeacion/procesos/:id` / `POST /api/planeacion/holds/:id/activar` / `PATCH /api/planeacion/holds/:id`: aceptan `estado` (`'adentro' | 'afuera'`), validan permisos (`403 Forbidden` si `operario` intenta editar `usuariosIds`/`boxId`) y estampan `encargado_id`/`encargado_at` (nullable).
+  - `GET/POST /api/planeacion/circuitos`, `POST /api/planeacion/circuitos/:id/{baja,desunir}`: ciclo planta V3 en `base.circuitos` (`ingreso_at`, `desunion_at`, `egreso_at`, `alta_coord_id`, `baja_coord_id`) + `GET /api/planeacion/auth/coordinacion/verify`.
+  - `GET /api/planeacion/board?includeCatalog=0&zoneId=<uuid>` & `GET /api/planeacion/taller-zone-map/:zoneId`: devuelven `taller_zone_map` (`boxes[]` con carriles `adentro`/`afuera`), `activos` con `last_note` + `notes_count` y `catalog` filtrado por zona (`rol`, `zone_id`).
+  - `GET /api/planeacion/procesos/:id/notas` & `PATCH /api/planeacion/{procesos,holds}/:id`: notas bajo demanda C2, estado `'adentro' | 'afuera'`, permisos (`403` si `operario`) y stamp `encargado_id`/`encargado_at`.
 - **Archivos**:
-  - `apps/base-frontend/src/components/common/{OperariosAssignDropdownCard,ZoneBoxMatrixContainer}.tsx` (nuevos)
-  - `apps/base-frontend/src/{components/kanban/{UnitPlaneacionCard,UnitPlaneacionDeployedModal},components/taller/TallerUnitCard,hooks/usePlaneacionKanban,pages/{PlaneacionKanbanPage,TallerLoginTerminalPage},services/planeacionApi,types/planeacion}.{ts,tsx}`
+  - `apps/base-frontend/src/components/common/{DragScrollContainer,ZoneBoxMatrixContainer}.tsx`
+  - `apps/base-frontend/src/components/kanban/{CoordinacionLoginModal,CoordinacionLoginWall,FlyingCardTransition,IdleHorizontalCard,IdleUnitsHorizontalDock,idleDockStates,NewIngresoModal,UnitPlaneacionCard}.{ts,tsx}`
+  - `apps/base-frontend/src/components/taller/{TallerUnitCard,TallerConfirmMoveModal}.tsx`
+  - `apps/base-frontend/src/{hooks/{usePlaneacionKanban,useDragAutoScroll}.ts,pages/{PlaneacionKanbanPage,TallerLoginTerminalPage}.tsx,services/planeacionApi.ts,types/planeacion.ts}`
   - `services/master-service/node_backend/planeacion/{db/schema,services/hotRamBaseService,routes/planeacionRoutes}.js`

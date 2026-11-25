@@ -68,6 +68,24 @@ class HotRamBaseService {
         const check = await this.verificarAccesoCoordinacion(cleanId);
         return Boolean(check.authorized);
     }
+    /**
+     * Verifica autorización de usuario de taller contra base.usuarios_taller.
+     * Resolución O(1) en Hot RAM C1 con fallback DB si la caché de catálogo aún no se hidrató.
+     */
+    async isTallerUserAuthorized(userId) {
+        const cleanId = (userId || '').trim();
+        if (!cleanId)
+            return false;
+        if (this.runtimeIndex?.tallerUsersMetaMap.has(cleanId)) {
+            return true;
+        }
+        const { index } = await this.ensureRuntimeIndex();
+        if (index.tallerUsersMetaMap.has(cleanId)) {
+            return true;
+        }
+        const check = await this.verificarAccesoTaller(cleanId);
+        return Boolean(check.authorized);
+    }
     computeEtag(payload) {
         return `"${node_crypto_1.default.createHash('sha1').update(JSON.stringify(payload)).digest('hex')}"`;
     }
@@ -107,6 +125,20 @@ class HotRamBaseService {
     buildTallerZoneMaps(catalog, activos) {
         const map = new Map();
         const boxesByZone = new Map();
+        const operariosByBox = new Map();
+        for (const u of catalog.usuarios) {
+            if (u.rol !== 'operario' || !u.box_id)
+                continue;
+            const list = operariosByBox.get(u.box_id);
+            const entry = { id: u.id, nombre_usuario: u.nombre_usuario };
+            if (list)
+                list.push(entry);
+            else
+                operariosByBox.set(u.box_id, [entry]);
+        }
+        for (const list of operariosByBox.values()) {
+            list.sort((a, b) => a.nombre_usuario.localeCompare(b.nombre_usuario, 'es', { sensitivity: 'base' }));
+        }
         for (const b of catalog.boxes) {
             const list = boxesByZone.get(b.zone_id);
             if (list)
@@ -124,6 +156,7 @@ class HotRamBaseService {
                 const slot = {
                     box_id: b.id,
                     box_name: b.box_name,
+                    operarios: operariosByBox.get(b.id) || [],
                     adentro: [],
                     afuera: [],
                 };
@@ -164,7 +197,7 @@ class HotRamBaseService {
         return map;
     }
     isPendingRow(row) {
-        return !row.llegadaZonaAt && !row.ingresoBoxAt && !row.salidaAt;
+        return !row.llegadaZonaAt && !row.ingresoBoxAt && !row.salidaAt && !row.anuladoAt;
     }
     async resolveTallerActorMeta(actorUsuarioId, index) {
         const cleanId = (actorUsuarioId || '').trim();
@@ -242,6 +275,20 @@ class HotRamBaseService {
                 tallerUsersMetaMap.set(ut.auth_user_id, meta);
             }
         }
+        const operariosByBoxMap = new Map();
+        for (const u of catalog.usuarios) {
+            if (u.rol !== 'operario' || !u.box_id)
+                continue;
+            const list = operariosByBoxMap.get(u.box_id);
+            const entry = { id: u.id, nombre_usuario: u.nombre_usuario };
+            if (list)
+                list.push(entry);
+            else
+                operariosByBoxMap.set(u.box_id, [entry]);
+        }
+        for (const list of operariosByBoxMap.values()) {
+            list.sort((a, b) => a.nombre_usuario.localeCompare(b.nombre_usuario, 'es', { sensitivity: 'base' }));
+        }
         const userNameToIdMap = new Map();
         for (const [id, name] of usersMap.entries()) {
             userNameToIdMap.set(name.trim().toLowerCase(), id);
@@ -276,6 +323,7 @@ class HotRamBaseService {
             boxesMap,
             usersMap,
             tallerUsersMetaMap,
+            operariosByBoxMap,
             userNameToIdMap,
             tractoresMap,
             semisMap,
@@ -451,9 +499,49 @@ class HotRamBaseService {
         this.runtimeIndex = fresh.index;
         return fresh;
     }
+    mergeCircuitoNotes(circuitoId, parentCircuitoId, notesByCircuito) {
+        const ownNotes = notesByCircuito.get(circuitoId) || [];
+        if (!parentCircuitoId)
+            return ownNotes;
+        const parentNotes = notesByCircuito.get(parentCircuitoId) || [];
+        if (parentNotes.length === 0)
+            return ownNotes;
+        if (ownNotes.length === 0)
+            return parentNotes;
+        return [...parentNotes, ...ownNotes].sort((a, b) => {
+            const timeCmp = a.timestamp.localeCompare(b.timestamp);
+            if (timeCmp !== 0)
+                return timeCmp;
+            return a.id.localeCompare(b.id);
+        });
+    }
+    resolveCircuitoRenderMeta(index, c, parent) {
+        const tractorPlate = c.tractorId ? index.tractoresMap.get(c.tractorId) || '' : '';
+        const semiPlate = c.semiId ? index.semisMap.get(c.semiId) || '' : '';
+        const virtualUnit = this.resolveVirtualUnit(index, c.tractorId, c.semiId);
+        const esDesunido = Boolean(c.parentCircuitoId);
+        let patenteCruzada = null;
+        if (esDesunido && parent) {
+            if (c.tractorId && !c.semiId) {
+                patenteCruzada = parent.semiId ? index.semisMap.get(parent.semiId) || null : null;
+            }
+            else if (c.semiId && !c.tractorId) {
+                patenteCruzada = parent.tractorId ? index.tractoresMap.get(parent.tractorId) || null : null;
+            }
+        }
+        const grupoRender = c.parentCircuitoId || virtualUnit.unidad_id || c.id;
+        return {
+            tractorPlate,
+            semiPlate,
+            virtualUnit,
+            esDesunido,
+            patenteCruzada,
+            grupoRender,
+        };
+    }
     /**
-     * Hidratación Hot RAM C1 V2:
-     * 1 único RTT paralelo sobre base.procesos (abiertos) + base.procesos_notas (circuitos activos).
+     * Hidratación Hot RAM C1 V3:
+     * 1 único RTT paralelo sobre base.circuitos (abiertos + padres de desunión) + base.procesos + base.procesos_notas.
      * 0 SQL JOINs repetitivos y 0 queries a catálogos o procesos_cold en warm hydrate.
      */
     async hydrateBoard(forceCatalog = false) {
@@ -466,19 +554,37 @@ class HotRamBaseService {
                     !this.cachedCatalog ||
                     !this.runtimeIndex ||
                     Date.now() - this.lastCatalogRefresh > CATALOG_TTL_MS;
-                // En warm hydrate: 1 único roundtrip paralelo (procesos abiertos + notas de circuitos abiertos)
-                const [catalogBundle, openRows, openNotesRows] = await Promise.all([
+                // En warm hydrate: 1 único roundtrip paralelo (circuitos abiertos/padres + procesos + notas)
+                const [catalogBundle, circuitoRows, openRows, openNotesRows] = await Promise.all([
                     shouldRefreshCatalog
                         ? this.fetchCatalogAndIndex()
                         : Promise.resolve({ catalog: this.cachedCatalog, index: this.runtimeIndex }),
                     index_js_1.db
                         .select({
+                        id: schema_js_1.circuitos.id,
+                        parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                        tractorId: schema_js_1.circuitos.tractorId,
+                        semiId: schema_js_1.circuitos.semiId,
+                        tractorN: schema_js_1.circuitos.tractorN,
+                        semiN: schema_js_1.circuitos.semiN,
+                        ingresoAt: schema_js_1.circuitos.ingresoAt,
+                        desunionAt: schema_js_1.circuitos.desunionAt,
+                        egresoAt: schema_js_1.circuitos.egresoAt,
+                        altaCoordId: schema_js_1.circuitos.altaCoordId,
+                    })
+                        .from(schema_js_1.circuitos)
+                        .where((0, drizzle_orm_1.sql) `(${schema_js_1.circuitos.egresoAt} IS NULL AND ${schema_js_1.circuitos.desunionAt} IS NULL)
+                  OR ${schema_js_1.circuitos.id} IN (
+                    SELECT DISTINCT parent_circuito_id
+                    FROM base.circuitos
+                    WHERE egreso_at IS NULL
+                      AND desunion_at IS NULL
+                      AND parent_circuito_id IS NOT NULL
+                  )`),
+                    index_js_1.db
+                        .select({
                         id: schema_js_1.procesos.id,
                         circuitoId: schema_js_1.procesos.circuitoId,
-                        tractorId: schema_js_1.procesos.tractorId,
-                        semiId: schema_js_1.procesos.semiId,
-                        tractorN: schema_js_1.procesos.tractorN,
-                        semiN: schema_js_1.procesos.semiN,
                         zoneId: schema_js_1.procesos.zoneId,
                         pendienteAt: schema_js_1.procesos.pendienteAt,
                         llegadaZonaAt: schema_js_1.procesos.llegadaZonaAt,
@@ -489,11 +595,11 @@ class HotRamBaseService {
                         encargadoId: schema_js_1.procesos.encargadoId,
                         encargadoAt: schema_js_1.procesos.encargadoAt,
                         salidaAt: schema_js_1.procesos.salidaAt,
-                        circuitoCerradoAt: schema_js_1.procesos.circuitoCerradoAt,
                         updatedAt: schema_js_1.procesos.updatedAt,
                     })
                         .from(schema_js_1.procesos)
-                        .where((0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt))
+                        .where((0, drizzle_orm_1.sql) `${schema_js_1.procesos.circuitoId} IN (SELECT id FROM base.circuitos WHERE egreso_at IS NULL AND desunion_at IS NULL)
+                  AND ${schema_js_1.procesos.anuladoAt} IS NULL`)
                         .orderBy((0, drizzle_orm_1.desc)(schema_js_1.procesos.pendienteAt)),
                     index_js_1.db
                         .select({
@@ -507,13 +613,19 @@ class HotRamBaseService {
                         editedAt: schema_js_1.procesosNotas.editedAt,
                     })
                         .from(schema_js_1.procesosNotas)
-                        .where((0, drizzle_orm_1.sql) `${schema_js_1.procesosNotas.circuitoId} IN (SELECT DISTINCT circuito_id FROM base.procesos WHERE circuito_cerrado_at IS NULL)`)
-                        .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt)),
+                        .where((0, drizzle_orm_1.sql) `${schema_js_1.procesosNotas.circuitoId} IN (
+                SELECT id FROM base.circuitos WHERE egreso_at IS NULL AND desunion_at IS NULL
+                UNION
+                SELECT parent_circuito_id FROM base.circuitos WHERE egreso_at IS NULL AND desunion_at IS NULL AND parent_circuito_id IS NOT NULL
+              )`)
+                        .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.id)),
                 ]);
                 const { catalog, index } = catalogBundle;
                 this.cachedCatalog = catalog;
                 this.runtimeIndex = index;
-                // Agrupar notas compartidas por circuito_id (disponibles en todas las cards del circuito, incl. Doble Carta)
+                const circuitoById = new Map(circuitoRows.map((c) => [c.id, c]));
+                const openCircuitos = circuitoRows.filter((c) => !c.egresoAt && !c.desunionAt);
+                // Agrupar notas compartidas por circuito_id (disponibles en todas las cards del circuito, incl. Doble Carta y padres)
                 const notesByCircuito = new Map();
                 for (const n of openNotesRows) {
                     const dto = this.mapNotaRow(n, index.usersMap);
@@ -530,17 +642,24 @@ class HotRamBaseService {
                 const assetsConPasoAbierto = new Set();
                 const latestClosedIdByCircuito = new Map();
                 const latestClosedIdByAsset = new Map();
+                const pasosCountByCircuito = new Map();
+                const pasoActivoIdByCircuito = new Map();
                 for (const r of openRows) {
+                    const circ = circuitoById.get(r.circuitoId);
+                    if (!circ)
+                        continue;
+                    pasosCountByCircuito.set(r.circuitoId, (pasosCountByCircuito.get(r.circuitoId) || 0) + 1);
                     const boxInfo = r.boxId ? index.boxesMap.get(r.boxId) : null;
                     const zoneName = boxInfo?.zone_name || index.zonesMap.get(r.zoneId) || '';
                     const boxName = boxInfo?.box_name || '';
                     if (!r.salidaAt) {
                         circuitosConPasoAbierto.add(r.circuitoId);
-                        if (r.tractorId)
-                            assetsConPasoAbierto.add(`t_${r.tractorId}`);
-                        if (r.semiId)
-                            assetsConPasoAbierto.add(`s_${r.semiId}`);
+                        if (circ.tractorId)
+                            assetsConPasoAbierto.add(`t_${circ.tractorId}`);
+                        if (circ.semiId)
+                            assetsConPasoAbierto.add(`s_${circ.semiId}`);
                         if (!this.isPendingRow(r)) {
+                            pasoActivoIdByCircuito.set(r.circuitoId, r.id);
                             const activeData = {
                                 box_name: boxName || 'Sin Box',
                                 zone_name: zoneName,
@@ -548,10 +667,10 @@ class HotRamBaseService {
                                 inicio_at: r.ingresoBoxAt ? r.ingresoBoxAt.toISOString() : null,
                                 circuito_id: r.circuitoId,
                             };
-                            if (r.tractorId)
-                                activeUnfinalizedByAsset.set(`t_${r.tractorId}`, activeData);
-                            if (r.semiId)
-                                activeUnfinalizedByAsset.set(`s_${r.semiId}`, activeData);
+                            if (circ.tractorId)
+                                activeUnfinalizedByAsset.set(`t_${circ.tractorId}`, activeData);
+                            if (circ.semiId)
+                                activeUnfinalizedByAsset.set(`s_${circ.semiId}`, activeData);
                         }
                     }
                     else {
@@ -566,16 +685,16 @@ class HotRamBaseService {
                                 row_id: r.id,
                             });
                         }
-                        if (r.tractorId) {
-                            const prevAsset = latestClosedIdByAsset.get(`t_${r.tractorId}`);
+                        if (circ.tractorId) {
+                            const prevAsset = latestClosedIdByAsset.get(`t_${circ.tractorId}`);
                             if (!prevAsset || salidaMs > prevAsset.salidaMs) {
-                                latestClosedIdByAsset.set(`t_${r.tractorId}`, { id: r.id, salidaMs });
+                                latestClosedIdByAsset.set(`t_${circ.tractorId}`, { id: r.id, salidaMs });
                             }
                         }
-                        if (r.semiId) {
-                            const prevAsset = latestClosedIdByAsset.get(`s_${r.semiId}`);
+                        if (circ.semiId) {
+                            const prevAsset = latestClosedIdByAsset.get(`s_${circ.semiId}`);
                             if (!prevAsset || salidaMs > prevAsset.salidaMs) {
-                                latestClosedIdByAsset.set(`s_${r.semiId}`, { id: r.id, salidaMs });
+                                latestClosedIdByAsset.set(`s_${circ.semiId}`, { id: r.id, salidaMs });
                             }
                         }
                     }
@@ -583,39 +702,46 @@ class HotRamBaseService {
                 const activos = [];
                 const holds = [];
                 for (const r of openRows) {
+                    const circ = circuitoById.get(r.circuitoId);
+                    if (!circ)
+                        continue;
+                    const parentCirc = circ.parentCircuitoId ? circuitoById.get(circ.parentCircuitoId) || null : null;
+                    const renderMeta = this.resolveCircuitoRenderMeta(index, circ, parentCirc);
                     const boxInfo = r.boxId ? index.boxesMap.get(r.boxId) : null;
                     const zoneName = boxInfo?.zone_name || index.zonesMap.get(r.zoneId) || '';
                     const boxName = boxInfo?.box_name || '';
-                    const tractorPlate = r.tractorId ? index.tractoresMap.get(r.tractorId) || '' : '';
-                    const semiPlate = r.semiId ? index.semisMap.get(r.semiId) || '' : '';
-                    const virtualUnit = this.resolveVirtualUnit(index, r.tractorId, r.semiId);
                     const usuariosIds = Array.isArray(r.usuariosIds) ? r.usuariosIds : [];
                     const usuariosNombres = usuariosIds.map((uid) => index.usersMap.get(uid) || 'Operario');
                     const encargadoId = r.encargadoId || null;
                     const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
                     const encargadoAt = r.encargadoAt ? r.encargadoAt.toISOString() : null;
-                    const circuitNotes = notesByCircuito.get(r.circuitoId) || [];
+                    const circuitNotes = this.mergeCircuitoNotes(r.circuitoId, circ.parentCircuitoId, notesByCircuito);
                     const lastNote = circuitNotes.length > 0 ? circuitNotes[circuitNotes.length - 1] : null;
                     const prevClosed = latestClosedByCircuito.get(r.circuitoId) || null;
                     // 1. Filas PREASIGNADO (pendiente_at solamente) -> proyectadas en holds[]
                     if (this.isPendingRow(r)) {
-                        const activeUnfinalized = (r.tractorId && activeUnfinalizedByAsset.get(`t_${r.tractorId}`)) ||
-                            (r.semiId && activeUnfinalizedByAsset.get(`s_${r.semiId}`)) ||
+                        const activeUnfinalized = (circ.tractorId && activeUnfinalizedByAsset.get(`t_${circ.tractorId}`)) ||
+                            (circ.semiId && activeUnfinalizedByAsset.get(`s_${circ.semiId}`)) ||
                             null;
                         const ubicacionBox = activeUnfinalized?.box_name || prevClosed?.box_name || null;
                         const ubicacionZone = activeUnfinalized?.zone_name || prevClosed?.zone_name || null;
                         holds.push({
                             hold_id: r.id,
                             circuito_id: r.circuitoId,
-                            unidad_id: virtualUnit.unidad_id,
-                            n_ute: virtualUnit.n_ute,
-                            tractor_id: r.tractorId,
-                            tractor_plate: tractorPlate,
-                            semi_id: r.semiId,
-                            semi_plate: semiPlate,
-                            tractor_n: r.tractorN,
-                            semi_n: r.semiN,
-                            modalidad_tracking: this.resolveModalidad(r.tractorId, r.semiId),
+                            parent_circuito_id: circ.parentCircuitoId,
+                            es_desunido: renderMeta.esDesunido,
+                            patente_cruzada: renderMeta.patenteCruzada,
+                            grupo_render: renderMeta.grupoRender,
+                            ingreso_at: circ.ingresoAt.toISOString(),
+                            unidad_id: renderMeta.virtualUnit.unidad_id,
+                            n_ute: renderMeta.virtualUnit.n_ute,
+                            tractor_id: circ.tractorId,
+                            tractor_plate: renderMeta.tractorPlate,
+                            semi_id: circ.semiId,
+                            semi_plate: renderMeta.semiPlate,
+                            tractor_n: circ.tractorN,
+                            semi_n: circ.semiN,
+                            modalidad_tracking: this.resolveModalidad(circ.tractorId, circ.semiId),
                             zone_id: r.zoneId,
                             zone_name: zoneName,
                             box_id: r.boxId,
@@ -629,6 +755,7 @@ class HotRamBaseService {
                             encargado_at: encargadoAt,
                             nota_planificacion: lastNote?.texto || null,
                             notes: circuitNotes,
+                            notes_count: circuitNotes.length,
                             proceso_origen_id: null,
                             created_at: r.pendienteAt.toISOString(),
                             updated_at: r.updatedAt.toISOString(),
@@ -651,20 +778,20 @@ class HotRamBaseService {
                         if (circuitosConPasoAbierto.has(r.circuitoId)) {
                             continue;
                         }
-                        if (r.tractorId && assetsConPasoAbierto.has(`t_${r.tractorId}`)) {
+                        if (circ.tractorId && assetsConPasoAbierto.has(`t_${circ.tractorId}`)) {
                             continue;
                         }
-                        if (r.semiId && assetsConPasoAbierto.has(`s_${r.semiId}`)) {
+                        if (circ.semiId && assetsConPasoAbierto.has(`s_${circ.semiId}`)) {
                             continue;
                         }
                         const bestClosed = latestClosedIdByCircuito.get(r.circuitoId);
                         if (bestClosed && bestClosed.id !== r.id) {
                             continue;
                         }
-                        if (r.tractorId && latestClosedIdByAsset.get(`t_${r.tractorId}`)?.id !== r.id) {
+                        if (circ.tractorId && latestClosedIdByAsset.get(`t_${circ.tractorId}`)?.id !== r.id) {
                             continue;
                         }
-                        if (r.semiId && latestClosedIdByAsset.get(`s_${r.semiId}`)?.id !== r.id) {
+                        if (circ.semiId && latestClosedIdByAsset.get(`s_${circ.semiId}`)?.id !== r.id) {
                             continue;
                         }
                     }
@@ -672,15 +799,23 @@ class HotRamBaseService {
                     activos.push({
                         proceso_id: r.id,
                         circuito_id: r.circuitoId,
-                        unidad_id: virtualUnit.unidad_id,
-                        n_ute: virtualUnit.n_ute,
-                        tractor_id: r.tractorId,
-                        tractor_plate: tractorPlate,
-                        semi_id: r.semiId,
-                        semi_plate: semiPlate,
-                        tractor_n: r.tractorN,
-                        semi_n: r.semiN,
-                        modalidad_tracking: this.resolveModalidad(r.tractorId, r.semiId),
+                        parent_circuito_id: circ.parentCircuitoId,
+                        es_desunido: renderMeta.esDesunido,
+                        patente_cruzada: renderMeta.patenteCruzada,
+                        grupo_render: renderMeta.grupoRender,
+                        ingreso_at: circ.ingresoAt.toISOString(),
+                        desunion_at: circ.desunionAt ? circ.desunionAt.toISOString() : null,
+                        egreso_at: circ.egresoAt ? circ.egresoAt.toISOString() : null,
+                        incompleto: false,
+                        unidad_id: renderMeta.virtualUnit.unidad_id,
+                        n_ute: renderMeta.virtualUnit.n_ute,
+                        tractor_id: circ.tractorId,
+                        tractor_plate: renderMeta.tractorPlate,
+                        semi_id: circ.semiId,
+                        semi_plate: renderMeta.semiPlate,
+                        tractor_n: circ.tractorN,
+                        semi_n: circ.semiN,
+                        modalidad_tracking: this.resolveModalidad(circ.tractorId, circ.semiId),
                         box_id: r.boxId || '',
                         box_name: boxName,
                         estado: this.normalizeBoxEstado(r.estado),
@@ -692,13 +827,14 @@ class HotRamBaseService {
                         llegada_at: (r.llegadaZonaAt || r.pendienteAt).toISOString(),
                         inicio_at: r.ingresoBoxAt ? r.ingresoBoxAt.toISOString() : null,
                         salida_at: r.salidaAt ? r.salidaAt.toISOString() : null,
-                        circuito_cerrado_at: r.circuitoCerradoAt ? r.circuitoCerradoAt.toISOString() : null,
+                        circuito_cerrado_at: null,
                         usuarios_ids: usuariosIds,
                         usuarios_nombres: usuariosNombres,
                         encargado_id: encargadoId,
                         encargado_nombre: encargadoNombre,
                         encargado_at: encargadoAt,
                         notes: circuitNotes,
+                        notes_count: circuitNotes.length,
                         salida_previa_at: prevClosed && prevClosed.row_id !== r.id ? prevClosed.salida_at : null,
                         salida_origen_box: prevClosed && prevClosed.row_id !== r.id ? prevClosed.box_name : null,
                         salida_origen_zone: prevClosed && prevClosed.row_id !== r.id ? prevClosed.zone_name : null,
@@ -707,16 +843,45 @@ class HotRamBaseService {
                         ultima_tarea_at: lastNote?.timestamp || null,
                     });
                 }
+                const circuitos_abiertos = openCircuitos.map((circ) => {
+                    const parentCirc = circ.parentCircuitoId ? circuitoById.get(circ.parentCircuitoId) || null : null;
+                    const renderMeta = this.resolveCircuitoRenderMeta(index, circ, parentCirc);
+                    const circuitNotes = this.mergeCircuitoNotes(circ.id, circ.parentCircuitoId, notesByCircuito);
+                    return {
+                        circuito_id: circ.id,
+                        parent_circuito_id: circ.parentCircuitoId,
+                        unidad_id: renderMeta.virtualUnit.unidad_id,
+                        n_ute: renderMeta.virtualUnit.n_ute,
+                        tractor_id: circ.tractorId,
+                        tractor_plate: renderMeta.tractorPlate,
+                        semi_id: circ.semiId,
+                        semi_plate: renderMeta.semiPlate,
+                        tractor_n: circ.tractorN,
+                        semi_n: circ.semiN,
+                        modalidad_tracking: this.resolveModalidad(circ.tractorId, circ.semiId),
+                        es_desunido: renderMeta.esDesunido,
+                        patente_cruzada: renderMeta.patenteCruzada,
+                        grupo_render: renderMeta.grupoRender,
+                        ingreso_at: circ.ingresoAt.toISOString(),
+                        alta_coord_id: circ.altaCoordId,
+                        pasos_count: pasosCountByCircuito.get(circ.id) || 0,
+                        paso_activo_id: pasoActivoIdByCircuito.get(circ.id) || null,
+                        notes: circuitNotes,
+                        notes_count: circuitNotes.length,
+                    };
+                });
                 const tallerZoneMaps = this.buildTallerZoneMaps(catalog, activos);
                 const etag = this.computeEtag({
                     activos,
                     holds,
+                    circuitos_abiertos,
                     zones: catalog.zones,
                     boxes: catalog.boxes,
                 });
                 this.cache = {
                     activos,
                     holds,
+                    circuitos_abiertos,
                     catalog,
                     tallerZoneMaps,
                     etag,
@@ -744,6 +909,163 @@ class HotRamBaseService {
             etag: `${snapshot.etag.slice(0, -1)}-zonemap-${zoneId}"`,
             updatedAt: snapshot.updatedAt,
         };
+    }
+    trimNotesPreview(notes) {
+        const list = notes || [];
+        return {
+            notes: list.length > 0 ? [list[list.length - 1]] : [],
+            notes_count: list.length,
+        };
+    }
+    /**
+     * Proyección G1 Lite para /taller (/db-render-arch):
+     * - Filtra activos y holds exclusivamente al zoneId del usuario.
+     * - Envía solo la última nota como preview + notes_count (el historial completo pasa a C2 On-Demand).
+     * - Conserva `llegada_at` en `activos` para RESERVADO, cálculo de duración en SALIDA y rollback optimista INICIO -> LLEGADA,
+     *   pero omite `encargado_at` (G3 histórico/trayectoria) y los campos duplicados `ultima_tarea*` en `activos`.
+     * - Conserva `ultima_tarea*` en `holds` (usado por `stageTz` en PENDIENTE), omitiendo `encargado_at`.
+     * - Evita doble serialización de cards dentro de taller_zone_map (solo estructura de boxes y labels).
+     * - Omite catalog (zonas/unidades/usuarios), ya que /taller lee los boxes desde taller_zone_map y no usa filtros ni botón Asignar.
+     */
+    buildLiteTallerBoardPayload(snapshot, zoneId) {
+        const activos = snapshot.activos
+            .filter((c) => c.zone_id === zoneId)
+            .map((c) => {
+            const trimmed = this.trimNotesPreview(c.notes);
+            const lite = {
+                ...c,
+                notes: trimmed.notes,
+                notes_count: c.notes_count ?? trimmed.notes_count,
+            };
+            delete lite.encargado_at;
+            delete lite.ultima_tarea;
+            delete lite.ultima_tarea_usuario;
+            delete lite.ultima_tarea_at;
+            return lite;
+        });
+        const holds = snapshot.holds
+            .filter((h) => h.zone_id === zoneId)
+            .map((h) => {
+            const trimmed = this.trimNotesPreview(h.notes);
+            const lite = {
+                ...h,
+                notes: trimmed.notes,
+                notes_count: h.notes_count ?? trimmed.notes_count,
+            };
+            delete lite.encargado_at;
+            return lite;
+        });
+        const rawZoneMap = snapshot.tallerZoneMaps.get(zoneId) ?? null;
+        const taller_zone_map = rawZoneMap
+            ? {
+                zone_id: rawZoneMap.zone_id,
+                zone_name: rawZoneMap.zone_name,
+                etapa_labels: rawZoneMap.etapa_labels,
+                boxes: rawZoneMap.boxes.map((b) => ({
+                    box_id: b.box_id,
+                    box_name: b.box_name,
+                    operarios: b.operarios,
+                    adentro: [],
+                    afuera: [],
+                })),
+                sin_box: {
+                    adentro: [],
+                    afuera: [],
+                },
+            }
+            : null;
+        return { activos, holds, taller_zone_map };
+    }
+    /**
+     * Proyección optimizada C1 para /coordinacion (/db-render-arch):
+     * - Recorta `notes` de activos, holds y circuitos_abiertos a únicamente la última nota + `notes_count`
+     *   (la cola completa se consulta On-Demand vía GET /api/planeacion/procesos/:id/notas).
+     * - Omite `catalog.usuarios` (Coordinación no asigna operarios), conservando `zones`, `boxes` y `unidades`.
+     */
+    buildCoordinacionBoardPayload(snapshot) {
+        const activos = snapshot.activos.map((c) => {
+            const trimmed = this.trimNotesPreview(c.notes);
+            return {
+                ...c,
+                notes: trimmed.notes,
+                notes_count: c.notes_count ?? trimmed.notes_count,
+            };
+        });
+        const holds = snapshot.holds.map((h) => {
+            const trimmed = this.trimNotesPreview(h.notes);
+            return {
+                ...h,
+                notes: trimmed.notes,
+                notes_count: h.notes_count ?? trimmed.notes_count,
+            };
+        });
+        const circuitos_abiertos = snapshot.circuitos_abiertos.map((circ) => {
+            const trimmed = this.trimNotesPreview(circ.notes);
+            return {
+                ...circ,
+                notes: trimmed.notes,
+                notes_count: circ.notes_count ?? trimmed.notes_count,
+            };
+        });
+        const catalog = {
+            zones: snapshot.catalog.zones,
+            boxes: snapshot.catalog.boxes,
+            usuarios: [],
+            unidades: snapshot.catalog.unidades,
+        };
+        return { activos, holds, circuitos_abiertos, catalog };
+    }
+    /**
+     * Consulta C2 On-Demand de todas las notas de un proceso/hold/circuito (con fast-path C1 Hot RAM).
+     */
+    async getNotasProceso(procesoOrHoldOrCircuitoId) {
+        if (this.cache) {
+            const cachedActivo = this.cache.activos.find((a) => a.proceso_id === procesoOrHoldOrCircuitoId);
+            if (cachedActivo)
+                return cachedActivo.notes || [];
+            const cachedHold = this.cache.holds.find((h) => h.hold_id === procesoOrHoldOrCircuitoId);
+            if (cachedHold)
+                return cachedHold.notes || [];
+            const cachedCirc = this.cache.circuitos_abiertos.find((c) => c.circuito_id === procesoOrHoldOrCircuitoId);
+            if (cachedCirc)
+                return cachedCirc.notes || [];
+        }
+        const { index } = await this.ensureRuntimeIndex();
+        const [hotRow] = await index_js_1.db
+            .select({ circuitoId: schema_js_1.procesos.circuitoId })
+            .from(schema_js_1.procesos)
+            .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, procesoOrHoldOrCircuitoId))
+            .limit(1);
+        let circuitoId = hotRow?.circuitoId || null;
+        if (!circuitoId) {
+            const [coldRow] = await index_js_1.db
+                .select({ circuitoId: schema_js_1.procesosCold.circuitoId })
+                .from(schema_js_1.procesosCold)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, procesoOrHoldOrCircuitoId))
+                .limit(1);
+            circuitoId = coldRow?.circuitoId || null;
+        }
+        if (!circuitoId) {
+            const [directCirc] = await index_js_1.db
+                .select({ id: schema_js_1.circuitos.id })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, procesoOrHoldOrCircuitoId))
+                .limit(1);
+            circuitoId = directCirc?.id || null;
+        }
+        if (!circuitoId) {
+            throw new NotFoundError(`Proceso o circuito (${procesoOrHoldOrCircuitoId}) no encontrado.`);
+        }
+        const [circMeta] = await index_js_1.db
+            .select({ parentCircuitoId: schema_js_1.circuitos.parentCircuitoId })
+            .from(schema_js_1.circuitos)
+            .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, circuitoId))
+            .limit(1);
+        const idsToFetch = circMeta?.parentCircuitoId
+            ? [circuitoId, circMeta.parentCircuitoId]
+            : [circuitoId];
+        const notesMap = await this.fetchNotesMapByCircuitos(idsToFetch, index.usersMap);
+        return this.mergeCircuitoNotes(circuitoId, circMeta?.parentCircuitoId, notesMap);
     }
     invalidate(forceCatalog = false) {
         if (forceCatalog) {
@@ -803,7 +1125,7 @@ class HotRamBaseService {
         })
             .from(schema_js_1.procesosNotas)
             .where((0, drizzle_orm_1.inArray)(schema_js_1.procesosNotas.circuitoId, uniqueIds))
-            .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt));
+            .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.id));
         for (const r of rows) {
             const dto = this.mapNotaRow(r, usersMap);
             const list = map.get(r.circuitoId);
@@ -821,46 +1143,81 @@ class HotRamBaseService {
         const { index } = await this.ensureRuntimeIndex();
         const res = await index_js_1.pool.query(`
       SELECT
-        id, circuito_id, tractor_id, semi_id, tractor_n, semi_n,
-        zone_id, pendiente_at, llegada_zona_at, box_id, estado, ingreso_box_at,
-        usuarios_ids, encargado_id, encargado_at, salida_at, circuito_cerrado_at,
+        p.id, p.circuito_id, c.parent_circuito_id, c.tractor_id, c.semi_id, c.tractor_n, c.semi_n,
+        c.ingreso_at, c.desunion_at, c.egreso_at,
+        p.zone_id, p.pendiente_at, p.llegada_zona_at, p.box_id, p.estado, p.ingreso_box_at,
+        p.usuarios_ids, p.encargado_id, p.encargado_at, p.salida_at,
         'ACTIVO_HOT'::text AS etapa_origen
-      FROM base.procesos
-      WHERE salida_at IS NOT NULL
+      FROM base.procesos p
+      INNER JOIN base.circuitos c ON c.id = p.circuito_id
+      WHERE p.salida_at IS NOT NULL
       UNION ALL
       SELECT
-        id, circuito_id, tractor_id, semi_id, tractor_n, semi_n,
-        zone_id, pendiente_at, llegada_zona_at, box_id, estado, ingreso_box_at,
-        usuarios_ids, encargado_id, encargado_at, salida_at, circuito_cerrado_at,
+        p.id, p.circuito_id, c.parent_circuito_id, c.tractor_id, c.semi_id, c.tractor_n, c.semi_n,
+        c.ingreso_at, c.desunion_at, c.egreso_at,
+        p.zone_id, p.pendiente_at, p.llegada_zona_at, p.box_id, p.estado, p.ingreso_box_at,
+        p.usuarios_ids, p.encargado_id, p.encargado_at, p.salida_at,
         'HISTORICO_COLD'::text AS etapa_origen
-      FROM base.procesos_cold
-      WHERE salida_at IS NOT NULL
+      FROM base.procesos_cold p
+      INNER JOIN base.circuitos c ON c.id = p.circuito_id
+      WHERE p.salida_at IS NOT NULL
       ORDER BY salida_at DESC
       LIMIT $1 OFFSET $2;
       `, [limit, offset]);
-        const circuitoIds = res.rows.map((r) => String(r.circuito_id));
-        const notesMap = await this.fetchNotesMapByCircuitos(circuitoIds, index.usersMap);
+        const circuitoIds = new Set();
+        const parentIds = new Set();
+        for (const r of res.rows) {
+            circuitoIds.add(String(r.circuito_id));
+            if (r.parent_circuito_id)
+                parentIds.add(String(r.parent_circuito_id));
+        }
+        const allNoteCircIds = Array.from(new Set([...circuitoIds, ...parentIds]));
+        const [notesMap, parentRows] = await Promise.all([
+            this.fetchNotesMapByCircuitos(allNoteCircIds, index.usersMap),
+            parentIds.size > 0
+                ? index_js_1.db
+                    .select({
+                    id: schema_js_1.circuitos.id,
+                    tractorId: schema_js_1.circuitos.tractorId,
+                    semiId: schema_js_1.circuitos.semiId,
+                })
+                    .from(schema_js_1.circuitos)
+                    .where((0, drizzle_orm_1.inArray)(schema_js_1.circuitos.id, Array.from(parentIds)))
+                : Promise.resolve([]),
+        ]);
+        const parentMap = new Map(parentRows.map((p) => [p.id, p]));
         return res.rows.map((r) => {
             const boxInfo = r.box_id ? index.boxesMap.get(String(r.box_id)) : null;
             const zoneId = r.zone_id ? String(r.zone_id) : boxInfo?.zone_id || '';
             const zoneName = boxInfo?.zone_name || (zoneId ? index.zonesMap.get(zoneId) || '' : '');
             const tractorId = r.tractor_id ? String(r.tractor_id) : null;
             const semiId = r.semi_id ? String(r.semi_id) : null;
-            const virtualUnit = this.resolveVirtualUnit(index, tractorId, semiId);
+            const parentId = r.parent_circuito_id ? String(r.parent_circuito_id) : null;
+            const parentCirc = parentId ? parentMap.get(parentId) || null : null;
+            const circId = String(r.circuito_id);
+            const renderMeta = this.resolveCircuitoRenderMeta(index, { id: circId, parentCircuitoId: parentId, tractorId, semiId }, parentCirc);
             const usuariosIds = Array.isArray(r.usuarios_ids) ? r.usuarios_ids : [];
             const encargadoId = r.encargado_id ? String(r.encargado_id) : null;
             const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
             const encargadoAt = r.encargado_at ? new Date(String(r.encargado_at)).toISOString() : null;
-            const notes = notesMap.get(String(r.circuito_id)) || [];
+            const notes = this.mergeCircuitoNotes(circId, parentId, notesMap);
             return {
                 proceso_id: String(r.id),
-                circuito_id: String(r.circuito_id),
-                unidad_id: virtualUnit.unidad_id,
-                n_ute: virtualUnit.n_ute,
+                circuito_id: circId,
+                parent_circuito_id: parentId,
+                es_desunido: renderMeta.esDesunido,
+                patente_cruzada: renderMeta.patenteCruzada,
+                grupo_render: renderMeta.grupoRender,
+                ingreso_at: new Date(String(r.ingreso_at)).toISOString(),
+                desunion_at: r.desunion_at ? new Date(String(r.desunion_at)).toISOString() : null,
+                egreso_at: r.egreso_at ? new Date(String(r.egreso_at)).toISOString() : null,
+                incompleto: false,
+                unidad_id: renderMeta.virtualUnit.unidad_id,
+                n_ute: renderMeta.virtualUnit.n_ute,
                 tractor_id: tractorId,
-                tractor_plate: tractorId ? index.tractoresMap.get(tractorId) || '' : '',
+                tractor_plate: renderMeta.tractorPlate,
                 semi_id: semiId,
-                semi_plate: semiId ? index.semisMap.get(semiId) || '' : '',
+                semi_plate: renderMeta.semiPlate,
                 tractor_n: r.tractor_n ? String(r.tractor_n) : null,
                 semi_n: r.semi_n ? String(r.semi_n) : null,
                 modalidad_tracking: this.resolveModalidad(tractorId, semiId),
@@ -875,9 +1232,7 @@ class HotRamBaseService {
                 llegada_at: new Date(String(r.llegada_zona_at || r.pendiente_at)).toISOString(),
                 inicio_at: r.ingreso_box_at ? new Date(String(r.ingreso_box_at)).toISOString() : null,
                 salida_at: r.salida_at ? new Date(String(r.salida_at)).toISOString() : null,
-                circuito_cerrado_at: r.circuito_cerrado_at
-                    ? new Date(String(r.circuito_cerrado_at)).toISOString()
-                    : null,
+                circuito_cerrado_at: r.egreso_at ? new Date(String(r.egreso_at)).toISOString() : null,
                 usuarios_ids: usuariosIds,
                 usuarios_nombres: usuariosIds.map((uid) => index.usersMap.get(uid) || 'Operario'),
                 encargado_id: encargadoId,
@@ -889,6 +1244,7 @@ class HotRamBaseService {
     }
     /**
      * Reconstruye la trayectoria cronológica completa (C2 On-Demand) de un tractor/semi/unidad virtual.
+     * Incluye circuitos padre/hijos de desunión y pasos incompletos tras Baja.
      * Cumple /db-clean-views: `timeline` expone 0 UUIDs sustitutos (solo datos naturales de negocio).
      */
     async getTrayectoriaUnidad(params) {
@@ -913,49 +1269,140 @@ class HotRamBaseService {
                 queryMs: 0,
             };
         }
-        const hotConds = [];
-        const coldConds = [];
-        if (tId) {
-            hotConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, tId));
-            coldConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.tractorId, tId));
+        const circConds = [];
+        if (tId)
+            circConds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, tId));
+        if (sId)
+            circConds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.semiId, sId));
+        const filterCirc = circConds.length === 1 ? circConds[0] : (0, drizzle_orm_1.or)(...circConds);
+        const matchedCircuitos = await index_js_1.db
+            .select({
+            id: schema_js_1.circuitos.id,
+            parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+            tractorId: schema_js_1.circuitos.tractorId,
+            semiId: schema_js_1.circuitos.semiId,
+            tractorN: schema_js_1.circuitos.tractorN,
+            semiN: schema_js_1.circuitos.semiN,
+            ingresoAt: schema_js_1.circuitos.ingresoAt,
+            desunionAt: schema_js_1.circuitos.desunionAt,
+            egresoAt: schema_js_1.circuitos.egresoAt,
+            archivedAt: schema_js_1.circuitos.archivedAt,
+        })
+            .from(schema_js_1.circuitos)
+            .where(filterCirc)
+            .orderBy((0, drizzle_orm_1.asc)(schema_js_1.circuitos.ingresoAt));
+        if (matchedCircuitos.length === 0) {
+            const queryMs = Number((node_perf_hooks_1.performance.now() - startedAt).toFixed(2));
+            return {
+                historial: [],
+                ubicacion_actual: [],
+                recorrido_programado: [],
+                timeline: [],
+                eventos: [],
+                queryMs,
+            };
         }
-        if (sId) {
-            hotConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, sId));
-            coldConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.semiId, sId));
+        const circById = new Map(matchedCircuitos.map((c) => [c.id, c]));
+        const missingParentIds = Array.from(new Set(matchedCircuitos
+            .map((c) => c.parentCircuitoId)
+            .filter((pid) => Boolean(pid && !circById.has(pid)))));
+        if (missingParentIds.length > 0) {
+            const extraParents = await index_js_1.db
+                .select({
+                id: schema_js_1.circuitos.id,
+                parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                tractorId: schema_js_1.circuitos.tractorId,
+                semiId: schema_js_1.circuitos.semiId,
+                tractorN: schema_js_1.circuitos.tractorN,
+                semiN: schema_js_1.circuitos.semiN,
+                ingresoAt: schema_js_1.circuitos.ingresoAt,
+                desunionAt: schema_js_1.circuitos.desunionAt,
+                egresoAt: schema_js_1.circuitos.egresoAt,
+                archivedAt: schema_js_1.circuitos.archivedAt,
+            })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.circuitos.id, missingParentIds));
+            for (const p of extraParents) {
+                circById.set(p.id, p);
+            }
         }
-        const filterHot = hotConds.length === 1 ? hotConds[0] : (0, drizzle_orm_1.or)(...hotConds);
-        const filterCold = coldConds.length === 1 ? coldConds[0] : (0, drizzle_orm_1.or)(...coldConds);
-        const [coldRows, hotRows] = await Promise.all([
-            index_js_1.db.select().from(schema_js_1.procesosCold).where(filterCold).orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosCold.pendienteAt)),
-            index_js_1.db.select().from(schema_js_1.procesos).where(filterHot).orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesos.pendienteAt)),
+        const matchedIds = matchedCircuitos.map((c) => c.id);
+        const allNoteIds = Array.from(circById.keys());
+        const [coldRows, hotRows, notesMap] = await Promise.all([
+            index_js_1.db
+                .select({
+                id: schema_js_1.procesosCold.id,
+                circuitoId: schema_js_1.procesosCold.circuitoId,
+                zoneId: schema_js_1.procesosCold.zoneId,
+                pendienteAt: schema_js_1.procesosCold.pendienteAt,
+                llegadaZonaAt: schema_js_1.procesosCold.llegadaZonaAt,
+                boxId: schema_js_1.procesosCold.boxId,
+                estado: schema_js_1.procesosCold.estado,
+                ingresoBoxAt: schema_js_1.procesosCold.ingresoBoxAt,
+                usuariosIds: schema_js_1.procesosCold.usuariosIds,
+                encargadoId: schema_js_1.procesosCold.encargadoId,
+                encargadoAt: schema_js_1.procesosCold.encargadoAt,
+                salidaAt: schema_js_1.procesosCold.salidaAt,
+                anuladoAt: schema_js_1.procesosCold.anuladoAt,
+            })
+                .from(schema_js_1.procesosCold)
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.procesosCold.circuitoId, matchedIds))
+                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosCold.pendienteAt)),
+            index_js_1.db
+                .select({
+                id: schema_js_1.procesos.id,
+                circuitoId: schema_js_1.procesos.circuitoId,
+                zoneId: schema_js_1.procesos.zoneId,
+                pendienteAt: schema_js_1.procesos.pendienteAt,
+                llegadaZonaAt: schema_js_1.procesos.llegadaZonaAt,
+                boxId: schema_js_1.procesos.boxId,
+                estado: schema_js_1.procesos.estado,
+                ingresoBoxAt: schema_js_1.procesos.ingresoBoxAt,
+                usuariosIds: schema_js_1.procesos.usuariosIds,
+                encargadoId: schema_js_1.procesos.encargadoId,
+                encargadoAt: schema_js_1.procesos.encargadoAt,
+                salidaAt: schema_js_1.procesos.salidaAt,
+                anuladoAt: schema_js_1.procesos.anuladoAt,
+                updatedAt: schema_js_1.procesos.updatedAt,
+            })
+                .from(schema_js_1.procesos)
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.procesos.circuitoId, matchedIds))
+                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesos.pendienteAt)),
+            this.fetchNotesMapByCircuitos(allNoteIds, index.usersMap),
         ]);
-        const allCircuitoIds = [
-            ...coldRows.map((r) => r.circuitoId),
-            ...hotRows.map((r) => r.circuitoId),
-        ];
-        const notesMap = await this.fetchNotesMapByCircuitos(allCircuitoIds, index.usersMap);
         const mapToCard = (r, etapa) => {
+            const circ = circById.get(r.circuitoId);
+            const parentCirc = circ.parentCircuitoId ? circById.get(circ.parentCircuitoId) || null : null;
+            const renderMeta = this.resolveCircuitoRenderMeta(index, circ, parentCirc);
             const boxInfo = r.boxId ? index.boxesMap.get(r.boxId) : null;
             const zoneId = r.zoneId || boxInfo?.zone_id || '';
             const zoneName = boxInfo?.zone_name || (zoneId ? index.zonesMap.get(zoneId) || '' : '');
-            const virtualUnit = this.resolveVirtualUnit(index, r.tractorId, r.semiId);
             const uIds = Array.isArray(r.usuariosIds) ? r.usuariosIds : [];
             const encargadoId = r.encargadoId || null;
             const encargadoNombre = encargadoId ? index.usersMap.get(encargadoId) || null : null;
             const encargadoAt = r.encargadoAt ? r.encargadoAt.toISOString() : null;
-            const notes = notesMap.get(r.circuitoId) || [];
+            const notes = this.mergeCircuitoNotes(r.circuitoId, circ.parentCircuitoId, notesMap);
+            const incompleto = Boolean(r.anuladoAt || ((circ.egresoAt || circ.desunionAt) && !r.salidaAt));
             return {
                 proceso_id: r.id,
                 circuito_id: r.circuitoId,
-                unidad_id: virtualUnit.unidad_id,
-                n_ute: virtualUnit.n_ute,
-                tractor_id: r.tractorId,
-                tractor_plate: r.tractorId ? index.tractoresMap.get(r.tractorId) || '' : '',
-                semi_id: r.semiId,
-                semi_plate: r.semiId ? index.semisMap.get(r.semiId) || '' : '',
-                tractor_n: r.tractorN,
-                semi_n: r.semiN,
-                modalidad_tracking: this.resolveModalidad(r.tractorId, r.semiId),
+                parent_circuito_id: circ.parentCircuitoId,
+                es_desunido: renderMeta.esDesunido,
+                patente_cruzada: renderMeta.patenteCruzada,
+                grupo_render: renderMeta.grupoRender,
+                ingreso_at: circ.ingresoAt.toISOString(),
+                desunion_at: circ.desunionAt ? circ.desunionAt.toISOString() : null,
+                egreso_at: circ.egresoAt ? circ.egresoAt.toISOString() : null,
+                incompleto,
+                unidad_id: renderMeta.virtualUnit.unidad_id,
+                n_ute: renderMeta.virtualUnit.n_ute,
+                tractor_id: circ.tractorId,
+                tractor_plate: renderMeta.tractorPlate,
+                semi_id: circ.semiId,
+                semi_plate: renderMeta.semiPlate,
+                tractor_n: circ.tractorN,
+                semi_n: circ.semiN,
+                modalidad_tracking: this.resolveModalidad(circ.tractorId, circ.semiId),
                 box_id: r.boxId || '',
                 box_name: boxInfo?.box_name || '',
                 estado: this.normalizeBoxEstado(r.estado),
@@ -967,7 +1414,8 @@ class HotRamBaseService {
                 llegada_at: (r.llegadaZonaAt || r.pendienteAt).toISOString(),
                 inicio_at: r.ingresoBoxAt ? r.ingresoBoxAt.toISOString() : null,
                 salida_at: r.salidaAt ? r.salidaAt.toISOString() : null,
-                circuito_cerrado_at: r.circuitoCerradoAt ? r.circuitoCerradoAt.toISOString() : null,
+                anulado_at: r.anuladoAt ? r.anuladoAt.toISOString() : null,
+                circuito_cerrado_at: circ.egresoAt ? circ.egresoAt.toISOString() : null,
                 usuarios_ids: uIds,
                 usuarios_nombres: uIds.map((uid) => index.usersMap.get(uid) || 'Operario'),
                 encargado_id: encargadoId,
@@ -976,27 +1424,36 @@ class HotRamBaseService {
                 notes,
             };
         };
+        const isCircClosed = (circuitoId) => {
+            const c = circById.get(circuitoId);
+            return Boolean(c?.egresoAt || c?.desunionAt);
+        };
         const historial = [
             ...coldRows.map((r) => mapToCard(r, 'HISTORICO_COLD')),
             ...hotRows
-                .filter((r) => Boolean(r.salidaAt || r.circuitoCerradoAt))
-                .map((r) => mapToCard(r, r.circuitoCerradoAt ? 'HISTORICO_COLD' : 'ACTIVO_HOT')),
+                .filter((r) => Boolean(r.salidaAt) || Boolean(r.anuladoAt) || isCircClosed(r.circuitoId))
+                .map((r) => mapToCard(r, isCircClosed(r.circuitoId) ? 'HISTORICO_COLD' : 'ACTIVO_HOT')),
         ];
         const ubicacionActual = hotRows
-            .filter((r) => !r.circuitoCerradoAt && !r.salidaAt && !this.isPendingRow(r))
+            .filter((r) => !isCircClosed(r.circuitoId) && !r.salidaAt && !r.anuladoAt && !this.isPendingRow(r))
             .map((r) => mapToCard(r, 'ACTIVO_HOT'));
-        const pendingHotRows = hotRows.filter((r) => !r.circuitoCerradoAt && this.isPendingRow(r));
+        const pendingHotRows = hotRows.filter((r) => !isCircClosed(r.circuitoId) && !r.anuladoAt && this.isPendingRow(r));
         const recorridoProgramado = pendingHotRows.map((r) => {
             const card = mapToCard(r, 'PLANIFICADO_HOLD');
             const lastNote = card.notes.length > 0 ? card.notes[card.notes.length - 1] : null;
             return {
                 hold_id: r.id,
                 circuito_id: r.circuitoId,
+                parent_circuito_id: card.parent_circuito_id,
+                es_desunido: card.es_desunido,
+                patente_cruzada: card.patente_cruzada,
+                grupo_render: card.grupo_render,
+                ingreso_at: card.ingreso_at,
                 unidad_id: card.unidad_id,
                 n_ute: card.n_ute,
-                tractor_id: r.tractorId,
+                tractor_id: card.tractor_id,
                 tractor_plate: card.tractor_plate,
-                semi_id: r.semiId,
+                semi_id: card.semi_id,
                 semi_plate: card.semi_plate,
                 modalidad_tracking: card.modalidad_tracking,
                 zone_id: card.zone_id,
@@ -1028,9 +1485,16 @@ class HotRamBaseService {
             box_name: c.box_name || 'Sin Box asignado',
             zone_name: c.zone_name,
             orden: null,
+            ingreso_at: c.ingreso_at ?? null,
+            desunion_at: c.desunion_at ?? null,
+            egreso_at: c.egreso_at ?? null,
+            es_desunido: Boolean(c.es_desunido),
+            patente_cruzada: c.patente_cruzada ?? null,
+            incompleto: Boolean(c.incompleto),
             llegada_at: c.llegada_at,
             inicio_at: c.inicio_at,
             salida_at: c.salida_at,
+            anulado_at: c.anulado_at ?? null,
             duracion_espera_min: diffMin(c.llegada_at, c.inicio_at),
             duracion_trabajo_min: diffMin(c.inicio_at, c.salida_at),
             duracion_total_min: diffMin(c.llegada_at, c.salida_at),
@@ -1051,9 +1515,16 @@ class HotRamBaseService {
                 box_name: h.box_name || 'Sin Box asignado',
                 zone_name: h.zone_name,
                 orden: h.orden,
+                ingreso_at: h.ingreso_at ?? null,
+                desunion_at: null,
+                egreso_at: null,
+                es_desunido: Boolean(h.es_desunido),
+                patente_cruzada: h.patente_cruzada ?? null,
+                incompleto: false,
                 llegada_at: null,
                 inicio_at: null,
                 salida_at: null,
+                anulado_at: null,
                 duracion_espera_min: null,
                 duracion_trabajo_min: null,
                 duracion_total_min: null,
@@ -1116,43 +1587,300 @@ class HotRamBaseService {
       `, [tr, sm, ute]);
         return res.rows[0] || null;
     }
-    /**
-     * Encuentra el circuito_id abierto de un activo físico (si existe) para heredar el hilo del circuito.
-     */
-    async findOpenCircuitoId(tx, tractorId, semiId) {
-        const conds = [];
-        if (tractorId)
-            conds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, tractorId));
-        if (semiId)
-            conds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, semiId));
-        if (conds.length === 0)
-            return null;
-        const existing = await tx
-            .select({ circuitoId: schema_js_1.procesos.circuitoId })
-            .from(schema_js_1.procesos)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), conds.length === 1 ? conds[0] : (0, drizzle_orm_1.or)(...conds)))
-            .orderBy((0, drizzle_orm_1.desc)(schema_js_1.procesos.pendienteAt))
-            .limit(1);
-        return existing.length > 0 ? existing[0].circuitoId : null;
-    }
-    async assertSinProcesoActivoColision(tx, params) {
+    async assertSinCircuitoAbiertoColision(tx, params) {
         const conds = [];
         if (params.tractorId)
-            conds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, params.tractorId));
+            conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, params.tractorId));
         if (params.semiId)
-            conds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, params.semiId));
+            conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.semiId, params.semiId));
         if (conds.length === 0)
             return;
+        const existing = await tx
+            .select({ id: schema_js_1.circuitos.id })
+            .from(schema_js_1.circuitos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt), (0, drizzle_orm_1.ne)(schema_js_1.circuitos.id, params.excludeCircuitoId), conds.length === 1 ? conds[0] : (0, drizzle_orm_1.or)(...conds)))
+            .limit(1);
+        if (existing.length > 0) {
+            throw new ConflictError('No se puede reabrir el circuito porque el tractor o semi ya ingresó en otro circuito abierto.');
+        }
+    }
+    async assertSinProcesoActivoColision(tx, params) {
         const existing = await tx
             .select({ id: schema_js_1.procesos.id, boxName: schema_js_1.boxes.boxName })
             .from(schema_js_1.procesos)
             .leftJoin(schema_js_1.boxes, (0, drizzle_orm_1.eq)(schema_js_1.procesos.boxId, schema_js_1.boxes.id))
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), (0, drizzle_orm_1.ne)(schema_js_1.procesos.id, params.excludeProcesoId), conds.length === 1 ? conds[0] : (0, drizzle_orm_1.or)(...conds)))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, params.circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), (0, drizzle_orm_1.ne)(schema_js_1.procesos.id, params.excludeProcesoId)))
             .limit(1);
         if (existing.length > 0) {
             const boxName = existing[0].boxName || 'otro Box';
-            throw new ConflictError(`No se puede reabrir el proceso porque la unidad ya tiene una estadía activa en ${boxName}.`);
+            throw new ConflictError(`No se puede reabrir el proceso porque el circuito ya tiene una estadía activa en ${boxName}.`);
         }
+    }
+    /**
+     * Busca el circuito abierto del activo o crea uno nuevo en base.circuitos (retrocompatibilidad sin UI Alta/Baja).
+     */
+    async findOrCreateOpenCircuito(tx, input) {
+        if (input.circuitoId) {
+            const found = await tx
+                .select({
+                id: schema_js_1.circuitos.id,
+                parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                tractorId: schema_js_1.circuitos.tractorId,
+                semiId: schema_js_1.circuitos.semiId,
+                tractorN: schema_js_1.circuitos.tractorN,
+                semiN: schema_js_1.circuitos.semiN,
+                ingresoAt: schema_js_1.circuitos.ingresoAt,
+                desunionAt: schema_js_1.circuitos.desunionAt,
+                egresoAt: schema_js_1.circuitos.egresoAt,
+            })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, input.circuitoId))
+                .limit(1);
+            if (found.length === 0) {
+                throw new NotFoundError(`Circuito (${input.circuitoId}) no encontrado en base.circuitos.`);
+            }
+            if (found[0].egresoAt || found[0].desunionAt) {
+                throw new ConflictError(`El circuito (${input.circuitoId}) ya se encuentra cerrado o desunido.`);
+            }
+            return found[0];
+        }
+        if (input.procesoOrigenId) {
+            const origHot = await tx
+                .select({ circuitoId: schema_js_1.procesos.circuitoId })
+                .from(schema_js_1.procesos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, input.procesoOrigenId))
+                .limit(1);
+            let origCircId = origHot[0]?.circuitoId || null;
+            if (!origCircId) {
+                const origCold = await tx
+                    .select({ circuitoId: schema_js_1.procesosCold.circuitoId })
+                    .from(schema_js_1.procesosCold)
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, input.procesoOrigenId))
+                    .limit(1);
+                origCircId = origCold[0]?.circuitoId || null;
+            }
+            if (origCircId) {
+                const foundOrig = await tx
+                    .select({
+                    id: schema_js_1.circuitos.id,
+                    parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                    tractorId: schema_js_1.circuitos.tractorId,
+                    semiId: schema_js_1.circuitos.semiId,
+                    tractorN: schema_js_1.circuitos.tractorN,
+                    semiN: schema_js_1.circuitos.semiN,
+                    ingresoAt: schema_js_1.circuitos.ingresoAt,
+                    desunionAt: schema_js_1.circuitos.desunionAt,
+                    egresoAt: schema_js_1.circuitos.egresoAt,
+                })
+                    .from(schema_js_1.circuitos)
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, origCircId))
+                    .limit(1);
+                if (foundOrig.length > 0) {
+                    if (foundOrig[0].desunionAt) {
+                        throw new ConflictError('El circuito origen fue desunido; seleccioná el circuito individual del tractor o semi.');
+                    }
+                    if (!foundOrig[0].egresoAt) {
+                        return foundOrig[0];
+                    }
+                }
+            }
+        }
+        const conds = [];
+        if (input.tractorId)
+            conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, input.tractorId));
+        if (input.semiId)
+            conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.semiId, input.semiId));
+        if (conds.length > 0) {
+            const openMatches = await tx
+                .select({
+                id: schema_js_1.circuitos.id,
+                parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                tractorId: schema_js_1.circuitos.tractorId,
+                semiId: schema_js_1.circuitos.semiId,
+                tractorN: schema_js_1.circuitos.tractorN,
+                semiN: schema_js_1.circuitos.semiN,
+                ingresoAt: schema_js_1.circuitos.ingresoAt,
+            })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt), conds.length === 1 ? conds[0] : (0, drizzle_orm_1.or)(...conds)));
+            if (openMatches.length > 1) {
+                throw new ConflictError('El tractor y el semi poseen circuitos abiertos separados por desunión; especificá circuitoId.');
+            }
+            if (openMatches.length === 1) {
+                const match = openMatches[0];
+                if (match.parentCircuitoId &&
+                    input.tractorId &&
+                    input.semiId &&
+                    (!match.tractorId || !match.semiId)) {
+                    throw new ConflictError('Uno de los activos está en un circuito individual por desunión; especificá circuitoId.');
+                }
+                return match;
+            }
+        }
+        const validCoordId = input.coordUserId && this.runtimeIndex?.coordUserIds.has(input.coordUserId)
+            ? input.coordUserId
+            : null;
+        const [created] = await tx
+            .insert(schema_js_1.circuitos)
+            .values({
+            tractorId: input.tractorId,
+            semiId: input.semiId,
+            tractorN: input.tractorN ?? null,
+            semiN: input.semiN ?? null,
+            altaCoordId: validCoordId,
+        })
+            .returning({
+            id: schema_js_1.circuitos.id,
+            parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+            tractorId: schema_js_1.circuitos.tractorId,
+            semiId: schema_js_1.circuitos.semiId,
+            tractorN: schema_js_1.circuitos.tractorN,
+            semiN: schema_js_1.circuitos.semiN,
+            ingresoAt: schema_js_1.circuitos.ingresoAt,
+        });
+        return created;
+    }
+    async bajaCircuitoTx(tx, circuitoId, coordUserId) {
+        const locked = await tx.execute((0, drizzle_orm_1.sql) `SELECT id, parent_circuito_id, ingreso_at, desunion_at, egreso_at FROM base.circuitos WHERE id = ${circuitoId}::uuid FOR UPDATE`);
+        if (locked.rows.length === 0) {
+            throw new NotFoundError(`Circuito (${circuitoId}) no encontrado en base.circuitos.`);
+        }
+        const circ = locked.rows[0];
+        if (circ.desunion_at) {
+            throw new ConflictError('El circuito fue desunido; ejecutá la baja sobre los circuitos individuales del tractor o semi.');
+        }
+        if (circ.egreso_at) {
+            return {
+                circuito_id: circ.id,
+                egreso_at: new Date(circ.egreso_at).toISOString(),
+                already_closed: true,
+                pasos_incompletos: 0,
+            };
+        }
+        const validCoordId = coordUserId && this.runtimeIndex?.coordUserIds.has(coordUserId) ? coordUserId : null;
+        // La Baja NO cierra artificialmente pasos abiertos: pasan a Cold incompletos (salida_at IS NULL).
+        const [closed] = await tx
+            .update(schema_js_1.circuitos)
+            .set({
+            egresoAt: (0, drizzle_orm_1.sql) `GREATEST(now(), ${schema_js_1.circuitos.ingresoAt})`,
+            bajaCoordId: validCoordId,
+            updatedAt: (0, drizzle_orm_1.sql) `now()`,
+        })
+            .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, circuitoId))
+            .returning({
+            id: schema_js_1.circuitos.id,
+            egresoAt: schema_js_1.circuitos.egresoAt,
+            bajaCoordId: schema_js_1.circuitos.bajaCoordId,
+        });
+        const incompleteCountRes = await tx
+            .select({ id: schema_js_1.procesos.id })
+            .from(schema_js_1.procesos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)));
+        return {
+            circuito_id: closed.id,
+            egreso_at: closed.egresoAt ? closed.egresoAt.toISOString() : new Date().toISOString(),
+            baja_coord_id: closed.bajaCoordId,
+            already_closed: false,
+            pasos_incompletos: incompleteCountRes.length,
+        };
+    }
+    /**
+     * Alta explícita de circuito en planta (Coordinación).
+     */
+    async altaCircuito(input) {
+        const { index } = await this.ensureRuntimeIndex();
+        const created = await index_js_1.db.transaction(async (tx) => {
+            const { tractorId, semiId } = await this.resolvePhysicalAssets(tx, input);
+            const conds = [];
+            if (tractorId)
+                conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, tractorId));
+            if (semiId)
+                conds.push((0, drizzle_orm_1.eq)(schema_js_1.circuitos.semiId, semiId));
+            if (conds.length > 0) {
+                const existing = await tx
+                    .select({ id: schema_js_1.circuitos.id })
+                    .from(schema_js_1.circuitos)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt), conds.length === 1 ? conds[0] : (0, drizzle_orm_1.or)(...conds)))
+                    .limit(1);
+                if (existing.length > 0) {
+                    throw new ConflictError('El tractor o semi ya posee un circuito abierto en planta.');
+                }
+            }
+            const validCoordId = input.coordUserId && index.coordUserIds.has(input.coordUserId) ? input.coordUserId : null;
+            const [row] = await tx
+                .insert(schema_js_1.circuitos)
+                .values({
+                tractorId,
+                semiId,
+                tractorN: input.tractorN ?? null,
+                semiN: input.semiN ?? null,
+                altaCoordId: validCoordId,
+            })
+                .returning();
+            if (input.notaTexto && input.notaTexto.trim()) {
+                await tx.insert(schema_js_1.procesosNotas).values({
+                    circuitoId: row.id,
+                    procesoId: null,
+                    usuarioId: null,
+                    location: 'Coordinación',
+                    texto: input.notaTexto.trim(),
+                });
+            }
+            return row;
+        });
+        this.invalidate();
+        const snapshot = await this.hydrateBoard();
+        const dto = snapshot.circuitos_abiertos.find((c) => c.circuito_id === created.id);
+        return (dto || {
+            circuito_id: created.id,
+            parent_circuito_id: created.parentCircuitoId,
+            tractor_id: created.tractorId,
+            semi_id: created.semiId,
+            tractor_n: created.tractorN,
+            semi_n: created.semiN,
+            ingreso_at: created.ingresoAt.toISOString(),
+        });
+    }
+    /**
+     * Baja explícita de circuito en cualquier instancia (pasos abiertos quedan incompletos).
+     */
+    async bajaCircuito(circuitoId, coordUserId) {
+        await this.ensureRuntimeIndex();
+        const res = await index_js_1.db.transaction(async (tx) => this.bajaCircuitoTx(tx, circuitoId, coordUserId));
+        this.invalidate();
+        await this.hydrateBoard();
+        return res;
+    }
+    /**
+     * Desunión interna Tractor / Semi en 2 circuitos hijos bajo parent_circuito_id.
+     */
+    async desunirCircuito(circuitoId, mantenerEn = 'TRACTOR', coordUserId) {
+        const { index } = await this.ensureRuntimeIndex();
+        const validCoordId = coordUserId && index.coordUserIds.has(coordUserId) ? coordUserId : null;
+        let res;
+        try {
+            res = await index_js_1.pool.query(`SELECT circuito_tractor_id, circuito_semi_id, moved_steps
+         FROM base.fn_desunir_circuito($1::uuid, $2::text, $3::uuid);`, [circuitoId, mantenerEn, validCoordId]);
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes('NOT_FOUND:')) {
+                throw new NotFoundError(msg.replace(/^.*NOT_FOUND:\s*/i, ''));
+            }
+            if (msg.includes('CONFLICT:')) {
+                throw new ConflictError(msg.replace(/^.*CONFLICT:\s*/i, ''));
+            }
+            throw err;
+        }
+        const row = res.rows[0];
+        this.invalidate();
+        await this.hydrateBoard();
+        return {
+            parent_circuito_id: circuitoId,
+            circuito_tractor_id: String(row.circuito_tractor_id),
+            circuito_semi_id: String(row.circuito_semi_id),
+            moved_steps: Number(row.moved_steps || 0),
+        };
     }
     /**
      * Registra llegada directa a un Box (pendiente_at = llegada_zona_at = now(), box_id = p_box_id).
@@ -1169,27 +1897,25 @@ class HotRamBaseService {
             if (boxRow.length === 0) {
                 throw new NotFoundError(`El box (${input.boxId}) no existe en base.boxes`);
             }
-            const openCircuitoId = (await this.findOpenCircuitoId(tx, tractorId, semiId)) || node_crypto_1.default.randomUUID();
-            // Cerrar cualquier estadía activa previa del mismo tractor/semi (mantiene fila en el circuito)
-            const assetConds = [];
-            if (tractorId)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, tractorId));
-            if (semiId)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, semiId));
+            const circ = await this.findOrCreateOpenCircuito(tx, {
+                circuitoId: input.circuitoId,
+                tractorId,
+                semiId,
+                coordUserId: input.origen === 'coordinacion' ? input.actorUsuarioId : null,
+            });
+            // Cerrar cualquier estadía activa previa dentro del mismo circuito (Doble Carta)
             await tx
                 .update(schema_js_1.procesos)
                 .set({
                 salidaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
                 updatedAt: (0, drizzle_orm_1.sql) `now()`,
             })
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)));
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circ.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt))));
             const now = new Date();
             const [created] = await tx
                 .insert(schema_js_1.procesos)
                 .values({
-                circuitoId: openCircuitoId,
-                tractorId,
-                semiId,
+                circuitoId: circ.id,
                 zoneId: boxRow[0].zoneId,
                 boxId: input.boxId,
                 pendienteAt: now,
@@ -1198,22 +1924,25 @@ class HotRamBaseService {
             })
                 .returning();
             if (input.notaTexto && input.notaTexto.trim()) {
-                const isCoord = !input.notaUsuarioId;
+                const resolvedTallerUserId = input.origen === 'taller'
+                    ? input.notaUsuarioId || input.actorUsuarioId || null
+                    : input.notaUsuarioId || null;
+                const isCoord = input.origen === 'coordinacion' || !resolvedTallerUserId;
                 await tx.insert(schema_js_1.procesosNotas).values({
-                    circuitoId: openCircuitoId,
+                    circuitoId: circ.id,
                     procesoId: created.id,
-                    usuarioId: isCoord ? null : input.notaUsuarioId,
+                    usuarioId: isCoord ? null : resolvedTallerUserId,
                     location: isCoord ? 'Coordinación' : boxRow[0].boxName,
                     texto: input.notaTexto.trim(),
                 });
             }
-            const virtualUnit = this.resolveVirtualUnit(index, created.tractorId, created.semiId);
+            const virtualUnit = this.resolveVirtualUnit(index, circ.tractorId, circ.semiId);
             return {
                 ...created,
                 proceso_id: created.id,
                 unidad_id: virtualUnit.unidad_id,
-                tractor_id: created.tractorId,
-                semi_id: created.semiId,
+                tractor_id: circ.tractorId,
+                semi_id: circ.semiId,
                 box_id: created.boxId,
                 llegada_at: (created.llegadaZonaAt || created.pendienteAt).toISOString(),
                 inicio_at: created.ingresoBoxAt ? created.ingresoBoxAt.toISOString() : null,
@@ -1230,15 +1959,56 @@ class HotRamBaseService {
     async actualizarProceso(procesoId, patch) {
         const { index } = await this.ensureRuntimeIndex();
         const updated = await index_js_1.db.transaction(async (tx) => {
-            const lockedRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos WHERE id = ${procesoId}::uuid FOR UPDATE`);
+            const lockedRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT
+              id, circuito_id, zone_id, box_id, estado,
+              pendiente_at, llegada_zona_at, ingreso_box_at, salida_at, anulado_at,
+              usuarios_ids, encargado_id, encargado_at
+            FROM base.procesos
+            WHERE id = ${procesoId}::uuid
+            FOR UPDATE`);
             if (lockedRes.rows.length === 0) {
                 // Fallback: si se solicita REABRIR o REINTEGRAR_A_PREASIGNADO sobre un registro ya en procesos_cold (> 7 días)
                 if (patch.action === 'REABRIR' || patch.action === 'REINTEGRAR_A_PREASIGNADO') {
-                    const coldRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos_cold WHERE id = ${procesoId}::uuid FOR UPDATE`);
+                    const coldRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT
+                  id, circuito_id, zone_id, box_id, estado,
+                  pendiente_at, llegada_zona_at, ingreso_box_at, salida_at, anulado_at,
+                  usuarios_ids, encargado_id, encargado_at
+                FROM base.procesos_cold
+                WHERE id = ${procesoId}::uuid
+                FOR UPDATE`);
                     if (coldRes.rows.length > 0) {
                         const c = coldRes.rows[0];
-                        const tractorId = c.tractor_id || null;
-                        const semiId = c.semi_id || null;
+                        if (c.anulado_at && patch.action === 'REABRIR') {
+                            throw new ConflictError('No se puede reabrir un proceso que fue deshecho.');
+                        }
+                        const circId = String(c.circuito_id);
+                        const circLock = await tx.execute((0, drizzle_orm_1.sql) `SELECT id, tractor_id, semi_id, desunion_at, egreso_at
+                  FROM base.circuitos
+                  WHERE id = ${circId}::uuid
+                  FOR UPDATE`);
+                        if (circLock.rows.length === 0) {
+                            throw new NotFoundError(`Circuito (${circId}) no encontrado.`);
+                        }
+                        const circ = circLock.rows[0];
+                        if (circ.desunion_at) {
+                            throw new ConflictError('Este paso pertenece a un circuito que fue desunido; operá sobre el circuito individual del tractor o semi.');
+                        }
+                        if (circ.egreso_at) {
+                            await this.assertSinCircuitoAbiertoColision(tx, {
+                                excludeCircuitoId: circId,
+                                tractorId: circ.tractor_id,
+                                semiId: circ.semi_id,
+                            });
+                            await tx
+                                .update(schema_js_1.circuitos)
+                                .set({
+                                egresoAt: null,
+                                bajaCoordId: null,
+                                archivedAt: null,
+                                updatedAt: (0, drizzle_orm_1.sql) `now()`,
+                            })
+                                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, circId));
+                        }
                         if (patch.action === 'REINTEGRAR_A_PREASIGNADO') {
                             let targetZoneId = patch.zoneId || c.zone_id || null;
                             if (!targetZoneId && patch.boxId) {
@@ -1250,9 +2020,7 @@ class HotRamBaseService {
                             const [ins] = await tx
                                 .insert(schema_js_1.procesos)
                                 .values({
-                                circuitoId: String(c.circuito_id),
-                                tractorId,
-                                semiId,
+                                circuitoId: circId,
                                 zoneId: targetZoneId,
                                 boxId: null,
                                 pendienteAt: new Date(),
@@ -1269,8 +2037,7 @@ class HotRamBaseService {
                         }
                         await this.assertSinProcesoActivoColision(tx, {
                             excludeProcesoId: procesoId,
-                            tractorId,
-                            semiId,
+                            circuitoId: circId,
                         });
                         const targetEstado = patch.targetEstado || (c.ingreso_box_at ? 'INICIO' : 'LLEGADA');
                         const nextBoxId = patch.boxId || c.box_id || null;
@@ -1287,11 +2054,7 @@ class HotRamBaseService {
                             .insert(schema_js_1.procesos)
                             .values({
                             id: String(c.id),
-                            circuitoId: String(c.circuito_id),
-                            tractorId,
-                            semiId,
-                            tractorN: c.tractor_n || null,
-                            semiN: c.semi_n || null,
+                            circuitoId: circId,
                             zoneId: nextZoneId,
                             boxId: nextBoxId,
                             estado: targetEstado === 'LLEGADA'
@@ -1303,7 +2066,6 @@ class HotRamBaseService {
                             llegadaZonaAt: llegDate,
                             ingresoBoxAt: nextIngDate,
                             salidaAt: null,
-                            circuitoCerradoAt: null,
                             usuariosIds: patch.usuariosIds !== undefined
                                 ? patch.usuariosIds
                                 : Array.isArray(c.usuarios_ids)
@@ -1314,13 +2076,13 @@ class HotRamBaseService {
                         })
                             .returning();
                         await tx.delete(schema_js_1.procesosCold).where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, procesoId));
-                        const vu = this.resolveVirtualUnit(index, reopened.tractorId, reopened.semiId);
+                        const vu = this.resolveVirtualUnit(index, circ.tractor_id, circ.semi_id);
                         return {
                             ...reopened,
                             proceso_id: reopened.id,
                             unidad_id: vu.unidad_id,
-                            tractor_id: reopened.tractorId,
-                            semi_id: reopened.semiId,
+                            tractor_id: circ.tractor_id,
+                            semi_id: circ.semi_id,
                             llegada_at: (reopened.llegadaZonaAt || reopened.pendienteAt).toISOString(),
                             inicio_at: reopened.ingresoBoxAt ? reopened.ingresoBoxAt.toISOString() : null,
                             salida_at: null,
@@ -1330,22 +2092,69 @@ class HotRamBaseService {
                 throw new NotFoundError('Proceso no encontrado en base.procesos ni en base.procesos_cold');
             }
             const current = lockedRes.rows[0];
-            // 1. EGRESO PLANTA (ARCHIVAR): cierra el circuito completo (retención 7 días antes del sweep semanal a cold)
+            const circRows = await tx
+                .select({
+                id: schema_js_1.circuitos.id,
+                tractorId: schema_js_1.circuitos.tractorId,
+                semiId: schema_js_1.circuitos.semiId,
+                desunionAt: schema_js_1.circuitos.desunionAt,
+                egresoAt: schema_js_1.circuitos.egresoAt,
+            })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, current.circuito_id))
+                .limit(1);
+            const currentCirc = circRows[0];
+            // 1. EGRESO PLANTA / BAJA (ARCHIVAR): cierra el circuito en cualquier instancia; pasos abiertos pasan incompletos a Cold
             if (patch.action === 'ARCHIVAR') {
-                const closedRows = await tx
+                const bajaRes = await this.bajaCircuitoTx(tx, current.circuito_id, patch.origen === 'coordinacion' ? patch.actorUsuarioId : null);
+                return {
+                    archivedToCold: current,
+                    ...bajaRes,
+                };
+            }
+            // 1b. DESHACER CARD (top-right X): cierra la fila individual con anulado_at preservando NULL en campos no completados, listo para Cold
+            if (patch.action === 'DESHACER') {
+                if (patch.origen === 'coordinacion') {
+                    const isCoordOk = await this.isCoordinacionUserAuthorized(patch.actorUsuarioId);
+                    if (!isCoordOk) {
+                        throw new ForbiddenError('Permiso denegado: solo usuarios autorizados de Coordinación o encargados de zona pueden deshacer una card.');
+                    }
+                }
+                else if (patch.origen === 'taller') {
+                    const actorMeta = await this.resolveTallerActorMeta(patch.actorUsuarioId, index);
+                    if (!actorMeta || actorMeta.rol !== 'encargado_zona') {
+                        throw new ForbiddenError('Permiso denegado: solo usuarios de Coordinación o encargados de zona pueden deshacer una card.');
+                    }
+                    if (!actorMeta.zone_id || actorMeta.zone_id !== current.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el encargado_zona solo puede deshacer cards dentro de su zona asignada.');
+                    }
+                }
+                else {
+                    throw new ForbiddenError('Permiso denegado: solo usuarios de Coordinación o encargados de zona pueden deshacer una card.');
+                }
+                if (current.anulado_at) {
+                    throw new ConflictError('Esta card ya fue deshecha.');
+                }
+                if (current.salida_at) {
+                    throw new ConflictError('No se puede deshacer una card ya finalizada.');
+                }
+                const [undone] = await tx
                     .update(schema_js_1.procesos)
                     .set({
-                    salidaAt: (0, drizzle_orm_1.sql) `COALESCE(${schema_js_1.procesos.salidaAt}, GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt})))`,
-                    circuitoCerradoAt: (0, drizzle_orm_1.sql) `now()`,
+                    anuladoAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
                     updatedAt: (0, drizzle_orm_1.sql) `now()`,
                 })
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, current.circuito_id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt)))
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, current.id))
                     .returning();
                 return {
-                    archivedToCold: closedRows[0] || current,
-                    circuito_id: current.circuito_id,
-                    closed_rows: closedRows.length,
+                    undoneProceso: undone,
+                    proceso_id: undone.id,
+                    circuito_id: undone.circuitoId,
+                    anulado_at: undone.anuladoAt ? undone.anuladoAt.toISOString() : new Date().toISOString(),
                 };
+            }
+            if (current.anulado_at) {
+                throw new ConflictError('El proceso fue deshecho y no puede modificarse.');
             }
             // 2. REVERTIR A HOLD (PREASIGNADO): UPDATE in-place en base.procesos (mismo UUID, 0 deletes!)
             if (patch.action === 'REVERTIR_A_HOLD') {
@@ -1353,21 +2162,13 @@ class HotRamBaseService {
                     throw new ConflictError('No se puede revertir a pendiente un proceso ya finalizado.');
                 }
                 const targetZoneId = patch.zoneId || current.zone_id;
-                // Multi-PREASIGNADO: solo impide duplicar un PREASIGNADO en la MISMA zona destino
-                const assetConds = [];
-                if (current.tractor_id)
-                    assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, current.tractor_id));
-                if (current.semi_id)
-                    assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, current.semi_id));
-                if (assetConds.length > 0) {
-                    const otherPendingSameZone = await tx
-                        .select({ id: schema_js_1.procesos.id })
-                        .from(schema_js_1.procesos)
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.ne)(schema_js_1.procesos.id, current.id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)))
-                        .limit(1);
-                    if (otherPendingSameZone.length > 0) {
-                        throw new ConflictError('La unidad ya posee una tarjeta PREASIGNADO en esta misma zona.');
-                    }
+                const otherPendingSameZone = await tx
+                    .select({ id: schema_js_1.procesos.id })
+                    .from(schema_js_1.procesos)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.ne)(schema_js_1.procesos.id, current.id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, current.circuito_id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+                    .limit(1);
+                if (otherPendingSameZone.length > 0) {
+                    throw new ConflictError('El circuito ya posee una tarjeta PREASIGNADO en esta misma zona.');
                 }
                 const [reverted] = await tx
                     .update(schema_js_1.procesos)
@@ -1386,25 +2187,36 @@ class HotRamBaseService {
             }
             // 3. DESPRENDER PREASIGNADO EN NUEVA ZONA (desde FINALIZÓ, activo u otro PREASIGNADO — Multi-Preasignado)
             if (patch.action === 'REINTEGRAR_A_PREASIGNADO') {
+                if (currentCirc?.desunionAt) {
+                    throw new ConflictError('El circuito fue desunido; creá la preasignación sobre el circuito individual correspondiente.');
+                }
+                if (currentCirc?.egresoAt) {
+                    await this.assertSinCircuitoAbiertoColision(tx, {
+                        excludeCircuitoId: current.circuito_id,
+                        tractorId: currentCirc.tractorId,
+                        semiId: currentCirc.semiId,
+                    });
+                    await tx
+                        .update(schema_js_1.circuitos)
+                        .set({
+                        egresoAt: null,
+                        bajaCoordId: null,
+                        archivedAt: null,
+                        updatedAt: (0, drizzle_orm_1.sql) `now()`,
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, current.circuito_id));
+                }
                 let targetZoneId = patch.zoneId || null;
                 if (!targetZoneId && patch.boxId) {
                     targetZoneId = index.boxesMap.get(patch.boxId)?.zone_id || null;
                 }
                 if (!targetZoneId)
                     targetZoneId = current.zone_id;
-                const assetConds = [];
-                if (current.tractor_id)
-                    assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, current.tractor_id));
-                if (current.semi_id)
-                    assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, current.semi_id));
-                // Multi-PREASIGNADO: solo reutiliza si ya existe un PREASIGNADO en la MISMA zona destino
-                const existingPendingSameZone = assetConds.length > 0
-                    ? await tx
-                        .select({ id: schema_js_1.procesos.id })
-                        .from(schema_js_1.procesos)
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)))
-                        .limit(1)
-                    : [];
+                const existingPendingSameZone = await tx
+                    .select({ id: schema_js_1.procesos.id })
+                    .from(schema_js_1.procesos)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, current.circuito_id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+                    .limit(1);
                 let holdRow;
                 if (existingPendingSameZone.length > 0) {
                     const [upd] = await tx
@@ -1412,7 +2224,6 @@ class HotRamBaseService {
                         .set({
                         zoneId: targetZoneId,
                         boxId: null,
-                        circuitoId: current.circuito_id,
                         updatedAt: (0, drizzle_orm_1.sql) `now()`,
                     })
                         .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, existingPendingSameZone[0].id))
@@ -1424,8 +2235,6 @@ class HotRamBaseService {
                         .insert(schema_js_1.procesos)
                         .values({
                         circuitoId: current.circuito_id,
-                        tractorId: current.tractor_id,
-                        semiId: current.semi_id,
                         zoneId: targetZoneId,
                         boxId: null,
                         pendienteAt: new Date(),
@@ -1433,13 +2242,6 @@ class HotRamBaseService {
                     })
                         .returning();
                     holdRow = ins;
-                }
-                // Si el proceso origen estaba cerrado (circuito_cerrado_at), reabrir el circuito
-                if (current.circuito_cerrado_at) {
-                    await tx
-                        .update(schema_js_1.procesos)
-                        .set({ circuitoCerradoAt: null })
-                        .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, current.id));
                 }
                 return {
                     movedToHold: holdRow,
@@ -1469,9 +2271,6 @@ class HotRamBaseService {
                     currentUsers.every((uid) => patchUsersArr.includes(uid)) &&
                     patchUsersArr.every((uid) => currentUsersSet.has(uid) || (selfId !== null && uid === selfId));
                 const isEditingUsuarios = patch.usuariosIds !== undefined && !isSameUsersList && !isSelfStartAdd;
-                // Auto-ubicación por UUID del usuario (/db-render-arch C1 Hot RAM):
-                // Un operario puede auto-ubicarse en su propio actorMeta.box_id (si pertenece a la zona actual)
-                // al ejecutar INICIAR o REABRIR, sin requerir encargado_zona ni alterar encargado_id/at.
                 const actorOwnBoxInZone = actorMeta?.rol === 'operario' &&
                     actorMeta.box_id &&
                     index.boxesMap.get(actorMeta.box_id)?.zone_id === current.zone_id
@@ -1483,6 +2282,78 @@ class HotRamBaseService {
                 const isEditingBox = patch.boxId !== undefined &&
                     patch.boxId !== current.box_id &&
                     !isSelfBoxStartOrReopen;
+                const isOperarioBoxTransfer = actorMeta?.rol === 'operario' &&
+                    !patch.action &&
+                    Boolean(current.ingreso_box_at) &&
+                    !current.salida_at &&
+                    patch.boxId !== undefined &&
+                    patch.boxId !== current.box_id;
+                if (isOperarioBoxTransfer && !isEditingUsuarios) {
+                    if (!actorMeta.zone_id || actorMeta.zone_id !== current.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el operario solo puede mover cards dentro de su zona asignada.');
+                    }
+                    const targetBoxInfo = index.boxesMap.get(patch.boxId);
+                    if (!targetBoxInfo || targetBoxInfo.zone_id !== actorMeta.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el box destino no pertenece a la zona del operario.');
+                    }
+                    if (currentCirc?.egresoAt || currentCirc?.desunionAt) {
+                        throw new ConflictError('No se puede mover una card de un circuito cerrado o desunido.');
+                    }
+                    // 1. Cerrar la fila actual en base.procesos antes del INSERT para liberar uq_procesos_activo
+                    const [closedRow] = await tx
+                        .update(schema_js_1.procesos)
+                        .set({
+                        salidaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
+                        updatedAt: (0, drizzle_orm_1.sql) `now()`,
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, current.id))
+                        .returning({ salidaAt: schema_js_1.procesos.salidaAt });
+                    // 2. Insertar nueva fila asignada al box destino
+                    const boxOps = (index.operariosByBoxMap.get(patch.boxId) || []).map((o) => o.id);
+                    const nextUsuarios = actorMeta.box_id === patch.boxId
+                        ? Array.from(new Set([...boxOps, actorMeta.id]))
+                        : boxOps;
+                    const newRowTs = new Date(Math.max(Date.now(), closedRow?.salidaAt ? closedRow.salidaAt.getTime() : 0));
+                    const nextEstado = (patch.estado !== undefined
+                        ? patch.estado
+                        : this.normalizeBoxEstado(current.estado)) ?? 'adentro';
+                    const [newRow] = await tx
+                        .insert(schema_js_1.procesos)
+                        .values({
+                        circuitoId: current.circuito_id,
+                        zoneId: targetBoxInfo.zone_id,
+                        boxId: patch.boxId,
+                        estado: nextEstado,
+                        pendienteAt: newRowTs,
+                        llegadaZonaAt: newRowTs,
+                        ingresoBoxAt: newRowTs,
+                        salidaAt: null,
+                        usuariosIds: nextUsuarios,
+                        encargadoId: null,
+                        encargadoAt: null,
+                    })
+                        .returning();
+                    const vu = this.resolveVirtualUnit(index, currentCirc?.tractorId ?? null, currentCirc?.semiId ?? null);
+                    return {
+                        ...newRow,
+                        proceso_id: newRow.id,
+                        closed_proceso_id: current.id,
+                        reassigned_new_row: true,
+                        unidad_id: vu.unidad_id,
+                        tractor_id: currentCirc?.tractorId ?? null,
+                        semi_id: currentCirc?.semiId ?? null,
+                        box_name: targetBoxInfo.box_name,
+                        estado: this.normalizeBoxEstado(newRow.estado),
+                        encargado_id: null,
+                        encargado_nombre: null,
+                        encargado_at: null,
+                        llegada_at: (newRow.llegadaZonaAt || newRow.pendienteAt).toISOString(),
+                        inicio_at: newRow.ingresoBoxAt ? newRow.ingresoBoxAt.toISOString() : null,
+                        salida_at: null,
+                        ultima_tarea: null,
+                        pending_hold: null,
+                    };
+                }
                 if (isEditingUsuarios || isEditingBox) {
                     if (!actorMeta || actorMeta.rol !== 'encargado_zona') {
                         throw new ForbiddenError('Permiso denegado: solo el rol encargado_zona puede editar usuarios_ids o box_id en procesos.');
@@ -1499,11 +2370,38 @@ class HotRamBaseService {
                     updates.encargadoId = actorMeta.id;
                     updates.encargadoAt = (0, drizzle_orm_1.sql) `now()`;
                 }
-                // Si el operario inicia o reabre sin enviar boxId explícito, auto-asignar su propio box_id por UUID
                 if (!patch.boxId &&
                     (patch.action === 'INICIAR' || patch.action === 'REABRIR') &&
                     actorOwnBoxInZone) {
                     updates.boxId = actorOwnBoxInZone;
+                }
+                // Auto-asignación de operarios del box cuando encargado_zona hace drop en un box
+                const isEncargadoDropInBox = actorMeta?.rol === 'encargado_zona' &&
+                    (patch.action === 'INICIAR' ||
+                        (patch.action === 'REABRIR' && patch.targetEstado === 'INICIO') ||
+                        (patch.boxId !== undefined && patch.boxId !== current.box_id));
+                if (isEncargadoDropInBox) {
+                    const resolvedBoxId = patch.boxId || current.box_id;
+                    if (resolvedBoxId && patch.usuariosIds === undefined) {
+                        const boxOps = index.operariosByBoxMap.get(resolvedBoxId) || [];
+                        updates.usuariosIds = boxOps.map((o) => o.id);
+                    }
+                    updates.encargadoId = actorMeta.id;
+                    updates.encargadoAt = (0, drizzle_orm_1.sql) `now()`;
+                }
+                // Jerarquía 1 (encargado_zona): edición in-place en contenedor zona actualiza la row y su tz
+                const isEncargadoZoneContainerEdit = actorMeta?.rol === 'encargado_zona' &&
+                    !patch.action &&
+                    Boolean(current.ingreso_box_at) &&
+                    !current.salida_at &&
+                    (isEditingBox || (patch.estado !== undefined && patch.estado !== current.estado));
+                if (isEncargadoZoneContainerEdit) {
+                    if (!actorMeta.zone_id || actorMeta.zone_id !== current.zone_id) {
+                        throw new ForbiddenError('Permiso denegado: el encargado_zona solo puede editar procesos dentro de su zona asignada.');
+                    }
+                    updates.ingresoBoxAt = (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`;
+                    updates.encargadoId = actorMeta.id;
+                    updates.encargadoAt = (0, drizzle_orm_1.sql) `now()`;
                 }
             }
             if (patch.boxId) {
@@ -1525,16 +2423,33 @@ class HotRamBaseService {
             let pendingHold = null;
             let lastNoteText = null;
             if (patch.action === 'REABRIR') {
-                if (current.salida_at || current.circuito_cerrado_at) {
+                if (currentCirc?.desunionAt) {
+                    throw new ConflictError('Este paso pertenece a un circuito que fue desunido; operá sobre el circuito individual correspondiente.');
+                }
+                if (currentCirc?.egresoAt) {
+                    await this.assertSinCircuitoAbiertoColision(tx, {
+                        excludeCircuitoId: current.circuito_id,
+                        tractorId: currentCirc.tractorId,
+                        semiId: currentCirc.semiId,
+                    });
+                    await tx
+                        .update(schema_js_1.circuitos)
+                        .set({
+                        egresoAt: null,
+                        bajaCoordId: null,
+                        archivedAt: null,
+                        updatedAt: (0, drizzle_orm_1.sql) `now()`,
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, current.circuito_id));
+                }
+                if (current.salida_at || currentCirc?.egresoAt) {
                     await this.assertSinProcesoActivoColision(tx, {
                         excludeProcesoId: procesoId,
-                        tractorId: current.tractor_id,
-                        semiId: current.semi_id,
+                        circuitoId: current.circuito_id,
                     });
                 }
                 const targetEstado = patch.targetEstado || (current.ingreso_box_at ? 'INICIO' : 'LLEGADA');
                 updates.salidaAt = null;
-                updates.circuitoCerradoAt = null;
                 if (!current.llegada_zona_at) {
                     updates.llegadaZonaAt = (0, drizzle_orm_1.sql) `GREATEST(now(), ${schema_js_1.procesos.pendienteAt})`;
                 }
@@ -1582,18 +2497,22 @@ class HotRamBaseService {
                 if (!current.salida_at) {
                     updates.salidaAt = (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`;
                 }
-                // Consultar si ya existe un PREASIGNADO pendiente en este circuito para emitir alerta Socket.IO
                 const [holdRows, noteRows] = await Promise.all([
                     tx
-                        .select()
+                        .select({
+                        id: schema_js_1.procesos.id,
+                        zoneId: schema_js_1.procesos.zoneId,
+                        boxId: schema_js_1.procesos.boxId,
+                        usuariosIds: schema_js_1.procesos.usuariosIds,
+                    })
                         .from(schema_js_1.procesos)
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, current.circuito_id), (0, drizzle_orm_1.ne)(schema_js_1.procesos.id, current.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt)))
+                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, current.circuito_id), (0, drizzle_orm_1.ne)(schema_js_1.procesos.id, current.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
                         .limit(1),
                     tx
                         .select({ texto: schema_js_1.procesosNotas.texto })
                         .from(schema_js_1.procesosNotas)
                         .where((0, drizzle_orm_1.eq)(schema_js_1.procesosNotas.circuitoId, current.circuito_id))
-                        .orderBy((0, drizzle_orm_1.desc)(schema_js_1.procesosNotas.createdAt))
+                        .orderBy((0, drizzle_orm_1.desc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.desc)(schema_js_1.procesosNotas.id))
                         .limit(1),
                 ]);
                 if (noteRows.length > 0) {
@@ -1618,14 +2537,14 @@ class HotRamBaseService {
                 .set(updates)
                 .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, procesoId))
                 .returning();
-            const vu = this.resolveVirtualUnit(index, row.tractorId, row.semiId);
+            const vu = this.resolveVirtualUnit(index, currentCirc?.tractorId ?? null, currentCirc?.semiId ?? null);
             const boxInfo = row.boxId ? index.boxesMap.get(row.boxId) : null;
             return {
                 ...row,
                 proceso_id: row.id,
                 unidad_id: vu.unidad_id,
-                tractor_id: row.tractorId,
-                semi_id: row.semiId,
+                tractor_id: currentCirc?.tractorId ?? null,
+                semi_id: currentCirc?.semiId ?? null,
                 box_name: boxInfo?.box_name || '',
                 estado: this.normalizeBoxEstado(row.estado),
                 encargado_id: row.encargadoId || null,
@@ -1644,9 +2563,9 @@ class HotRamBaseService {
     }
     /**
      * Gestión de Notas Normalizadas por Circuito (base.procesos_notas - Opción C).
-     * 0 PL/pgSQL complejo, 0 duplicación en Doble Carta, retorno retrocompatible { notes: [...] }.
+     * Acepta procesoId, holdId o circuitoId directo; incluye notas heredadas del padre en hijos desunidos.
      */
-    async agregarNota(procesoId, usuarioId, texto, location) {
+    async agregarNota(procesoOrCircuitoId, usuarioId, texto, location) {
         const cleanText = texto.trim();
         if (!cleanText)
             throw new ConflictError('El texto de la nota no puede estar vacío.');
@@ -1655,7 +2574,7 @@ class HotRamBaseService {
             const procRows = await tx
                 .select({ id: schema_js_1.procesos.id, circuitoId: schema_js_1.procesos.circuitoId, boxId: schema_js_1.procesos.boxId })
                 .from(schema_js_1.procesos)
-                .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, procesoId))
+                .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, procesoOrCircuitoId))
                 .limit(1);
             let circuitoId = procRows.length > 0 ? procRows[0].circuitoId : null;
             let boxId = procRows.length > 0 ? procRows[0].boxId : null;
@@ -1664,14 +2583,27 @@ class HotRamBaseService {
                 const coldRows = await tx
                     .select({ circuitoId: schema_js_1.procesosCold.circuitoId, boxId: schema_js_1.procesosCold.boxId })
                     .from(schema_js_1.procesosCold)
-                    .where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, procesoId))
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.procesosCold.id, procesoOrCircuitoId))
                     .limit(1);
-                if (coldRows.length === 0) {
-                    throw new NotFoundError(`Proceso ${procesoId} no encontrado.`);
+                if (coldRows.length > 0) {
+                    circuitoId = coldRows[0].circuitoId;
+                    boxId = coldRows[0].boxId;
+                    linkedProcesoId = null;
                 }
-                circuitoId = coldRows[0].circuitoId;
-                boxId = coldRows[0].boxId;
-                linkedProcesoId = null;
+            }
+            if (!circuitoId) {
+                const directCirc = await tx
+                    .select({ id: schema_js_1.circuitos.id })
+                    .from(schema_js_1.circuitos)
+                    .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, procesoOrCircuitoId))
+                    .limit(1);
+                if (directCirc.length > 0) {
+                    circuitoId = directCirc[0].id;
+                    linkedProcesoId = null;
+                }
+            }
+            if (!circuitoId) {
+                throw new NotFoundError(`Proceso o circuito ${procesoOrCircuitoId} no encontrado.`);
             }
             const isCoord = !usuarioId || location === 'Coordinación';
             const resolvedLocation = isCoord
@@ -1684,12 +2616,30 @@ class HotRamBaseService {
                 location: resolvedLocation,
                 texto: cleanText,
             });
+            const [circMeta] = await tx
+                .select({ parentCircuitoId: schema_js_1.circuitos.parentCircuitoId })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, circuitoId))
+                .limit(1);
+            const idsToFetch = circMeta?.parentCircuitoId
+                ? [circuitoId, circMeta.parentCircuitoId]
+                : [circuitoId];
             const allNotes = await tx
-                .select()
+                .select({
+                id: schema_js_1.procesosNotas.id,
+                circuitoId: schema_js_1.procesosNotas.circuitoId,
+                usuarioId: schema_js_1.procesosNotas.usuarioId,
+                location: schema_js_1.procesosNotas.location,
+                texto: schema_js_1.procesosNotas.texto,
+                createdAt: schema_js_1.procesosNotas.createdAt,
+                editedAt: schema_js_1.procesosNotas.editedAt,
+            })
                 .from(schema_js_1.procesosNotas)
-                .where((0, drizzle_orm_1.eq)(schema_js_1.procesosNotas.circuitoId, circuitoId))
-                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt));
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.procesosNotas.circuitoId, idsToFetch))
+                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.id));
             return {
+                procesoId: procesoOrCircuitoId,
+                circuitoId,
                 notes: allNotes.map((n) => this.mapNotaRow(n, index.usersMap)),
             };
         });
@@ -1714,13 +2664,30 @@ class HotRamBaseService {
             if (!updatedNote) {
                 throw new NotFoundError(`Nota ${noteId} no encontrada.`);
             }
+            const [circMeta] = await tx
+                .select({ parentCircuitoId: schema_js_1.circuitos.parentCircuitoId })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, updatedNote.circuitoId))
+                .limit(1);
+            const idsToFetch = circMeta?.parentCircuitoId
+                ? [updatedNote.circuitoId, circMeta.parentCircuitoId]
+                : [updatedNote.circuitoId];
             const allNotes = await tx
-                .select()
+                .select({
+                id: schema_js_1.procesosNotas.id,
+                circuitoId: schema_js_1.procesosNotas.circuitoId,
+                usuarioId: schema_js_1.procesosNotas.usuarioId,
+                location: schema_js_1.procesosNotas.location,
+                texto: schema_js_1.procesosNotas.texto,
+                createdAt: schema_js_1.procesosNotas.createdAt,
+                editedAt: schema_js_1.procesosNotas.editedAt,
+            })
                 .from(schema_js_1.procesosNotas)
-                .where((0, drizzle_orm_1.eq)(schema_js_1.procesosNotas.circuitoId, updatedNote.circuitoId))
-                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt));
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.procesosNotas.circuitoId, idsToFetch))
+                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.id));
             return {
                 procesoId,
+                circuitoId: updatedNote.circuitoId,
                 notes: allNotes.map((n) => this.mapNotaRow(n, index.usersMap)),
             };
         });
@@ -1738,13 +2705,30 @@ class HotRamBaseService {
             if (!deletedNote) {
                 throw new NotFoundError(`Nota ${noteId} no encontrada.`);
             }
+            const [circMeta] = await tx
+                .select({ parentCircuitoId: schema_js_1.circuitos.parentCircuitoId })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, deletedNote.circuitoId))
+                .limit(1);
+            const idsToFetch = circMeta?.parentCircuitoId
+                ? [deletedNote.circuitoId, circMeta.parentCircuitoId]
+                : [deletedNote.circuitoId];
             const allNotes = await tx
-                .select()
+                .select({
+                id: schema_js_1.procesosNotas.id,
+                circuitoId: schema_js_1.procesosNotas.circuitoId,
+                usuarioId: schema_js_1.procesosNotas.usuarioId,
+                location: schema_js_1.procesosNotas.location,
+                texto: schema_js_1.procesosNotas.texto,
+                createdAt: schema_js_1.procesosNotas.createdAt,
+                editedAt: schema_js_1.procesosNotas.editedAt,
+            })
                 .from(schema_js_1.procesosNotas)
-                .where((0, drizzle_orm_1.eq)(schema_js_1.procesosNotas.circuitoId, deletedNote.circuitoId))
-                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt));
+                .where((0, drizzle_orm_1.inArray)(schema_js_1.procesosNotas.circuitoId, idsToFetch))
+                .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.createdAt), (0, drizzle_orm_1.asc)(schema_js_1.procesosNotas.id));
             return {
                 procesoId,
+                circuitoId: deletedNote.circuitoId,
                 notes: allNotes.map((n) => this.mapNotaRow(n, index.usersMap)),
             };
         });
@@ -1753,7 +2737,7 @@ class HotRamBaseService {
         return res;
     }
     /**
-     * Gestión de PREASIGNADO (ahora unificado directamente en base.procesos con llegada_zona_at = NULL).
+     * Gestión de PREASIGNADO (en base.procesos vinculado por FK a base.circuitos).
      */
     async crearHold(input) {
         const { index } = await this.ensureRuntimeIndex();
@@ -1765,40 +2749,26 @@ class HotRamBaseService {
                 if (bInfo)
                     targetZoneId = bInfo.zone_id;
             }
-            // Heredar circuito_id si el tractor/semi ya tiene un circuito abierto (Doble Carta con notas compartidas)
-            let openCircuitoId = await this.findOpenCircuitoId(tx, tractorId, semiId);
-            if (!openCircuitoId && input.procesoOrigenId) {
-                const orig = await tx
-                    .select({ circuitoId: schema_js_1.procesos.circuitoId })
-                    .from(schema_js_1.procesos)
-                    .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, input.procesoOrigenId))
-                    .limit(1);
-                if (orig.length > 0)
-                    openCircuitoId = orig[0].circuitoId;
+            const circ = await this.findOrCreateOpenCircuito(tx, {
+                circuitoId: input.circuitoId,
+                procesoOrigenId: input.procesoOrigenId,
+                tractorId,
+                semiId,
+            });
+            // Anti-duplicación en misma zona: impedir crear un PREASIGNADO si el circuito ya está activo en esa misma targetZoneId
+            const activeSameZone = await tx
+                .select({ id: schema_js_1.procesos.id })
+                .from(schema_js_1.procesos)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circ.id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+                .limit(1);
+            if (activeSameZone.length > 0) {
+                throw new ConflictError('La unidad ya se encuentra activa en esta zona; preasignala en otra zona.');
             }
-            const circuitoId = openCircuitoId || node_crypto_1.default.randomUUID();
-            const assetConds = [];
-            if (tractorId)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, tractorId));
-            if (semiId)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, semiId));
-            // Anti-duplicación en misma zona: impedir crear un PREASIGNADO si el activo ya está activo en esa misma targetZoneId
-            if (assetConds.length > 0) {
-                const activeSameZone = await tx
-                    .select({ id: schema_js_1.procesos.id })
-                    .from(schema_js_1.procesos)
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)))
-                    .limit(1);
-                if (activeSameZone.length > 0) {
-                    throw new ConflictError('La unidad ya se encuentra activa en esta zona; preasignala en otra zona.');
-                }
-            }
-            // Multi-PREASIGNADO: permite múltiples cards PREASIGNADO en distintas zonas (cualquier card puede desprender otra).
-            // Solo evita duplicar una segunda tarjeta PREASIGNADO dentro de la MISMA zona destino.
+            // Multi-PREASIGNADO: permite múltiples cards PREASIGNADO en distintas zonas del circuito
             const existingPendingSameZone = await tx
                 .select({ id: schema_js_1.procesos.id })
                 .from(schema_js_1.procesos)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)))
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circ.id), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, targetZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
                 .limit(1);
             let holdRow;
             if (existingPendingSameZone.length > 0) {
@@ -1807,7 +2777,6 @@ class HotRamBaseService {
                     .set({
                     zoneId: targetZoneId,
                     boxId: input.boxId ?? null,
-                    circuitoId,
                     ...(input.usuariosIds ? { usuariosIds: input.usuariosIds } : {}),
                     updatedAt: (0, drizzle_orm_1.sql) `now()`,
                 })
@@ -1819,9 +2788,7 @@ class HotRamBaseService {
                 const [created] = await tx
                     .insert(schema_js_1.procesos)
                     .values({
-                    circuitoId,
-                    tractorId,
-                    semiId,
+                    circuitoId: circ.id,
                     zoneId: targetZoneId,
                     boxId: input.boxId || null,
                     pendienteAt: new Date(),
@@ -1832,7 +2799,7 @@ class HotRamBaseService {
             }
             if (input.notaPlanificacion && input.notaPlanificacion.trim()) {
                 await tx.insert(schema_js_1.procesosNotas).values({
-                    circuitoId,
+                    circuitoId: circ.id,
                     procesoId: holdRow.id,
                     usuarioId: null,
                     location: 'Coordinación',
@@ -1848,11 +2815,17 @@ class HotRamBaseService {
     async actualizarHold(holdId, patch) {
         const { index } = await this.ensureRuntimeIndex();
         const updated = await index_js_1.db.transaction(async (tx) => {
-            const lockedRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos WHERE id = ${holdId}::uuid FOR UPDATE`);
+            const lockedRes = await tx.execute((0, drizzle_orm_1.sql) `SELECT id, circuito_id, zone_id, box_id, usuarios_ids, anulado_at
+            FROM base.procesos
+            WHERE id = ${holdId}::uuid
+            FOR UPDATE`);
             if (lockedRes.rows.length === 0) {
                 throw new NotFoundError(`Preasignación ${holdId} no encontrada en base.procesos.`);
             }
             const current = lockedRes.rows[0];
+            if (current.anulado_at) {
+                throw new ConflictError('No se puede editar una preasignación deshecha.');
+            }
             const updates = {
                 updatedAt: (0, drizzle_orm_1.sql) `now()`,
             };
@@ -1903,11 +2876,21 @@ class HotRamBaseService {
                 throw new NotFoundError(`Preasignación ${holdId} no encontrada en base.procesos.`);
             }
             if (patch.notaPlanificacion && patch.notaPlanificacion.trim()) {
+                const isTallerOrigen = patch.origen === 'taller' && Boolean(patch.actorUsuarioId);
+                let notaUsuarioId = null;
+                let notaLocation = 'Coordinación';
+                if (isTallerOrigen) {
+                    const actorMeta = await this.resolveTallerActorMeta(patch.actorUsuarioId, index);
+                    notaUsuarioId = actorMeta?.id || patch.actorUsuarioId || null;
+                    const boxName = (row.boxId ? index.boxesMap.get(row.boxId)?.box_name : null) ||
+                        (actorMeta?.box_id ? index.boxesMap.get(actorMeta.box_id)?.box_name : null);
+                    notaLocation = boxName || index.zonesMap.get(row.zoneId) || 'Box';
+                }
                 await tx.insert(schema_js_1.procesosNotas).values({
                     circuitoId: row.circuitoId,
                     procesoId: row.id,
-                    usuarioId: null,
-                    location: 'Coordinación',
+                    usuarioId: notaUsuarioId,
+                    location: notaLocation,
                     texto: patch.notaPlanificacion.trim(),
                 });
             }
@@ -1923,18 +2906,21 @@ class HotRamBaseService {
                 .delete(schema_js_1.procesos)
                 .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, holdId))
                 .returning();
-            // Si el circuito quedó únicamente con pasos ya finalizados y el coordinador dio egreso a la preasignación, cerrar circuito
+            // Si el circuito quedó sin pasos abiertos (vacío o solo con pasos ya finalizados), cerrar el circuito en base.circuitos
             if (deleted) {
                 const remainingOpen = await tx
                     .select({ id: schema_js_1.procesos.id })
                     .from(schema_js_1.procesos)
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, deleted.circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt)))
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, deleted.circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
                     .limit(1);
                 if (remainingOpen.length === 0) {
                     await tx
-                        .update(schema_js_1.procesos)
-                        .set({ circuitoCerradoAt: (0, drizzle_orm_1.sql) `now()` })
-                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, deleted.circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt)));
+                        .update(schema_js_1.circuitos)
+                        .set({
+                        egresoAt: (0, drizzle_orm_1.sql) `GREATEST(now(), ${schema_js_1.circuitos.ingresoAt})`,
+                        updatedAt: (0, drizzle_orm_1.sql) `now()`,
+                    })
+                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, deleted.circuitoId), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt)));
                 }
             }
         });
@@ -1951,13 +2937,32 @@ class HotRamBaseService {
             ? await this.resolveTallerActorMeta(actorUsuarioId, index)
             : null;
         const res = await index_js_1.db.transaction(async (tx) => {
-            const locked = await tx.execute((0, drizzle_orm_1.sql) `SELECT * FROM base.procesos WHERE id = ${holdId}::uuid FOR UPDATE`);
+            const locked = await tx.execute((0, drizzle_orm_1.sql) `SELECT id, circuito_id, zone_id, box_id, estado, usuarios_ids, pendiente_at, anulado_at
+            FROM base.procesos
+            WHERE id = ${holdId}::uuid
+            FOR UPDATE`);
             if (locked.rows.length === 0) {
                 throw new NotFoundError(`Preasignación (${holdId}) no encontrada en base.procesos`);
             }
             const hold = locked.rows[0];
-            // Auto-ubicación por UUID del usuario (/db-render-arch C1 Hot RAM):
-            // Si el actor es un operario con box_id en la zona del hold, ubica automáticamente en su box.
+            if (hold.anulado_at) {
+                throw new ConflictError('No se puede activar una preasignación deshecha.');
+            }
+            const [circ] = await tx
+                .select({
+                id: schema_js_1.circuitos.id,
+                parentCircuitoId: schema_js_1.circuitos.parentCircuitoId,
+                tractorId: schema_js_1.circuitos.tractorId,
+                semiId: schema_js_1.circuitos.semiId,
+                desunionAt: schema_js_1.circuitos.desunionAt,
+                egresoAt: schema_js_1.circuitos.egresoAt,
+            })
+                .from(schema_js_1.circuitos)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.circuitos.id, hold.circuito_id))
+                .limit(1);
+            if (!circ || circ.egresoAt || circ.desunionAt) {
+                throw new ConflictError('No se puede activar una preasignación cuyo circuito está cerrado o desunido.');
+            }
             const actorOwnBoxInZone = actorMeta?.rol === 'operario' &&
                 actorMeta.box_id &&
                 index.boxesMap.get(actorMeta.box_id)?.zone_id === hold.zone_id
@@ -1976,25 +2981,21 @@ class HotRamBaseService {
             if (!boxInfo) {
                 throw new NotFoundError(`El Box indicado (${targetBoxId}) no existe en base.boxes.`);
             }
-            // Cerrar cualquier estadía activa previa no finalizada del mismo activo (si venía de Doble Carta)
-            const assetConds = [];
-            if (hold.tractor_id)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.tractorId, hold.tractor_id));
-            if (hold.semi_id)
-                assetConds.push((0, drizzle_orm_1.eq)(schema_js_1.procesos.semiId, hold.semi_id));
-            if (assetConds.length > 0) {
-                await tx
-                    .update(schema_js_1.procesos)
-                    .set({
-                    salidaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
-                    updatedAt: (0, drizzle_orm_1.sql) `now()`,
-                })
-                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.ne)(schema_js_1.procesos.id, hold.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.circuitoCerradoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt)), assetConds.length === 1 ? assetConds[0] : (0, drizzle_orm_1.or)(...assetConds)));
-            }
+            // Cerrar cualquier estadía activa previa no finalizada del mismo circuito (Doble Carta)
+            await tx
+                .update(schema_js_1.procesos)
+                .set({
+                salidaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
+                updatedAt: (0, drizzle_orm_1.sql) `now()`,
+            })
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, hold.circuito_id), (0, drizzle_orm_1.ne)(schema_js_1.procesos.id, hold.id), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt), (0, drizzle_orm_1.or)((0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.ingresoBoxAt))));
             const existingUsers = Array.isArray(hold.usuarios_ids) ? hold.usuarios_ids : [];
-            const nextUsuariosIds = iniciarInmediato && actorMeta?.rol === 'operario' && !existingUsers.includes(actorMeta.id)
-                ? [...existingUsers, actorMeta.id]
-                : existingUsers;
+            const boxOperariosIds = (index.operariosByBoxMap.get(targetBoxId) || []).map((o) => o.id);
+            const nextUsuariosIds = iniciarInmediato && actorMeta?.rol === 'encargado_zona'
+                ? boxOperariosIds
+                : iniciarInmediato && actorMeta?.rol === 'operario' && !existingUsers.includes(actorMeta.id)
+                    ? [...existingUsers, actorMeta.id]
+                    : existingUsers;
             const [activated] = await tx
                 .update(schema_js_1.procesos)
                 .set({
@@ -2002,6 +3003,12 @@ class HotRamBaseService {
                 boxId: targetBoxId,
                 estado: iniciarInmediato ? estado ?? 'adentro' : null,
                 usuariosIds: nextUsuariosIds,
+                ...(actorMeta?.rol === 'encargado_zona'
+                    ? {
+                        encargadoId: actorMeta.id,
+                        encargadoAt: (0, drizzle_orm_1.sql) `now()`,
+                    }
+                    : {}),
                 llegadaZonaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), ${schema_js_1.procesos.pendienteAt})`,
                 ingresoBoxAt: iniciarInmediato
                     ? (0, drizzle_orm_1.sql) `GREATEST(clock_timestamp(), ${schema_js_1.procesos.pendienteAt})`
@@ -2010,21 +3017,25 @@ class HotRamBaseService {
             })
                 .where((0, drizzle_orm_1.eq)(schema_js_1.procesos.id, hold.id))
                 .returning();
-            const vu = this.resolveVirtualUnit(index, activated.tractorId, activated.semiId);
-            const circuitNotes = await this.fetchNotesMapByCircuitos([activated.circuitoId], index.usersMap);
+            const vu = this.resolveVirtualUnit(index, circ.tractorId, circ.semiId);
+            const idsToFetch = circ.parentCircuitoId
+                ? [activated.circuitoId, circ.parentCircuitoId]
+                : [activated.circuitoId];
+            const notesMap = await this.fetchNotesMapByCircuitos(idsToFetch, index.usersMap);
+            const mergedNotes = this.mergeCircuitoNotes(activated.circuitoId, circ.parentCircuitoId, notesMap);
             return {
                 ...activated,
                 id: activated.id,
                 proceso_id: activated.id,
                 unidad_id: vu.unidad_id,
-                tractor_id: activated.tractorId,
-                semi_id: activated.semiId,
+                tractor_id: circ.tractorId,
+                semi_id: circ.semiId,
                 box_id: activated.boxId,
                 estado: this.normalizeBoxEstado(activated.estado),
                 llegada_at: (activated.llegadaZonaAt || activated.pendienteAt).toISOString(),
                 inicio_at: activated.ingresoBoxAt ? activated.ingresoBoxAt.toISOString() : null,
                 salida_at: activated.salidaAt ? activated.salidaAt.toISOString() : null,
-                notes: circuitNotes.get(activated.circuitoId) || [],
+                notes: mergedNotes,
             };
         });
         this.invalidate();

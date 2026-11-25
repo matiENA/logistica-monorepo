@@ -1,162 +1,166 @@
-import React, { useMemo, useState } from 'react';
-import { Plus, X } from 'lucide-react';
-import { toast } from 'sonner';
-import type { PlaneacionCatalog } from '../../types/planeacion';
-import { registrarLlegadaBox } from '../../services/planeacionApi';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, X } from 'lucide-react';
+import type { CatalogUnitItem } from '../../hooks/usePlaneacionKanban';
+import { normalizePlateKey } from '../../hooks/usePlaneacionKanban';
+import { UnitLicensePlate } from '../common/UnitLicensePlate';
+
+export interface OriginRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
 interface NewIngresoModalProps {
   open: boolean;
-  catalog: PlaneacionCatalog;
+  availableUnits: CatalogUnitItem[];
   onClose: () => void;
-  onCreated: () => void;
+  onSelectUnit: (unit: CatalogUnitItem, originRect: OriginRect) => void;
 }
 
 export const NewIngresoModal: React.FC<NewIngresoModalProps> = ({
   open,
-  catalog,
+  availableUnits,
   onClose,
-  onCreated,
+  onSelectUnit,
 }) => {
-  const [unitSearch, setUnitSearch] = useState('');
-  const [selectedUnidadId, setSelectedUnidadId] = useState('');
-  const [selectedBoxId, setSelectedBoxId] = useState(catalog.boxes[0]?.id || '');
-  const [notaTexto, setNotaTexto] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [plateSearch, setPlateSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setPlateSearch('');
+      return;
+    }
+    const raf = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open, onClose]);
 
   const filteredUnits = useMemo(() => {
-    const q = unitSearch.trim().toLowerCase();
-    const list = catalog.unidades;
-    if (!q) return list.slice(0, 40);
-    return list
-      .filter(
-        (u) =>
-          u.n_ute.toLowerCase().includes(q) ||
-          u.tractor_plate.toLowerCase().includes(q) ||
-          u.semi_plate.toLowerCase().includes(q)
-      )
-      .slice(0, 40);
-  }, [catalog.unidades, unitSearch]);
+    const qRaw = plateSearch.trim().toLowerCase();
+    const qNorm = normalizePlateKey(plateSearch);
+    if (!qRaw) return availableUnits;
+    return availableUnits.filter((u) => {
+      const trNorm = normalizePlateKey(u.tractor_plate);
+      const smNorm = normalizePlateKey(u.semi_plate);
+      return (
+        (qNorm && (trNorm.includes(qNorm) || smNorm.includes(qNorm))) ||
+        u.tractor_plate.toLowerCase().includes(qRaw) ||
+        u.semi_plate.toLowerCase().includes(qRaw) ||
+        u.n_ute.toLowerCase().includes(qRaw)
+      );
+    });
+  }, [availableUnits, plateSearch]);
 
   if (!open) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const boxId = selectedBoxId || catalog.boxes[0]?.id;
-    if (!selectedUnidadId || !boxId) {
-      toast.error('Seleccioná una unidad y un box de destino');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await registrarLlegadaBox({
-        unidadId: selectedUnidadId,
-        boxId,
-        notaTexto: notaTexto.trim() || null,
-      });
-      toast.success('Ingreso a box registrado');
-      onCreated();
-      onClose();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error registrando ingreso');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Seleccionar patentes para incorporar al circuito"
+      className="fixed inset-0 z-50 bg-[#EDEDED]/70 backdrop-blur-[3px] flex items-center justify-center p-4"
       onClick={onClose}
     >
-      <form
-        onSubmit={handleSubmit}
+      <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white border-[1.5px] border-zinc-900 rounded-2xl w-full max-w-md p-5 shadow-2xl flex flex-col gap-4"
+        className="w-full max-w-[316px] border-2 border-dashed border-zinc-500/80 bg-[#EDEDED]/95 backdrop-blur-md rounded-2xl p-3 flex flex-col gap-3 shadow-lg"
       >
-        <div className="flex items-center justify-between border-b border-zinc-200 pb-2.5">
-          <h3 className="text-sm font-black text-zinc-950 uppercase tracking-wide">
-            Registrar Llegada a Box
-          </h3>
-          <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-950">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        {/* Buscador minimalista + Cierre */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search
+              size={16}
+              strokeWidth={2}
+              aria-hidden="true"
+              focusable="false"
+              className="text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={plateSearch}
+              onChange={(e) => setPlateSearch(e.target.value)}
+              placeholder="Buscar patente..."
+              aria-label="Filtrar patentes disponibles"
+              className="w-full h-8 pl-8 pr-3 bg-white/85 border border-zinc-400 rounded-full text-xs font-mono text-zinc-950 placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-1"
+            />
+          </div>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] font-bold uppercase text-zinc-700">
-            Buscar Unidad / Patente
-          </label>
-          <input
-            type="text"
-            value={unitSearch}
-            onChange={(e) => setUnitSearch(e.target.value)}
-            placeholder="Filtrar por UTE, tractor o semi..."
-            className="px-3 py-2 text-xs border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900"
-          />
-          <select
-            value={selectedUnidadId}
-            onChange={(e) => setSelectedUnidadId(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold border border-zinc-300 rounded-lg bg-white"
-            required
+          <span
+            className="h-8 px-2.5 inline-flex items-center justify-center rounded-full border border-dashed border-zinc-400 text-[11px] font-numeric font-bold text-zinc-700 tabular-nums shrink-0 select-none"
+            title="Conjuntos disponibles"
           >
-            <option value="">Seleccionar unidad...</option>
-            {filteredUnits.map((u) => (
-              <option key={u.unidad_id} value={u.unidad_id}>
-                {u.n_ute ? `#${u.n_ute} — ` : ''}
-                {u.tractor_plate || '---'} / {u.semi_plate || '---'}
-              </option>
-            ))}
-          </select>
-        </div>
+            {filteredUnits.length}
+          </span>
 
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] font-bold uppercase text-zinc-700">Box de Destino</label>
-          <select
-            value={selectedBoxId || catalog.boxes[0]?.id || ''}
-            onChange={(e) => setSelectedBoxId(e.target.value)}
-            className="px-3 py-2 text-xs font-semibold border border-zinc-300 rounded-lg bg-white"
-            required
-          >
-            {catalog.boxes.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.zone_name} — {b.box_name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[11px] font-bold uppercase text-zinc-700">
-            Nota inicial (opcional)
-          </label>
-          <input
-            type="text"
-            value={notaTexto}
-            onChange={(e) => setNotaTexto(e.target.value)}
-            placeholder="Motivo de ingreso..."
-            className="px-3 py-2 text-xs border border-zinc-300 rounded-lg"
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg border border-zinc-300 text-xs font-semibold text-zinc-700"
+            aria-label="Cerrar selector de patentes"
+            title="Cerrar"
+            className="w-8 h-8 rounded-full border border-transparent hover:border-zinc-400 hover:bg-zinc-300/50 text-zinc-700 hover:text-zinc-950 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
           >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-1 px-4 py-1.5 rounded-lg bg-zinc-950 text-white text-xs font-bold hover:bg-zinc-800 disabled:opacity-50"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Confirmar Llegada
+            <X size={16} strokeWidth={2} aria-hidden="true" focusable="false" />
           </button>
         </div>
-      </form>
+
+        {/* Scroll en 2 columnas: solo patentes, sin contenedores sólidos */}
+        <div
+          className="max-h-[58vh] overflow-y-auto px-1 py-1 no-scrollbar"
+          aria-label="Patentes disponibles para ingresar al circuito"
+        >
+          {filteredUnits.length === 0 ? (
+            <div className="py-10 text-center text-xs font-mono text-zinc-600 select-none">
+              {availableUnits.length === 0
+                ? 'Todas las unidades están en circuito'
+                : 'Sin patentes coincidentes'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 justify-items-center items-center">
+              {filteredUnits.map((u) => {
+                const labelText = [u.tractor_plate, u.semi_plate].filter(Boolean).join(' / ');
+                return (
+                  <button
+                    key={u.unidad_id}
+                    type="button"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      onSelectUnit(u, {
+                        left: rect.left,
+                        top: rect.top,
+                        width: rect.width,
+                        height: rect.height,
+                      });
+                    }}
+                    aria-label={`Incorporar patentes ${labelText} al circuito`}
+                    className="group p-1 rounded-lg bg-transparent border-0 flex flex-col items-center gap-[3px] cursor-pointer transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:scale-[1.05] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2 focus-visible:ring-offset-[#EDEDED]"
+                  >
+                    {u.tractor_plate && (
+                      <UnitLicensePlate plate={u.tractor_plate} label="Tractor" size="sm" />
+                    )}
+                    {u.semi_plate && (
+                      <UnitLicensePlate plate={u.semi_plate} label="Semi" size="sm" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

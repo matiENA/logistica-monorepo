@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.procesosColdRelations = exports.procesosNotasRelations = exports.procesosRelations = exports.unidadesRelations = exports.usuariosTallerRelations = exports.boxesRelations = exports.zonesRelations = exports.procesosCold = exports.procesosNotas = exports.procesos = exports.unidades = exports.semis = exports.tractores = exports.userCoordinacion = exports.usuariosTaller = exports.boxes = exports.zones = exports.baseSchema = void 0;
+exports.procesosColdRelations = exports.procesosNotasRelations = exports.procesosRelations = exports.circuitosRelations = exports.unidadesRelations = exports.usuariosTallerRelations = exports.boxesRelations = exports.zonesRelations = exports.procesosCold = exports.procesosNotas = exports.procesos = exports.circuitos = exports.unidades = exports.semis = exports.tractores = exports.userCoordinacion = exports.usuariosTaller = exports.boxes = exports.zones = exports.baseSchema = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const drizzle_orm_1 = require("drizzle-orm");
 exports.baseSchema = (0, pg_core_1.pgSchema)('base');
@@ -61,16 +61,33 @@ exports.unidades = exports.baseSchema.table('unidades', {
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
-// Tabla Única Operativa V2 (base.procesos):
-// Unifica PREASIGNADO (pendiente_at), ESPERANDO A SER INGRESADO A BOX (llegada_zona_at),
-// TRABAJANDO (ingreso_box_at), FINALIZÓ (salida_at) y retención semanal post Egreso Planta (circuito_cerrado_at).
-exports.procesos = exports.baseSchema.table('procesos', {
+// Tabla Maestra de Circuitos V3 (base.circuitos):
+// Cabecera del ciclo Alta (ingreso_at) -> Recorridos -> Baja (egreso_at) y Desunión en 2 circuitos hijos.
+exports.circuitos = exports.baseSchema.table('circuitos', {
     id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
-    circuitoId: (0, pg_core_1.uuid)('circuito_id').notNull().defaultRandom(),
+    parentCircuitoId: (0, pg_core_1.uuid)('parent_circuito_id').references(() => exports.circuitos.id, {
+        onDelete: 'restrict',
+    }),
     tractorId: (0, pg_core_1.uuid)('tractor_id').references(() => exports.tractores.id, { onDelete: 'set null' }),
     semiId: (0, pg_core_1.uuid)('semi_id').references(() => exports.semis.id, { onDelete: 'set null' }),
     tractorN: (0, pg_core_1.text)('tractor_n'),
     semiN: (0, pg_core_1.text)('semi_n'),
+    ingresoAt: (0, pg_core_1.timestamp)('ingreso_at', { withTimezone: true }).notNull().defaultNow(),
+    desunionAt: (0, pg_core_1.timestamp)('desunion_at', { withTimezone: true }),
+    egresoAt: (0, pg_core_1.timestamp)('egreso_at', { withTimezone: true }),
+    altaCoordId: (0, pg_core_1.uuid)('alta_coord_id').references(() => exports.userCoordinacion.id, { onDelete: 'set null' }),
+    bajaCoordId: (0, pg_core_1.uuid)('baja_coord_id').references(() => exports.userCoordinacion.id, { onDelete: 'set null' }),
+    archivedAt: (0, pg_core_1.timestamp)('archived_at', { withTimezone: true }),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+// Tabla Única Operativa V3 (base.procesos):
+// Unifica PREASIGNADO (pendiente_at), ESPERANDO A SER INGRESADO A BOX (llegada_zona_at),
+// TRABAJANDO (ingreso_box_at) y FINALIZÓ (salida_at), vinculada por FK a base.circuitos.
+exports.procesos = exports.baseSchema.table('procesos', {
+    id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
+    circuitoId: (0, pg_core_1.uuid)('circuito_id')
+        .notNull()
+        .references(() => exports.circuitos.id, { onDelete: 'restrict' }),
     zoneId: (0, pg_core_1.uuid)('zone_id')
         .notNull()
         .references(() => exports.zones.id, { onDelete: 'restrict' }),
@@ -83,14 +100,16 @@ exports.procesos = exports.baseSchema.table('procesos', {
     encargadoId: (0, pg_core_1.uuid)('encargado_id').references(() => exports.usuariosTaller.id, { onDelete: 'set null' }),
     encargadoAt: (0, pg_core_1.timestamp)('encargado_at', { withTimezone: true }),
     salidaAt: (0, pg_core_1.timestamp)('salida_at', { withTimezone: true }),
-    circuitoCerradoAt: (0, pg_core_1.timestamp)('circuito_cerrado_at', { withTimezone: true }),
+    anuladoAt: (0, pg_core_1.timestamp)('anulado_at', { withTimezone: true }),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 // Notas Normalizadas por Circuito (base.procesos_notas - Opción C):
-// Compartidas automáticamente en Doble Carta y cambios de zona sin duplicación JSONB.
+// Compartidas automáticamente en Doble Carta y heredadas por hijos tras desunión.
 exports.procesosNotas = exports.baseSchema.table('procesos_notas', {
     id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
-    circuitoId: (0, pg_core_1.uuid)('circuito_id').notNull(),
+    circuitoId: (0, pg_core_1.uuid)('circuito_id')
+        .notNull()
+        .references(() => exports.circuitos.id, { onDelete: 'cascade' }),
     procesoId: (0, pg_core_1.uuid)('proceso_id').references(() => exports.procesos.id, { onDelete: 'set null' }),
     usuarioId: (0, pg_core_1.uuid)('usuario_id'),
     location: (0, pg_core_1.text)('location').notNull().default('Coordinación'),
@@ -99,14 +118,12 @@ exports.procesosNotas = exports.baseSchema.table('procesos_notas', {
     editedAt: (0, pg_core_1.timestamp)('edited_at', { withTimezone: true }),
 });
 // Store Histórico Semanal (base.procesos_cold):
-// Recibe en batch semanal los circuitos con circuito_cerrado_at <= now() - interval '7 days'.
+// Recibe en batch semanal los pasos (completos o incompletos) de circuitos cerrados >= 7 días.
 exports.procesosCold = exports.baseSchema.table('procesos_cold', {
     id: (0, pg_core_1.uuid)('id').primaryKey(),
-    circuitoId: (0, pg_core_1.uuid)('circuito_id').notNull(),
-    tractorId: (0, pg_core_1.uuid)('tractor_id').references(() => exports.tractores.id, { onDelete: 'set null' }),
-    semiId: (0, pg_core_1.uuid)('semi_id').references(() => exports.semis.id, { onDelete: 'set null' }),
-    tractorN: (0, pg_core_1.text)('tractor_n'),
-    semiN: (0, pg_core_1.text)('semi_n'),
+    circuitoId: (0, pg_core_1.uuid)('circuito_id')
+        .notNull()
+        .references(() => exports.circuitos.id, { onDelete: 'restrict' }),
     zoneId: (0, pg_core_1.uuid)('zone_id').references(() => exports.zones.id, { onDelete: 'set null' }),
     pendienteAt: (0, pg_core_1.timestamp)('pendiente_at', { withTimezone: true }).notNull(),
     llegadaZonaAt: (0, pg_core_1.timestamp)('llegada_zona_at', { withTimezone: true }),
@@ -117,7 +134,7 @@ exports.procesosCold = exports.baseSchema.table('procesos_cold', {
     encargadoId: (0, pg_core_1.uuid)('encargado_id').references(() => exports.usuariosTaller.id, { onDelete: 'set null' }),
     encargadoAt: (0, pg_core_1.timestamp)('encargado_at', { withTimezone: true }),
     salidaAt: (0, pg_core_1.timestamp)('salida_at', { withTimezone: true }),
-    circuitoCerradoAt: (0, pg_core_1.timestamp)('circuito_cerrado_at', { withTimezone: true }).notNull(),
+    anuladoAt: (0, pg_core_1.timestamp)('anulado_at', { withTimezone: true }),
     archivedAt: (0, pg_core_1.timestamp)('archived_at', { withTimezone: true }).notNull().defaultNow(),
 });
 // Relaciones Drizzle
@@ -155,14 +172,37 @@ exports.unidadesRelations = (0, drizzle_orm_1.relations)(exports.unidades, ({ on
         references: [exports.semis.id],
     }),
 }));
-exports.procesosRelations = (0, drizzle_orm_1.relations)(exports.procesos, ({ one, many }) => ({
+exports.circuitosRelations = (0, drizzle_orm_1.relations)(exports.circuitos, ({ one, many }) => ({
+    parent: one(exports.circuitos, {
+        fields: [exports.circuitos.parentCircuitoId],
+        references: [exports.circuitos.id],
+        relationName: 'circuito_parent',
+    }),
+    children: many(exports.circuitos, { relationName: 'circuito_parent' }),
     tractor: one(exports.tractores, {
-        fields: [exports.procesos.tractorId],
+        fields: [exports.circuitos.tractorId],
         references: [exports.tractores.id],
     }),
     semi: one(exports.semis, {
-        fields: [exports.procesos.semiId],
+        fields: [exports.circuitos.semiId],
         references: [exports.semis.id],
+    }),
+    altaCoord: one(exports.userCoordinacion, {
+        fields: [exports.circuitos.altaCoordId],
+        references: [exports.userCoordinacion.id],
+    }),
+    bajaCoord: one(exports.userCoordinacion, {
+        fields: [exports.circuitos.bajaCoordId],
+        references: [exports.userCoordinacion.id],
+    }),
+    procesos: many(exports.procesos),
+    procesosCold: many(exports.procesosCold),
+    notas: many(exports.procesosNotas),
+}));
+exports.procesosRelations = (0, drizzle_orm_1.relations)(exports.procesos, ({ one, many }) => ({
+    circuito: one(exports.circuitos, {
+        fields: [exports.procesos.circuitoId],
+        references: [exports.circuitos.id],
     }),
     zone: one(exports.zones, {
         fields: [exports.procesos.zoneId],
@@ -179,19 +219,19 @@ exports.procesosRelations = (0, drizzle_orm_1.relations)(exports.procesos, ({ on
     notas: many(exports.procesosNotas),
 }));
 exports.procesosNotasRelations = (0, drizzle_orm_1.relations)(exports.procesosNotas, ({ one }) => ({
+    circuito: one(exports.circuitos, {
+        fields: [exports.procesosNotas.circuitoId],
+        references: [exports.circuitos.id],
+    }),
     proceso: one(exports.procesos, {
         fields: [exports.procesosNotas.procesoId],
         references: [exports.procesos.id],
     }),
 }));
 exports.procesosColdRelations = (0, drizzle_orm_1.relations)(exports.procesosCold, ({ one }) => ({
-    tractor: one(exports.tractores, {
-        fields: [exports.procesosCold.tractorId],
-        references: [exports.tractores.id],
-    }),
-    semi: one(exports.semis, {
-        fields: [exports.procesosCold.semiId],
-        references: [exports.semis.id],
+    circuito: one(exports.circuitos, {
+        fields: [exports.procesosCold.circuitoId],
+        references: [exports.circuitos.id],
     }),
     zone: one(exports.zones, {
         fields: [exports.procesosCold.zoneId],

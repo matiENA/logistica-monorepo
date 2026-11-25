@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useDragAutoScroll, useIsCardDragging } from '../../hooks/useDragAutoScroll';
 
 interface AutoScrollColumnProps {
   children: React.ReactNode;
@@ -17,7 +18,14 @@ export const AutoScrollColumn: React.FC<AutoScrollColumnProps> = ({
   className = '',
   ariaLabel,
 }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const { setRef, nodeRef: containerRef } = useDragAutoScroll<HTMLDivElement>({
+    vertical: true,
+    edgePx: 110,
+    maxSpeedPxPerSec: 560,
+    topAllowancePx: 46,
+    bottomAllowancePx: 18,
+  });
+  const isCardDragging = useIsCardDragging();
   const directionRef = useRef<1 | -1>(1);
   const pauseUntilRef = useRef<number>(0);
 
@@ -29,10 +37,10 @@ export const AutoScrollColumn: React.FC<AutoScrollColumnProps> = ({
     let lastTime = performance.now();
 
     const step = (now: number) => {
-      const dt = now - lastTime;
+      const dt = Math.min(now - lastTime, 64);
       lastTime = now;
 
-      if (!isHovered && !isPaused && now > pauseUntilRef.current) {
+      if (!isHovered && !isPaused && !isCardDragging && now > pauseUntilRef.current) {
         const maxScroll = el.scrollHeight - el.clientHeight;
         if (maxScroll > 4) {
           const delta = (dt / 1000) * 18 * directionRef.current;
@@ -53,11 +61,11 @@ export const AutoScrollColumn: React.FC<AutoScrollColumnProps> = ({
 
     rafId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(rafId);
-  }, [isHovered, isPaused, itemsCount]);
+  }, [isHovered, isPaused, isCardDragging, itemsCount, containerRef]);
 
   return (
     <div
-      ref={containerRef}
+      ref={setRef}
       aria-label={ariaLabel}
       className={`flex-1 min-h-0 overflow-y-auto no-scrollbar ${className}`}
     >

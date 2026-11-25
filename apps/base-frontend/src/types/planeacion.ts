@@ -2,6 +2,12 @@ export type EstadoProceso = 'PREASIGNADO' | 'EN_ESPERA' | 'EN_PROCESO' | 'FINALI
 
 export type EstadoBox = 'adentro' | 'afuera';
 
+export type IdleHierarchyTier =
+  | 'SIN_ASIGNACION'
+  | 'TERMINADO'
+  | 'ESPERANDO_BOX'
+  | 'PREASIGNADO';
+
 export interface ProcesoNota {
   id?: string;
   usuario_id: string | null;
@@ -38,6 +44,7 @@ export interface UsuarioCoordinacionSession {
 
 export interface PlaneacionHold {
   hold_id: string;
+  circuito_id?: string;
   unidad_id: string | null;
   n_ute: string;
   tractor_id: string | null;
@@ -58,6 +65,7 @@ export interface PlaneacionHold {
   encargado_at?: string | null;
   nota_planificacion: string | null;
   notes?: ProcesoNota[];
+  notes_count?: number;
   proceso_origen_id?: string | null;
   created_at: string;
   updated_at: string;
@@ -74,6 +82,7 @@ export interface PlaneacionHold {
 
 export interface PlaneacionCard {
   proceso_id: string;
+  circuito_id?: string;
   unidad_id: string | null;
   n_ute: string;
   tractor_id: string | null;
@@ -90,12 +99,14 @@ export interface PlaneacionCard {
   llegada_at: string;
   inicio_at: string | null;
   salida_at: string | null;
+  anulado_at?: string | null;
   usuarios_ids: string[];
   usuarios_nombres: string[];
   encargado_id?: string | null;
   encargado_nombre?: string | null;
   encargado_at?: string | null;
   notes: ProcesoNota[];
+  notes_count?: number;
   salida_previa_at?: string | null;
   salida_origen_box?: string | null;
   salida_origen_zone?: string | null;
@@ -150,9 +161,15 @@ export interface PlaneacionCatalog {
   }>;
 }
 
+export interface TallerBoxOperario {
+  id: string;
+  nombre_usuario: string;
+}
+
 export interface TallerBoxSlot {
   box_id: string;
   box_name: string;
+  operarios?: TallerBoxOperario[];
   adentro: PlaneacionCard[];
   afuera: PlaneacionCard[];
 }
@@ -173,10 +190,68 @@ export interface TallerZoneRenderMap {
   };
 }
 
+export interface CircuitoAbierto {
+  circuito_id: string;
+  parent_circuito_id: string | null;
+  unidad_id: string | null;
+  n_ute: string;
+  tractor_id: string | null;
+  tractor_plate: string;
+  semi_id: string | null;
+  semi_plate: string;
+  tractor_n: string | null;
+  semi_n: string | null;
+  modalidad_tracking: 'EQUIPO_ACOPLADO' | 'SOLO_TRACTOR' | 'SOLO_SEMI' | 'UNIDAD';
+  es_desunido: boolean;
+  patente_cruzada: string | null;
+  grupo_render: string;
+  ingreso_at: string;
+  alta_coord_id: string | null;
+  pasos_count: number;
+  paso_activo_id: string | null;
+  notes: ProcesoNota[];
+  notes_count: number;
+}
+
+export interface IdleDockItem {
+  key: string;
+  tier: IdleHierarchyTier;
+  targetId: string;
+  circuito_id?: string;
+  hold_id?: string;
+  proceso_id?: string;
+  unidad_id: string | null;
+  n_ute: string;
+  tractor_id: string | null;
+  tractor_plate: string;
+  semi_id: string | null;
+  semi_plate: string;
+  modalidad_tracking: 'EQUIPO_ACOPLADO' | 'SOLO_TRACTOR' | 'SOLO_SEMI' | 'UNIDAD';
+  zone_id: string | null;
+  zone_name: string;
+  box_id: string | null;
+  box_name: string;
+  preasignado_zones?: string[];
+  holds_count?: number;
+  en_proceso_activo?: boolean;
+  ubicacion_actual_box?: string | null;
+  ubicacion_actual_zone?: string | null;
+  salida_origen_box?: string | null;
+  salida_origen_zone?: string | null;
+  timestamp: string | null;
+  notes: ProcesoNota[];
+  notes_count: number;
+  ultima_tarea?: string | null;
+  ultima_tarea_usuario?: string | null;
+  ultima_tarea_at?: string | null;
+  is_temp?: boolean;
+}
+
 export interface BoardResponse {
   success: boolean;
   activos: PlaneacionCard[];
   holds?: PlaneacionHold[];
+  circuitos_abiertos?: CircuitoAbierto[];
   catalog: PlaneacionCatalog;
   taller_zone_map?: TallerZoneRenderMap | null;
   updatedAt: number;
@@ -191,6 +266,7 @@ export interface TrayectoriaStep {
   llegada_at: string | null;
   inicio_at: string | null;
   salida_at: string | null;
+  anulado_at?: string | null;
   duracion_espera_min: number | null;
   duracion_trabajo_min: number | null;
   duracion_total_min: number | null;
