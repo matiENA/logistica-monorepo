@@ -76,7 +76,7 @@ export const NewIngresoModal: React.FC<NewIngresoModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[316px] border-2 border-dashed border-zinc-500/80 bg-[#EDEDED]/95 backdrop-blur-md rounded-2xl p-3 flex flex-col gap-3 shadow-lg"
+        className="w-full max-w-[316px] ui-stroke-dashed border-zinc-500/80 bg-[#EDEDED]/95 backdrop-blur-md rounded-2xl p-3 flex flex-col gap-3 shadow-lg"
       >
         {/* Buscador minimalista + Cierre */}
         <div className="flex items-center gap-2">
@@ -100,7 +100,7 @@ export const NewIngresoModal: React.FC<NewIngresoModalProps> = ({
           </div>
 
           <span
-            className="h-8 px-2.5 inline-flex items-center justify-center rounded-full border border-dashed border-zinc-400 text-[11px] font-numeric font-bold text-zinc-700 tabular-nums shrink-0 select-none"
+            className="h-8 px-2.5 inline-flex items-center justify-center rounded-full ui-stroke-dashed-subtle border-zinc-400 text-[11px] font-numeric font-bold text-zinc-700 tabular-nums shrink-0 select-none"
             title="Conjuntos disponibles"
           >
             {filteredUnits.length}

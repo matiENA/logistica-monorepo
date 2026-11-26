@@ -8,6 +8,8 @@ import {
 import type {
   BoardResponse,
   CircuitoAbierto,
+  CircuitoTerminado,
+  CircuitoTimelineStep,
   IdleDockItem,
   PlaneacionCard,
   PlaneacionCatalog,
@@ -65,6 +67,20 @@ export function usePlaneacionKanban(enabled = true) {
   const activos = boardQuery.data?.activos ?? [];
   const holds = boardQuery.data?.holds ?? [];
   const circuitosAbiertos = boardQuery.data?.circuitos_abiertos ?? [];
+  const rawCircuitosTerminados = boardQuery.data?.circuitos_terminados ?? [];
+  const circuitosTimelines = boardQuery.data?.circuitos_timelines ?? {};
+
+  const circuitosTerminados = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return rawCircuitosTerminados;
+    return rawCircuitosTerminados.filter(
+      (c) =>
+        c.tractor_plate.toLowerCase().includes(q) ||
+        c.semi_plate.toLowerCase().includes(q) ||
+        c.n_ute.toLowerCase().includes(q) ||
+        (c.patente_cruzada || '').toLowerCase().includes(q)
+    );
+  }, [rawCircuitosTerminados, searchQuery]);
   const catalog = boardQuery.data?.catalog ?? {
     zones: [],
     boxes: [],
@@ -158,6 +174,9 @@ export function usePlaneacionKanban(enabled = true) {
         h.ubicacion_actual_box || activeUnfinalized?.box_name || h.salida_origen_box || null;
       const ubicacionZone =
         h.ubicacion_actual_zone || activeUnfinalized?.zone_name || h.salida_origen_zone || null;
+      const enProcesoActivo = Boolean(h.en_proceso_activo ?? activeUnfinalized);
+      const liberadoCircuito =
+        !enProcesoActivo && Boolean(h.liberado_circuito ?? h.salida_previa_at);
 
       return {
         proceso_id: h.hold_id,
@@ -207,7 +226,8 @@ export function usePlaneacionKanban(enabled = true) {
         ultima_tarea: h.ultima_tarea,
         ultima_tarea_usuario: h.ultima_tarea_usuario,
         ultima_tarea_at: h.ultima_tarea_at,
-        en_proceso_activo: Boolean(h.en_proceso_activo ?? activeUnfinalized),
+        en_proceso_activo: enProcesoActivo,
+        liberado_circuito: liberadoCircuito,
         ubicacion_actual_box: ubicacionBox,
         ubicacion_actual_zone: ubicacionZone,
       };
@@ -476,6 +496,8 @@ export function usePlaneacionKanban(enabled = true) {
           preasignado_zones: zones,
           holds_count: count,
           en_proceso_activo: Boolean(h.en_proceso_activo),
+          liberado_circuito:
+            !h.en_proceso_activo && Boolean(h.liberado_circuito ?? h.salida_previa_at),
           ubicacion_actual_box: h.ubicacion_actual_box || h.salida_origen_box || null,
           ubicacion_actual_zone: h.ubicacion_actual_zone || h.salida_origen_zone || null,
           salida_origen_box: h.salida_origen_box || null,
@@ -655,6 +677,7 @@ export function usePlaneacionKanban(enabled = true) {
         ultima_tarea_usuario: lastNote?.usuario || sourceCard.ultima_tarea_usuario || null,
         ultima_tarea_at: lastNote?.timestamp || sourceCard.ultima_tarea_at || null,
         en_proceso_activo: false,
+        liberado_circuito: true,
         ubicacion_actual_box: sourceCard.box_name || null,
         ubicacion_actual_zone: sourceCard.zone_name || null,
       };
@@ -727,6 +750,7 @@ export function usePlaneacionKanban(enabled = true) {
         ultima_tarea_usuario: lastNote?.usuario || sourceCard.ultima_tarea_usuario || null,
         ultima_tarea_at: lastNote?.timestamp || sourceCard.ultima_tarea_at || null,
         en_proceso_activo: true,
+        liberado_circuito: false,
         ubicacion_actual_box: sourceCard.box_name || null,
         ubicacion_actual_zone: sourceCard.zone_name || null,
       };
@@ -774,6 +798,9 @@ export function usePlaneacionKanban(enabled = true) {
         proceso_origen_id: sourceHoldId,
         created_at: nowIso,
         updated_at: nowIso,
+        liberado_circuito:
+          !sourceHold.en_proceso_activo &&
+          Boolean(sourceHold.liberado_circuito ?? sourceHold.salida_previa_at),
       };
 
       const filteredHolds = (prev.holds || []).filter(
@@ -914,6 +941,7 @@ export function usePlaneacionKanban(enabled = true) {
         created_at: nowIso,
         updated_at: nowIso,
         en_proceso_activo: false,
+        liberado_circuito: false,
       };
 
       queryClient.setQueryData<BoardResponse>(['planeacion', 'board'], {
@@ -934,11 +962,42 @@ export function usePlaneacionKanban(enabled = true) {
       const prev = queryClient.getQueryData<BoardResponse>(['planeacion', 'board']);
       if (!prev) return undefined;
 
+      const matchedCirc = (prev.circuitos_abiertos || []).find((c) => c.circuito_id === circuitoId);
+      const matchedActivo = (prev.activos || []).find((a) => a.circuito_id === circuitoId);
+      const matchedHold = (prev.holds || []).find((h) => h.circuito_id === circuitoId);
+      const src = matchedCirc || matchedActivo || matchedHold;
+
+      const existingTerminados = (prev.circuitos_terminados || []).filter(
+        (t) => t.circuito_id !== circuitoId
+      );
+      const nextTerminados: CircuitoTerminado[] = src
+        ? [
+            {
+              circuito_id: circuitoId,
+              parent_circuito_id: matchedCirc?.parent_circuito_id ?? null,
+              unidad_id: src.unidad_id ?? null,
+              n_ute: src.n_ute || '',
+              tractor_id: src.tractor_id ?? null,
+              tractor_plate: src.tractor_plate || '',
+              semi_id: src.semi_id ?? null,
+              semi_plate: src.semi_plate || '',
+              modalidad_tracking: src.modalidad_tracking,
+              es_desunido: Boolean(matchedCirc?.es_desunido),
+              patente_cruzada: matchedCirc?.patente_cruzada ?? null,
+              ingreso_at: matchedCirc?.ingreso_at || new Date().toISOString(),
+              egreso_at: new Date().toISOString(),
+              baja_coord_nombre: null,
+            },
+            ...existingTerminados,
+          ]
+        : existingTerminados;
+
       queryClient.setQueryData<BoardResponse>(['planeacion', 'board'], {
         ...prev,
         circuitos_abiertos: (prev.circuitos_abiertos || []).filter(
           (c) => c.circuito_id !== circuitoId
         ),
+        circuitos_terminados: nextTerminados,
         holds: (prev.holds || []).filter((h) => h.circuito_id !== circuitoId),
         activos: (prev.activos || []).filter((a) => a.circuito_id !== circuitoId),
       });
@@ -956,7 +1015,11 @@ export function usePlaneacionKanban(enabled = true) {
       const targetHold = isHold ? (prev.holds || []).find((h) => h.hold_id === cardId) : undefined;
       const targetActivo = !isHold ? (prev.activos || []).find((a) => a.proceso_id === cardId) : undefined;
 
-      const nextHolds = isHold ? (prev.holds || []).filter((h) => h.hold_id !== cardId) : (prev.holds || []);
+      const nextHolds = isHold
+        ? (prev.holds || []).filter((h) => h.hold_id !== cardId)
+        : targetActivo?.circuito_id
+        ? (prev.holds || []).filter((h) => h.circuito_id !== targetActivo.circuito_id)
+        : (prev.holds || []);
       const nextActivos = !isHold
         ? (prev.activos || []).filter((a) => a.proceso_id !== cardId)
         : (prev.activos || []);
@@ -995,10 +1058,21 @@ export function usePlaneacionKanban(enabled = true) {
       const targetActivo = !isHold ? (prev.activos || []).find((a) => a.proceso_id === cardId) : undefined;
       const affectedCircuitoId = targetHold?.circuito_id || targetActivo?.circuito_id || null;
 
-      const nextHolds = isHold ? (prev.holds || []).filter((h) => h.hold_id !== cardId) : (prev.holds || []);
+      const nextHoldsBase = isHold
+        ? (prev.holds || []).filter((h) => h.hold_id !== cardId)
+        : (prev.holds || []);
       const nextActivos = !isHold
         ? (prev.activos || []).filter((a) => a.proceso_id !== cardId)
         : (prev.activos || []);
+
+      const nextHolds =
+        !isHold && affectedCircuitoId
+          ? nextHoldsBase.map((h) =>
+              h.circuito_id === affectedCircuitoId
+                ? { ...h, en_proceso_activo: false }
+                : h
+            )
+          : nextHoldsBase;
 
       let nextCircuitos = prev.circuitos_abiertos || [];
       if (affectedCircuitoId) {
@@ -1099,6 +1173,60 @@ export function usePlaneacionKanban(enabled = true) {
     [queryClient]
   );
 
+  const optimisticReorderCircuitoTimeline = useCallback(
+    (
+      circuitoId: string,
+      orderedPreasignadoIds: string[]
+    ): BoardResponse | undefined => {
+      const prevBoard = queryClient.getQueryData<BoardResponse>(['planeacion', 'board']);
+      if (!prevBoard) return prevBoard;
+
+      const currentSteps = prevBoard.circuitos_timelines?.[circuitoId];
+      if (!currentSteps || currentSteps.length === 0) return prevBoard;
+
+      const fixedSteps = currentSteps.filter((s) => s.status !== 'PREASIGNADO');
+      const preMap = new Map(
+        currentSteps
+          .filter((s) => s.status === 'PREASIGNADO')
+          .map((s) => [s.proceso_id, s])
+      );
+
+      const reorderedPre: CircuitoTimelineStep[] = [];
+      const seen = new Set<string>();
+      for (const id of orderedPreasignadoIds) {
+        const step = preMap.get(id);
+        if (step && !seen.has(id)) {
+          seen.add(id);
+          reorderedPre.push({ ...step, orden: reorderedPre.length + 1 });
+        }
+      }
+      for (const s of currentSteps) {
+        if (s.status === 'PREASIGNADO' && !seen.has(s.proceso_id)) {
+          seen.add(s.proceso_id);
+          reorderedPre.push({ ...s, orden: reorderedPre.length + 1 });
+        }
+      }
+
+      const orderIndexMap = new Map(reorderedPre.map((s, idx) => [s.proceso_id, idx + 1]));
+
+      queryClient.setQueryData<BoardResponse>(['planeacion', 'board'], {
+        ...prevBoard,
+        circuitos_timelines: {
+          ...(prevBoard.circuitos_timelines ?? {}),
+          [circuitoId]: [...fixedSteps, ...reorderedPre],
+        },
+        holds: (prevBoard.holds ?? []).map((h) =>
+          h.circuito_id === circuitoId && orderIndexMap.has(h.hold_id)
+            ? { ...h, orden: orderIndexMap.get(h.hold_id)! }
+            : h
+        ),
+      });
+
+      return prevBoard;
+    },
+    [queryClient]
+  );
+
   const rollbackBoard = useCallback(
     (previousSnapshot: BoardResponse | undefined) => {
       if (previousSnapshot) {
@@ -1121,6 +1249,9 @@ export function usePlaneacionKanban(enabled = true) {
     idleCounts,
     availableCatalogUnits,
     circuitosAbiertos,
+    circuitosTerminados,
+    circuitosTimelines,
+    activos,
     activosCount: activos.length,
     finalizadosCount: finalizados.length,
     holds,
@@ -1141,6 +1272,7 @@ export function usePlaneacionKanban(enabled = true) {
     optimisticRemoveCard,
     optimisticUndoCard,
     optimisticSyncCircuitoNotes,
+    optimisticReorderCircuitoTimeline,
     rollbackBoard,
   };
 }

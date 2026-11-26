@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowUpDown,
   CheckCircle2,
   LogOut,
   Plus,
@@ -21,7 +20,9 @@ import {
 } from '../components/kanban/IdleUnitsHorizontalDock';
 import { FlyingCardTransition } from '../components/kanban/FlyingCardTransition';
 import { CoordinacionLoginWall } from '../components/kanban/CoordinacionLoginWall';
+import { CoordinacionConfirmTerminarModal } from '../components/kanban/CoordinacionConfirmTerminarModal';
 import {
+  COORDINACION_AUTH_STORAGE_KEY,
   PlaneacionApiError,
   actualizarProceso,
   altaCircuito,
@@ -29,8 +30,9 @@ import {
   clearBoardCache,
   clearCoordinacionUser,
   crearHold,
-  eliminarHold,
   getSavedCoordinacionUser,
+  logoutUsuarioCoordinacion,
+  reordenarProcesosCircuito,
   verificarAccesoCoordinacion,
 } from '../services/planeacionApi';
 import type {
@@ -47,27 +49,42 @@ interface FlyingCardState {
   originRect: OriginRect;
 }
 
+interface PendingTerminarState {
+  payload: Record<string, any>;
+  resolvedCircuitoId: string | null;
+  unitLabel: string;
+  tractorPlate: string;
+  semiPlate: string;
+  sourceStageLabel: string;
+  activeProcesosCount: number;
+  holdsCount: number;
+  finalizadosCount: number;
+  affectedZones: string[];
+}
+
 export const PlaneacionKanbanPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [coordUser, setCoordUser] = useState<UsuarioCoordinacionSession | null>(() =>
     getSavedCoordinacionUser()
   );
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>(
-    () => (getSavedCoordinacionUser()?.id ? 'checking' : 'unauthenticated')
+    'checking'
   );
 
   const {
-    sortDirection,
-    setSortDirection,
     searchQuery,
     setSearchQuery,
     columns,
     idleItems,
     idleCounts,
     availableCatalogUnits,
+    circuitosAbiertos,
+    circuitosTerminados,
+    circuitosTimelines,
+    activos,
+    holds,
     activosCount,
     isLoading,
-    isFetching,
     error: boardError,
     refresh,
     optimisticMoveFinalizadoToHold,
@@ -80,14 +97,18 @@ export const PlaneacionKanbanPage: React.FC = () => {
     optimisticRemoveCard,
     optimisticUndoCard,
     optimisticSyncCircuitoNotes,
+    optimisticReorderCircuitoTimeline,
     rollbackBoard,
   } = usePlaneacionKanban(authStatus === 'authenticated');
 
   const [hoveredColId, setHoveredColId] = useState<string | null>(null);
+  const [focusedColId, setFocusedColId] = useState<string | null>(null);
   const [dragOverZoneId, setDragOverZoneId] = useState<string | null>(null);
   const [dragOverPreasignadoZoneId, setDragOverPreasignadoZoneId] = useState<string | null>(null);
   const [isDragOverEgreso, setIsDragOverEgreso] = useState(false);
   const [isNewIngresoOpen, setIsNewIngresoOpen] = useState(false);
+  const [pendingTerminar, setPendingTerminar] = useState<PendingTerminarState | null>(null);
+  const [isTerminating, setIsTerminating] = useState(false);
   const [pinnedCardIds, setPinnedCardIds] = useState<Record<string, boolean>>({});
 
   const [flyingCard, setFlyingCard] = useState<FlyingCardState | null>(null);
@@ -99,7 +120,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
   const lastDroppedColRef = useRef<string | null>(null);
 
   const isCardDragging = useIsCardDragging();
-  const { setRef: setBoardScrollRef } = useDragAutoScroll<HTMLDivElement>({
+  const { setRef: setBoardScrollRef, nodeRef: boardScrollRef } = useDragAutoScroll<HTMLDivElement>({
     horizontal: true,
     edgeRatio: 1.5 / 9,
     minEdgePx: 120,
@@ -108,6 +129,23 @@ export const PlaneacionKanbanPage: React.FC = () => {
     leftAllowancePx: 28,
     rightAllowancePx: 28,
   });
+
+  const handleBoardWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const el = boardScrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth + 2) return;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+
+    if (!e.shiftKey && e.target instanceof HTMLElement) {
+      const verticalScroller = e.target.closest('.overflow-y-auto') as HTMLElement | null;
+      if (verticalScroller && el.contains(verticalScroller)) {
+        if (verticalScroller.scrollHeight - verticalScroller.clientHeight > 2) {
+          return;
+        }
+      }
+    }
+
+    el.scrollLeft += e.deltaY;
+  }, [boardScrollRef]);
 
   useEffect(() => {
     if (isCardDragging) {
@@ -121,9 +159,13 @@ export const PlaneacionKanbanPage: React.FC = () => {
   }, [isCardDragging]);
 
   const forceAuthLogout = useCallback(
-    (message?: string) => {
-      clearCoordinacionUser();
-      clearBoardCache();
+    (message?: string, notifyServer = false) => {
+      if (notifyServer) {
+        void logoutUsuarioCoordinacion();
+      } else {
+        clearCoordinacionUser();
+        clearBoardCache();
+      }
       queryClient.removeQueries({ queryKey: ['planeacion'] });
       setCoordUser(null);
       setAuthStatus('unauthenticated');
@@ -134,44 +176,64 @@ export const PlaneacionKanbanPage: React.FC = () => {
     [queryClient]
   );
 
-  // Verificación bloqueante de sesión contra base.user_coordinacion antes de montar el tablero
+  // Verificación persistente de sesión en dispositivo (Cookie HttpOnly + Token + LocalStorage)
   useEffect(() => {
     if (authStatus !== 'checking') return;
     const saved = coordUser || getSavedCoordinacionUser();
-    if (!saved?.id) {
-      setCoordUser(null);
-      setAuthStatus('unauthenticated');
-      return;
-    }
 
     let active = true;
-    verificarAccesoCoordinacion(saved.id)
+    verificarAccesoCoordinacion(saved?.id)
       .then((res) => {
         if (!active) return;
-        if (!res.authorized || !res.user) {
+        if (res.authorized && res.user) {
+          setCoordUser(res.user);
+          setAuthStatus('authenticated');
+        } else if (res.transientError && saved?.id) {
+          // Error transitorio (cold start / red): conservar sesión persistida del dispositivo
+          setCoordUser(saved);
+          setAuthStatus('authenticated');
+        } else {
           clearCoordinacionUser();
           clearBoardCache();
           queryClient.removeQueries({ queryKey: ['planeacion'] });
           setCoordUser(null);
           setAuthStatus('unauthenticated');
-        } else {
-          setCoordUser(res.user);
-          setAuthStatus('authenticated');
         }
       })
       .catch(() => {
         if (!active) return;
-        clearCoordinacionUser();
-        clearBoardCache();
-        queryClient.removeQueries({ queryKey: ['planeacion'] });
-        setCoordUser(null);
-        setAuthStatus('unauthenticated');
+        if (saved?.id) {
+          setCoordUser(saved);
+          setAuthStatus('authenticated');
+        } else {
+          setCoordUser(null);
+          setAuthStatus('unauthenticated');
+        }
       });
 
     return () => {
       active = false;
     };
   }, [authStatus, coordUser, queryClient]);
+
+  // Sincronización de sesión entre pestañas del mismo dispositivo
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== COORDINACION_AUTH_STORAGE_KEY) return;
+      const synced = getSavedCoordinacionUser();
+      if (!synced) {
+        clearBoardCache();
+        queryClient.removeQueries({ queryKey: ['planeacion'] });
+        setCoordUser(null);
+        setAuthStatus('unauthenticated');
+      } else {
+        setCoordUser(synced);
+        setAuthStatus('authenticated');
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [queryClient]);
 
   useEffect(() => {
     if (
@@ -189,7 +251,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
   }, []);
 
   const handleCoordLogout = () => {
-    forceAuthLogout();
+    forceAuthLogout(undefined, true);
   };
 
   const handleLoginAuthenticated = (user: UsuarioCoordinacionSession) => {
@@ -306,10 +368,33 @@ export const PlaneacionKanbanPage: React.FC = () => {
     });
   }, []);
 
-  const renderUnitCard = (card: PlaneacionCard) => (
+  const handleReorderCircuitoTimeline = useCallback(
+    async (circuitoId: string, orderedPreasignadoIds: string[]) => {
+      const prevBoard = optimisticReorderCircuitoTimeline(circuitoId, orderedPreasignadoIds);
+      try {
+        await reordenarProcesosCircuito(circuitoId, orderedPreasignadoIds);
+      } catch (err) {
+        rollbackBoard(prevBoard);
+        if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
+          clearCoordinacionUser();
+          clearBoardCache();
+          setCoordUser(null);
+          setAuthStatus('unauthenticated');
+          return;
+        }
+        toast.error(err instanceof Error ? err.message : 'Error al reordenar zonas del circuito');
+      }
+    },
+    [optimisticReorderCircuitoTimeline, rollbackBoard]
+  );
+
+  const renderUnitCard = (card: PlaneacionCard, isZoneExpanded: boolean) => (
     <UnitPlaneacionCard
       key={card.proceso_id}
       card={card}
+      isZoneExpanded={isZoneExpanded}
+      timelineSteps={card.circuito_id ? circuitosTimelines[card.circuito_id] : undefined}
+      onReorderTimeline={handleReorderCircuitoTimeline}
       onPinChange={handlePinChange}
       onNoteAdded={handleNoteSynced}
       onUndoCard={handleUndoCard}
@@ -390,10 +475,14 @@ export const PlaneacionKanbanPage: React.FC = () => {
           await crearHold({
             zoneId,
             boxId: null,
+            circuitoId:
+              data.circuitoId && !String(data.circuitoId).startsWith('temp_')
+                ? data.circuitoId
+                : null,
             unidadId: data.unidadId || null,
             tractorId: data.tractorId || null,
             semiId: data.semiId || null,
-            procesoOrigenId: data.holdId,
+            procesoOrigenId: !String(data.holdId).startsWith('temp_') ? data.holdId : null,
           });
         } catch (err) {
           console.error('Error al desprender preasignación:', err);
@@ -449,10 +538,14 @@ export const PlaneacionKanbanPage: React.FC = () => {
           await crearHold({
             zoneId,
             boxId: null,
+            circuitoId:
+              data.circuitoId && !String(data.circuitoId).startsWith('temp_')
+                ? data.circuitoId
+                : null,
             unidadId: data.unidadId || null,
             tractorId: data.tractorId || null,
             semiId: data.semiId || null,
-            procesoOrigenId: data.procesoId,
+            procesoOrigenId: !String(data.procesoId).startsWith('temp_') ? data.procesoId : null,
           });
         } catch (err) {
           console.error('Error al preasignar unidad activa:', err);
@@ -468,97 +561,174 @@ export const PlaneacionKanbanPage: React.FC = () => {
     }
   };
 
-  // Manejo de Drop en Egreso / Salida (Optimistic UI 0 ms, eliminación protegida por jerarquía user_coordinacion)
-  const handleDropOnEgreso = async (e: React.DragEvent) => {
+  // Manejo de Drop en TERMINADOS (abre pop-up de confirmación antes de cerrar el circuito completo)
+  const handleDropOnEgreso = (e: React.DragEvent) => {
     e.preventDefault();
     lastDroppedColRef.current = null;
     setIsDragOverEgreso(false);
+
+    const data = extractDragPayload(e) as Record<string, any> | null;
+    (window as unknown as Record<string, unknown>).__COORD_DRAG_PAYLOAD = null;
+    if (!data) return;
+
+    const isSupportedCard =
+      (data.type === 'CARD_CIRCUITO' && Boolean(data.circuitoId)) ||
+      (data.type === 'CARD_HOLD' && Boolean(data.holdId)) ||
+      (data.type === 'CARD_PROCESO' && Boolean(data.procesoId));
+    if (!isSupportedCard) return;
+
+    const matchedHold =
+      data.type === 'CARD_HOLD' && data.holdId
+        ? holds.find((h) => h.hold_id === data.holdId)
+        : undefined;
+    const matchedActivo =
+      data.type === 'CARD_PROCESO' && data.procesoId
+        ? activos.find((a) => a.proceso_id === data.procesoId)
+        : undefined;
+    const rawCircuitoId =
+      (typeof data.circuitoId === 'string' && data.circuitoId) ||
+      matchedHold?.circuito_id ||
+      matchedActivo?.circuito_id ||
+      null;
+    const matchedCirc = rawCircuitoId
+      ? circuitosAbiertos.find((c) => c.circuito_id === rawCircuitoId)
+      : undefined;
+
+    const tractorPlate = String(
+      data.tractorPlate ||
+        matchedHold?.tractor_plate ||
+        matchedActivo?.tractor_plate ||
+        matchedCirc?.tractor_plate ||
+        ''
+    );
+    const semiPlate = String(
+      data.semiPlate ||
+        matchedHold?.semi_plate ||
+        matchedActivo?.semi_plate ||
+        matchedCirc?.semi_plate ||
+        ''
+    );
+    const unitLabel = String(
+      data.plate ||
+        [tractorPlate, semiPlate].filter(Boolean).join(' / ') ||
+        matchedHold?.n_ute ||
+        matchedActivo?.n_ute ||
+        matchedCirc?.n_ute ||
+        'Unidad'
+    );
+
+    const holdsInCircuit = rawCircuitoId
+      ? holds.filter((h) => h.circuito_id === rawCircuitoId)
+      : matchedHold
+      ? [matchedHold]
+      : [];
+    const activosInCircuit = rawCircuitoId
+      ? activos.filter((a) => a.circuito_id === rawCircuitoId)
+      : matchedActivo
+      ? [matchedActivo]
+      : [];
+
+    const activeProcesosCount = activosInCircuit.filter((a) => !a.salida_at).length;
+    const finalizadosCount = activosInCircuit.filter((a) => Boolean(a.salida_at)).length;
+    const holdsCount =
+      holdsInCircuit.length > 0 ? holdsInCircuit.length : data.type === 'CARD_HOLD' ? 1 : 0;
+
+    const zoneNamesSet = new Set<string>();
+    for (const a of activosInCircuit) {
+      if (a.zone_name) zoneNamesSet.add(a.zone_name);
+    }
+    for (const h of holdsInCircuit) {
+      if (h.zone_name) zoneNamesSet.add(h.zone_name);
+    }
+    if (zoneNamesSet.size === 0 && typeof data.zoneName === 'string' && data.zoneName) {
+      zoneNamesSet.add(data.zoneName);
+    }
+
+    let sourceStageLabel = 'Unidad en circuito';
+    if (data.type === 'CARD_CIRCUITO') {
+      sourceStageLabel = 'Sin Asignación';
+    } else if (data.type === 'CARD_HOLD') {
+      const zName = String(data.zoneName || matchedHold?.zone_name || '').trim();
+      sourceStageLabel = zName ? `Preasignado · ${zName}` : 'Preasignado';
+    } else if (data.type === 'CARD_PROCESO') {
+      const zName = String(data.zoneName || matchedActivo?.zone_name || '').trim();
+      const bName = String(data.boxName || matchedActivo?.box_name || '').trim();
+      if (data.salidaAt || matchedActivo?.salida_at) {
+        sourceStageLabel = zName ? `Finalizó · ${zName}` : 'Finalizó';
+      } else if (data.inicioAt || matchedActivo?.inicio_at) {
+        sourceStageLabel = bName
+          ? `Trabajando · ${bName}`
+          : zName
+          ? `Trabajando · ${zName}`
+          : 'Trabajando';
+      } else {
+        sourceStageLabel = zName ? `Esperando Box · ${zName}` : 'Esperando Box';
+      }
+    }
+
+    setPendingTerminar({
+      payload: data,
+      resolvedCircuitoId: rawCircuitoId,
+      unitLabel,
+      tractorPlate,
+      semiPlate,
+      sourceStageLabel,
+      activeProcesosCount,
+      holdsCount,
+      finalizadosCount,
+      affectedZones: Array.from(zoneNamesSet),
+    });
+  };
+
+  const handleConfirmTerminar = async () => {
+    if (!pendingTerminar || isTerminating) return;
+    const pending = pendingTerminar;
+    setIsTerminating(true);
+
+    let previousSnapshot: BoardResponse | undefined;
+    if (pending.resolvedCircuitoId) {
+      previousSnapshot = optimisticRemoveCircuito(pending.resolvedCircuitoId);
+    } else if (pending.payload.type === 'CARD_HOLD' && pending.payload.holdId) {
+      previousSnapshot = optimisticRemoveCard(String(pending.payload.holdId), true);
+    } else if (pending.payload.type === 'CARD_PROCESO' && pending.payload.procesoId) {
+      previousSnapshot = optimisticRemoveCard(String(pending.payload.procesoId), false);
+    }
+
     try {
-      const data = extractDragPayload(e) as Record<string, any> | null;
-      (window as unknown as Record<string, unknown>).__COORD_DRAG_PAYLOAD = null;
-      if (!data) return;
-
-      // Desde Idle SIN ASIGNACIÓN -> baja explícita del circuito
-      if (data.type === 'CARD_CIRCUITO' && data.circuitoId) {
-        const rawCircuitoId = String(data.circuitoId);
-        const previousSnapshot = optimisticRemoveCircuito(rawCircuitoId);
-
-        const performBaja = async () => {
-          let resolvedId = rawCircuitoId;
-          if (rawCircuitoId.startsWith('temp_circ_')) {
-            const pendingAlta = pendingAltaByTempIdRef.current.get(rawCircuitoId);
-            const created = pendingAlta ? await pendingAlta : null;
-            if (!created?.circuito_id) return;
-            resolvedId = created.circuito_id;
-          }
-          await bajaCircuito(resolvedId);
-        };
-
-        try {
-          await performBaja();
-        } catch (err) {
-          console.error('Error al dar de baja circuito idle:', err);
-          rollbackBoard(previousSnapshot);
-          if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
-            forceAuthLogout(err.message);
-            return;
-          }
-          toast.error(err instanceof Error ? err.message : 'Error dando de baja la unidad');
+      let finalCircuitoId = pending.resolvedCircuitoId;
+      if (finalCircuitoId && finalCircuitoId.startsWith('temp_circ_')) {
+        const pendingAlta = pendingAltaByTempIdRef.current.get(finalCircuitoId);
+        const created = pendingAlta ? await pendingAlta : null;
+        if (!created?.circuito_id) {
+          throw new Error('No se pudo resolver el circuito recién creado para finalizarlo.');
         }
-        return;
+        finalCircuitoId = created.circuito_id;
       }
 
-      if (data.type === 'CARD_HOLD' && data.holdId) {
-        // Si proviene del dock de Idles y consolida múltiples holds del circuito, dar baja al circuito completo
-        if (data.fromIdleDock && data.circuitoId && Number(data.holdsCount || 1) > 1) {
-          const previousSnapshot = optimisticRemoveCircuito(data.circuitoId);
-          try {
-            await bajaCircuito(data.circuitoId);
-          } catch (err) {
-            rollbackBoard(previousSnapshot);
-            if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
-              forceAuthLogout(err.message);
-              return;
-            }
-            toast.error(err instanceof Error ? err.message : 'Error al dar egreso');
-          }
-          return;
+      if (finalCircuitoId && !finalCircuitoId.startsWith('temp_')) {
+        await bajaCircuito(finalCircuitoId);
+      } else {
+        const fallbackProcesoId =
+          pending.payload.procesoId || pending.payload.holdId || null;
+        if (!fallbackProcesoId || String(fallbackProcesoId).startsWith('temp_')) {
+          throw new Error('No se pudo identificar el circuito de la unidad para finalizar.');
         }
-
-        const previousSnapshot = optimisticRemoveCard(data.holdId, true);
-
-        try {
-          await eliminarHold(data.holdId);
-        } catch (err) {
-          console.error('Error al eliminar preasignación:', err);
-          rollbackBoard(previousSnapshot);
-          if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
-            forceAuthLogout(err.message);
-            return;
-          }
-          toast.error(err instanceof Error ? err.message : 'Error al dar egreso');
-        }
-        return;
+        await actualizarProceso(String(fallbackProcesoId), { action: 'ARCHIVAR' });
       }
 
-      if (data.type === 'CARD_PROCESO' && data.procesoId) {
-        const previousSnapshot = optimisticRemoveCard(data.procesoId, false);
-
-        try {
-          await actualizarProceso(data.procesoId, { action: 'ARCHIVAR' });
-        } catch (err) {
-          console.error('Error al archivar por egreso:', err);
-          rollbackBoard(previousSnapshot);
-          if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
-            forceAuthLogout(err.message);
-            return;
-          }
-          toast.error(err instanceof Error ? err.message : 'Error al dar egreso');
-        }
-        return;
-      }
+      setPendingTerminar(null);
+      toast.success('Circuito finalizado · Unidad en Terminados');
     } catch (err) {
-      console.error('Error al dar egreso:', err);
+      console.error('Error al finalizar circuito en Terminados:', err);
+      rollbackBoard(previousSnapshot);
+      if (err instanceof PlaneacionApiError && (err.status === 401 || err.status === 403)) {
+        setPendingTerminar(null);
+        forceAuthLogout(err.message);
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Error al finalizar el circuito');
+    } finally {
+      setIsTerminating(false);
     }
   };
 
@@ -583,7 +753,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
     <div className="flex-1 min-h-0 flex flex-col select-none bg-[#EDEDED] text-zinc-950 font-sans">
       {/* Header Coordinación · UI Design System compliant */}
       <header className="w-full px-4 md:px-6 py-2 flex items-center justify-between min-h-[48px] shrink-0 bg-[#EDEDED] border-b border-zinc-300/80">
-        {/* Controles Izquierda: Buscador + Refresh + Contador */}
+        {/* Controles Izquierda: Buscador + Contador */}
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search
@@ -603,31 +773,15 @@ export const PlaneacionKanbanPage: React.FC = () => {
             />
           </div>
 
-          <button
-            type="button"
-            onClick={() => refresh()}
-            title="Actualizar tablero"
-            aria-label="Actualizar tablero"
-            className="w-8 h-8 rounded-full bg-white border border-zinc-400 flex items-center justify-center text-zinc-700 hover:text-zinc-950 hover:border-zinc-600 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
-          >
-            <RefreshCw
-              size={16}
-              strokeWidth={2}
-              aria-hidden="true"
-              focusable="false"
-              className={isFetching ? 'animate-spin' : ''}
-            />
-          </button>
-
           <span
-            className="hidden sm:inline-flex items-center h-8 text-[11px] font-mono font-bold px-2.5 rounded-full border border-dashed border-zinc-400 text-zinc-800 select-none"
+            className="hidden sm:inline-flex items-center h-8 text-[11px] font-mono font-bold px-2.5 rounded-full ui-stroke-dashed-subtle border-zinc-400 text-zinc-800 select-none"
             title="Unidades activas en planta"
           >
             {activosCount} activas
           </span>
         </div>
 
-        {/* Controles Derecha: Primary CTA (+ Ingresar Unidad) + Sort + Sesión */}
+        {/* Controles Derecha: Primary CTA (+ Ingresar Unidad) + Sesión */}
         <div className="flex items-center gap-2">
           {/* Primary Action Button (btn-sm, height 32px, WCAG compliant >= 4.5:1) */}
           <button
@@ -637,17 +791,6 @@ export const PlaneacionKanbanPage: React.FC = () => {
           >
             <Plus size={16} strokeWidth={2.25} aria-hidden="true" focusable="false" />
             <span>Ingresar Unidad</span>
-          </button>
-
-          {/* Sort Button (btn-sm icon, height 32px) */}
-          <button
-            type="button"
-            onClick={() => setSortDirection((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-            title={`Ordenar por llegada (${sortDirection === 'desc' ? 'Más reciente' : 'Más antiguo'})`}
-            aria-label={`Ordenar por llegada (${sortDirection === 'desc' ? 'Más reciente' : 'Más antiguo'})`}
-            className="w-8 h-8 rounded-full bg-white border border-zinc-400 hover:border-zinc-600 text-zinc-700 hover:text-zinc-950 flex items-center justify-center cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
-          >
-            <ArrowUpDown size={16} strokeWidth={2} aria-hidden="true" focusable="false" />
           </button>
 
           {/* Sesión de Coordinación (Top Right: usuario + botón salir) */}
@@ -672,7 +815,8 @@ export const PlaneacionKanbanPage: React.FC = () => {
       <main className="flex-1 min-h-0 w-full px-3 md:px-6 py-2.5 flex flex-col gap-2.5 overflow-hidden">
         <div
           ref={setBoardScrollRef}
-          className="flex-1 min-h-0 w-full flex flex-col overflow-x-auto overflow-y-hidden"
+          onWheel={handleBoardWheel}
+          className="flex-1 min-h-0 w-full flex flex-col overflow-x-auto overflow-y-hidden no-scrollbar"
         >
           {isLoading ? (
             <div className="flex-1 flex items-center justify-center">
@@ -687,14 +831,16 @@ export const PlaneacionKanbanPage: React.FC = () => {
               <span className="text-xs">Agregá zonas y boxes para visualizar columnas.</span>
             </div>
           ) : (
-            <div
-              className="grid flex-1 min-h-0 h-full gap-0 min-w-max"
-              style={{
-                gridTemplateColumns: `repeat(${columns.length}, minmax(260px, 1fr)) minmax(180px, 220px)`,
-              }}
-            >
+            <div className="flex flex-row items-stretch flex-1 min-h-0 h-full gap-0 w-max">
               {columns.map((col) => {
                 const isDragOver = dragOverZoneId === col.id;
+                const hasPinnedInCol = col.cards.some((c) => Boolean(pinnedCardIds[c.proceso_id]));
+                const isZoneExpanded =
+                  hoveredColId === col.id ||
+                  focusedColId === col.id ||
+                  dragOverZoneId === col.id ||
+                  dragOverPreasignadoZoneId === col.id ||
+                  hasPinnedInCol;
                 const salidaCards = col.cards.filter(
                   (c) => !c.hold_id && c.etapa_ciclo !== 'PLANIFICADO_HOLD' && Boolean(c.salida_at)
                 );
@@ -717,8 +863,15 @@ export const PlaneacionKanbanPage: React.FC = () => {
                 return (
                   <section
                     key={col.id}
+                    data-zone-expanded={isZoneExpanded ? 'true' : 'false'}
                     onMouseEnter={() => setHoveredColId(col.id)}
-                    onMouseLeave={() => setHoveredColId(null)}
+                    onMouseLeave={() => setHoveredColId((prev) => (prev === col.id ? null : prev))}
+                    onFocusCapture={() => setFocusedColId(col.id)}
+                    onBlurCapture={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                        setFocusedColId((prev) => (prev === col.id ? null : prev));
+                      }
+                    }}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.dataTransfer.dropEffect = 'move';
@@ -730,9 +883,9 @@ export const PlaneacionKanbanPage: React.FC = () => {
                       }
                     }}
                     onDrop={(e) => handleDropOnZone(col.id, e)}
-                    className={`h-full flex flex-col min-h-0 px-2.5 pt-1.5 pb-2 border-r-[3px] border-dashed border-amber-400 transition-colors ${
-                      isDragOver ? 'bg-emerald-50/70 border-emerald-500' : ''
-                    }`}
+                    className={`h-full flex flex-col min-h-0 shrink-0 pt-1.5 pb-2 ui-divider-dashed-r border-amber-400 transition-[width,padding,background-color,border-color] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+                      isZoneExpanded ? 'w-[348px] px-2.5' : 'w-[148px] px-1.5'
+                    } ${isDragOver ? 'bg-emerald-50/70 border-emerald-500' : ''}`}
                   >
                     <div className="mb-2 px-1 flex items-center justify-between gap-2 h-[38px] shrink-0">
                       <h2 className="text-[15px] xl:text-[17px] font-extrabold tracking-tight text-zinc-950 lowercase font-mono truncate">
@@ -753,38 +906,38 @@ export const PlaneacionKanbanPage: React.FC = () => {
                       {/* 1. TOPE: salida_at / FINALIZÓ */}
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between px-1 text-[10px] font-mono font-bold tracking-wider uppercase text-zinc-600 select-none">
-                          <span>FINALIZÓ</span>
-                          <span className="tabular-nums font-semibold">{salidaCards.length}</span>
+                          <span className="truncate">FINALIZÓ</span>
+                          <span className="tabular-nums font-semibold shrink-0">{salidaCards.length}</span>
                         </div>
                         {salidaCards.length === 0 ? (
                           <div className="py-1 px-2 text-center text-[10px] font-mono text-zinc-500 italic select-none">
                             sin unidades
                           </div>
                         ) : (
-                          salidaCards.map(renderUnitCard)
+                          salidaCards.map((card) => renderUnitCard(card, isZoneExpanded))
                         )}
                       </div>
 
                       {/* DIVIDER */}
-                      <div className="border-t border-zinc-300/80 my-0.5" />
+                      <div className="ui-divider-dashed-subtle-t border-zinc-400/70 my-0.5" />
 
                       {/* 2. MEDIO: inicio_at / TRABAJANDO */}
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between px-1 text-[10px] font-mono font-bold tracking-wider uppercase text-zinc-600 select-none">
-                          <span>TRABAJANDO</span>
-                          <span className="tabular-nums font-semibold">{inicioCards.length}</span>
+                          <span className="truncate">TRABAJANDO</span>
+                          <span className="tabular-nums font-semibold shrink-0">{inicioCards.length}</span>
                         </div>
                         {inicioCards.length === 0 ? (
                           <div className="py-1 px-2 text-center text-[10px] font-mono text-zinc-500 italic select-none">
                             sin unidades
                           </div>
                         ) : (
-                          inicioCards.map(renderUnitCard)
+                          inicioCards.map((card) => renderUnitCard(card, isZoneExpanded))
                         )}
                       </div>
 
                       {/* DIVIDER */}
-                      <div className="border-t border-zinc-300/80 my-0.5" />
+                      <div className="ui-divider-dashed-subtle-t border-zinc-400/70 my-0.5" />
 
                       {/* 3. SUBDIVIDER RESERVADO: procesos.llegada_at / ESPERANDO A SER INGRESADO A BOX */}
                       <div className="flex flex-col gap-2">
@@ -804,12 +957,12 @@ export const PlaneacionKanbanPage: React.FC = () => {
                             sin unidades
                           </div>
                         ) : (
-                          reservadoCards.map(renderUnitCard)
+                          reservadoCards.map((card) => renderUnitCard(card, isZoneExpanded))
                         )}
                       </div>
 
                       {/* DIVIDER */}
-                      <div className="border-t border-zinc-300/80 my-0.5" />
+                      <div className="ui-divider-dashed-subtle-t border-zinc-400/70 my-0.5" />
 
                       {/* 4. FONDO: procesos_hold / PREASIGNADO */}
                       <div
@@ -833,15 +986,17 @@ export const PlaneacionKanbanPage: React.FC = () => {
                           e.stopPropagation();
                           handleDropOnZone(col.id, e, true);
                         }}
-                        className={`flex flex-col gap-2 p-1.5 rounded-lg transition-all ${
+                        className={`flex flex-col gap-2 rounded-lg ui-stroke-dashed transition-[padding,background-color,border-color,box-shadow] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+                          isZoneExpanded ? 'p-1.5' : 'p-1'
+                        } ${
                           dragOverPreasignadoZoneId === col.id
-                            ? 'bg-amber-100/70 border-2 border-dashed border-amber-500 ring-2 ring-amber-400/40'
-                            : ''
+                            ? 'bg-amber-100/70 border-amber-500 ring-2 ring-amber-400/40'
+                            : 'border-transparent'
                         }`}
                       >
                         <div className="flex items-center justify-between px-1 text-[10px] font-mono font-bold tracking-wider uppercase text-zinc-600 select-none">
-                          <span>PREASIGNADO</span>
-                          <span className="tabular-nums font-semibold">
+                          <span className="truncate">PREASIGNADO</span>
+                          <span className="tabular-nums font-semibold shrink-0">
                             {preasignadoCards.length}
                           </span>
                         </div>
@@ -850,7 +1005,7 @@ export const PlaneacionKanbanPage: React.FC = () => {
                             sin unidades
                           </div>
                         ) : (
-                          preasignadoCards.map(renderUnitCard)
+                          preasignadoCards.map((card) => renderUnitCard(card, isZoneExpanded))
                         )}
                       </div>
                     </AutoScrollColumn>
@@ -858,8 +1013,9 @@ export const PlaneacionKanbanPage: React.FC = () => {
                 );
               })}
 
-              {/* Columna / Drop Zone para Dar Egreso y Terminar Proceso (no sólida, dashed) */}
+              {/* Columna / Drop Zone TERMINADOS: fin de circuito (retención sincronizada con sweep Cold) */}
               <section
+                aria-label="Zona Terminados: arrastrá cualquier card para finalizar el circuito en planta"
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = 'move';
@@ -871,33 +1027,91 @@ export const PlaneacionKanbanPage: React.FC = () => {
                   }
                 }}
                 onDrop={handleDropOnEgreso}
-                className={`h-full flex flex-col min-h-0 px-3 pt-2 pb-2 rounded-xl border-2 border-dashed transition-all ${
+                className={`h-full flex flex-col min-h-0 shrink-0 px-2.5 pt-2 pb-2 rounded-xl ui-stroke-dashed transition-[width,background-color,border-color,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
                   isDragOverEgreso
-                    ? 'border-rose-500 bg-rose-50/80 text-rose-950 scale-[1.01]'
-                    : 'border-zinc-400/75 bg-zinc-200/30 text-zinc-700'
+                    ? 'w-[220px] border-rose-500 bg-rose-50/80 text-rose-950 scale-[1.01]'
+                    : circuitosTerminados.length > 0
+                    ? 'w-[196px] border-zinc-400/75 bg-zinc-200/35 text-zinc-700'
+                    : 'w-[160px] border-zinc-400/75 bg-zinc-200/30 text-zinc-700'
                 }`}
               >
                 <div className="mb-2 px-1 flex items-center justify-between gap-2 h-[38px] shrink-0">
-                  <div className="flex items-center gap-1.5 font-mono text-[13px] font-black uppercase text-zinc-900">
-                    <LogOut size={16} strokeWidth={2} aria-hidden="true" className="text-zinc-700" />
-                    <span>Egreso Planta</span>
+                  <div className="flex items-center gap-1.5 font-mono text-[13px] font-black uppercase text-zinc-900 min-w-0">
+                    <LogOut size={16} strokeWidth={2} aria-hidden="true" className="text-zinc-700 shrink-0" />
+                    <span className="truncate">TERMINADOS</span>
                   </div>
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-900/10 text-zinc-800 font-mono text-[11px] font-bold tabular-nums shrink-0">
+                    {circuitosTerminados.length}
+                  </span>
                 </div>
 
-                <div className="flex-1 flex flex-col items-center justify-center p-4 text-center border border-dashed border-zinc-400/60 rounded-lg bg-transparent">
-                  <CheckCircle2
-                    size={28}
-                    strokeWidth={1.75}
-                    aria-hidden="true"
-                    className="text-zinc-500 mb-2"
-                  />
-                  <span className="text-xs font-bold text-zinc-800 uppercase tracking-wide">
-                    Zona de Salida / Egreso
-                  </span>
-                  <p className="text-[11px] text-zinc-600 mt-1 leading-snug">
-                    Arrastrá aquí una unidad para dar egreso definitivo de planta.
-                  </p>
-                </div>
+                {circuitosTerminados.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-4 text-center ui-stroke-dashed-subtle border-zinc-400/60 rounded-lg bg-transparent">
+                    <CheckCircle2
+                      size={28}
+                      strokeWidth={1.75}
+                      aria-hidden="true"
+                      className="text-zinc-500 mb-2"
+                    />
+                    <span className="text-xs font-bold text-zinc-800 uppercase tracking-wide">
+                      Fin del flow · Egreso Planta
+                    </span>
+                    <p className="text-[11px] text-zinc-600 mt-1 leading-snug">
+                      Arrastrá aquí cualquier card para finalizar el circuito y terminar todos los procesos de la unidad en esta instancia.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex-1 min-h-0 flex flex-col gap-1.5">
+                    <div className="px-2 py-1.5 rounded-lg ui-stroke-dashed-subtle border-zinc-400/60 text-center text-[10px] font-mono text-zinc-600 shrink-0 select-none">
+                      Soltá aquí para finalizar circuito
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col gap-1.5">
+                      {circuitosTerminados.map((circ) => {
+                        const primaryPlate =
+                          [circ.tractor_plate, circ.semi_plate].filter(Boolean).join(' / ') ||
+                          circ.n_ute ||
+                          'Unidad';
+                        const egresoLabel = new Date(circ.egreso_at).toLocaleString('es-AR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        });
+                        return (
+                          <article
+                            key={circ.circuito_id}
+                            aria-label={`Circuito terminado ${primaryPlate}`}
+                            className="rounded-lg border border-zinc-300/90 bg-white/85 px-2.5 py-2 text-left select-none shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+                          >
+                            <div className="flex items-center justify-between gap-1.5">
+                              <span className="font-mono text-[11px] font-black text-zinc-900 truncate">
+                                {primaryPlate}
+                              </span>
+                              <CheckCircle2
+                                size={13}
+                                strokeWidth={2}
+                                aria-hidden="true"
+                                className="text-emerald-700 shrink-0"
+                              />
+                            </div>
+                            <div className="mt-1 flex items-center justify-between gap-1 text-[10px] font-mono text-zinc-500">
+                              <span className="truncate">
+                                {circ.n_ute ? `UTE ${circ.n_ute}` : circ.es_desunido ? 'Desunido' : 'Egresado'}
+                              </span>
+                              <span className="tabular-nums shrink-0">{egresoLabel}</span>
+                            </div>
+                            {circ.baja_coord_nombre && (
+                              <div className="mt-0.5 text-[10px] font-mono text-zinc-400 truncate">
+                                {circ.baja_coord_nombre}
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </section>
             </div>
           )}
@@ -908,6 +1122,8 @@ export const PlaneacionKanbanPage: React.FC = () => {
           ref={idleDockRef}
           items={idleItems}
           counts={idleCounts}
+          circuitosTimelines={circuitosTimelines}
+          onReorderTimeline={handleReorderCircuitoTimeline}
           flyingUnit={flyingCard?.unit ?? null}
           justLandedUnitKey={justLandedUnitKey}
           onNoteAdded={handleNoteSynced}
@@ -920,6 +1136,24 @@ export const PlaneacionKanbanPage: React.FC = () => {
         availableUnits={availableCatalogUnits}
         onClose={() => setIsNewIngresoOpen(false)}
         onSelectUnit={handleSelectPlateUnit}
+      />
+
+      {/* Pop-up de confirmación de usuario antes de cerrar el circuito en TERMINADOS */}
+      <CoordinacionConfirmTerminarModal
+        open={Boolean(pendingTerminar)}
+        unitLabel={pendingTerminar?.unitLabel ?? 'Unidad'}
+        tractorPlate={pendingTerminar?.tractorPlate ?? null}
+        semiPlate={pendingTerminar?.semiPlate ?? null}
+        sourceStageLabel={pendingTerminar?.sourceStageLabel ?? null}
+        activeProcesosCount={pendingTerminar?.activeProcesosCount ?? 0}
+        holdsCount={pendingTerminar?.holdsCount ?? 0}
+        finalizadosCount={pendingTerminar?.finalizadosCount ?? 0}
+        affectedZones={pendingTerminar?.affectedZones ?? []}
+        isSubmitting={isTerminating}
+        onCancel={() => {
+          if (!isTerminating) setPendingTerminar(null);
+        }}
+        onConfirm={handleConfirmTerminar}
       />
 
       {/* Portal de Confección y Desplazamiento de Card hacia Dock de Idles */}

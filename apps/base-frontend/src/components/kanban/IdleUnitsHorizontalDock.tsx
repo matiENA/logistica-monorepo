@@ -11,7 +11,12 @@ import {
   normalizePlateKey,
   type CatalogUnitItem,
 } from '../../hooks/usePlaneacionKanban';
-import type { IdleDockItem, IdleHierarchyTier, ProcesoNota } from '../../types/planeacion';
+import type {
+  CircuitoTimelineStep,
+  IdleDockItem,
+  IdleHierarchyTier,
+  ProcesoNota,
+} from '../../types/planeacion';
 import { useDragAutoScroll, useIsCardDragging } from '../../hooks/useDragAutoScroll';
 import { IdleHorizontalCard } from './IdleHorizontalCard';
 import {
@@ -39,6 +44,8 @@ export interface IdleDockHandle {
 interface IdleUnitsHorizontalDockProps {
   items: IdleDockItem[];
   counts: IdleCounts;
+  circuitosTimelines?: Record<string, CircuitoTimelineStep[]>;
+  onReorderTimeline?: (circuitoId: string, orderedPreasignadoIds: string[]) => void;
   flyingUnit: CatalogUnitItem | null;
   justLandedUnitKey: string | null;
   onNoteAdded?: (sync?: { procesoId: string; circuitoId?: string; notes: ProcesoNota[] }) => void;
@@ -134,7 +141,7 @@ function itemMatchesUnit(item: IdleDockItem, unit: CatalogUnitItem): boolean {
 }
 
 export const IdleUnitsHorizontalDock = forwardRef<IdleDockHandle, IdleUnitsHorizontalDockProps>(
-  ({ items, counts, flyingUnit, justLandedUnitKey, onNoteAdded }, ref) => {
+  ({ items, counts, circuitosTimelines, onReorderTimeline, flyingUnit, justLandedUnitKey, onNoteAdded }, ref) => {
     const [isHovered, setIsHovered] = useState(false);
     const [isDraggingCard, setIsDraggingCard] = useState(false);
     const [pinnedKeys, setPinnedKeys] = useState<Record<string, boolean>>({});
@@ -401,7 +408,7 @@ export const IdleUnitsHorizontalDock = forwardRef<IdleDockHandle, IdleUnitsHoriz
         data-active-tier={activeTier}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`w-full shrink-0 rounded-2xl border-2 border-dashed transition-[height,border-color,background-color] ${IDLE_SMOOTH_EASE} flex flex-col overflow-hidden ${dockSpec.heightClass} ${dockSpec.surfaceClass}`}
+        className={`w-full shrink-0 rounded-2xl ui-stroke-dashed transition-[height,border-color,background-color] ${IDLE_SMOOTH_EASE} flex flex-col overflow-hidden ${dockSpec.heightClass} ${dockSpec.surfaceClass}`}
       >
         {/* Header del dock sin título: 4 denominaciones como tabs con estado activo reconocible */}
         <div
@@ -410,7 +417,7 @@ export const IdleUnitsHorizontalDock = forwardRef<IdleDockHandle, IdleUnitsHoriz
               setIsHovered((prev) => !prev);
             }
           }}
-          className="h-11 px-3 flex items-center justify-between gap-2 border-b border-dashed border-zinc-400/70 shrink-0 select-none"
+          className="h-11 px-3 flex items-center justify-between gap-2 ui-divider-dashed-subtle-b border-zinc-400/70 shrink-0 select-none"
         >
           <div
             role="tablist"
@@ -503,11 +510,17 @@ export const IdleUnitsHorizontalDock = forwardRef<IdleDockHandle, IdleUnitsHoriz
                   Boolean(justLandedUnitKey) &&
                   buildUnitFlightSignature(item) === justLandedUnitKey;
 
+                const circId =
+                  item.circuito_id || (item.tier === 'SIN_ASIGNACION' ? item.targetId : undefined);
+                const timelineSteps = circId ? circuitosTimelines?.[circId] : undefined;
+
                 return (
                   <IdleHorizontalCard
                     key={item.key}
                     item={item}
                     dockState={dockState}
+                    timelineSteps={timelineSteps}
+                    onReorderTimeline={onReorderTimeline}
                     isHiddenForFlight={isHiddenForFlight}
                     isJustLanded={isJustLanded}
                     registerCardRef={registerCardRef}

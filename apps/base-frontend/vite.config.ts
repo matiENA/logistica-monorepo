@@ -8,7 +8,9 @@ function devEntryRewritePlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, _res, next) => {
         const url = req.url || '';
-        if (
+        if (url === '/qr' || url.startsWith('/qr/') || url.startsWith('/qr?')) {
+          req.url = '/qr.html';
+        } else if (
           url === '/taller' ||
           url.startsWith('/taller/') ||
           url.startsWith('/taller?') ||
@@ -54,6 +56,7 @@ export default defineConfig({
       input: {
         taller: path.resolve(__dirname, 'taller.html'),
         coordinacion: path.resolve(__dirname, 'coordinacion.html'),
+        qr: path.resolve(__dirname, 'qr.html'),
       },
     },
   },

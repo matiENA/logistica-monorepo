@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ChevronDown,
   GripVertical,
   Loader2,
   MapPin,
@@ -11,14 +10,17 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { UnitLicensePlate } from '../common/UnitLicensePlate';
+import { ProcesoTimelineBar } from '../common/ProcesoTimelineBar';
 import {
   agregarNotaProceso,
   fetchProcesoNotas,
   getSavedTallerUser,
 } from '../../services/planeacionApi';
-import type { EstadoBox, ProcesoNota } from '../../types/planeacion';
+import type { CircuitoTimelineStep, EstadoBox, ProcesoNota } from '../../types/planeacion';
 
 export type TallerColumnId = 'HOLD' | 'LLEGADA' | 'INICIO' | 'SALIDA';
+
+export const CARD_OPERARIO_DRAG_MIME = 'application/x-taller-card-operario';
 
 export interface TallerCardItem {
   col: TallerColumnId;
@@ -56,14 +58,19 @@ export interface TallerCardItem {
   ultima_tarea?: string | null;
   ultima_tarea_usuario?: string | null;
   ultima_tarea_at?: string | null;
+  en_proceso_activo?: boolean;
+  liberado_circuito?: boolean;
 }
 
 interface TallerUnitCardProps {
   item: TallerCardItem;
+  timelineSteps?: CircuitoTimelineStep[];
   isBusy: boolean;
   layout?: 'vertical' | 'horizontal';
   compact?: boolean;
   isContainerHovered?: boolean;
+  canManageOperarios?: boolean;
+  onRemoveOperario?: (procesoId: string, operarioId: string, operarioNombre: string) => void;
   onDeployChange?: (id: string, isDeployed: boolean) => void;
   onNoteAdded?: (sync?: { procesoId: string; circuitoId?: string; notes: ProcesoNota[] }) => void;
   onUndoCard?: (item: TallerCardItem) => void;
@@ -72,6 +79,71 @@ interface TallerUnitCardProps {
 }
 
 const SMOOTH_EASE = 'duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
+
+type TallerHoldVisualTone = 'standard' | 'yellow' | 'freed';
+
+interface TallerHoldToneSpec {
+  zoomOutSurface: string;
+  hoverSurface: string;
+  expandedSurface: string;
+  focusRing: string;
+  dragRing: string;
+  mutedText: string;
+  boxIconText: string;
+  tzHoverText: string;
+  tzExpandedText: string;
+  boxValueText: string;
+  noteMetaText: string;
+  inputClasses: string;
+}
+
+const TALLER_HOLD_TONE_SPEC: Record<TallerHoldVisualTone, TallerHoldToneSpec> = {
+  standard: {
+    zoomOutSurface: 'bg-[#0E131E] border-amber-500/25 hover:border-amber-400/60',
+    hoverSurface: 'bg-[#0E131E] border-amber-500/25 hover:border-amber-400/60',
+    expandedSurface: 'bg-[#1B2230] border-amber-400/60',
+    focusRing: 'focus-visible:ring-amber-400',
+    dragRing: 'ring-2 ring-amber-400/50 shadow-lg',
+    mutedText: 'text-zinc-400',
+    boxIconText: 'text-emerald-400',
+    tzHoverText: 'text-emerald-400',
+    tzExpandedText: 'text-emerald-300',
+    boxValueText: 'text-emerald-400',
+    noteMetaText: 'text-zinc-400',
+    inputClasses:
+      'border-white/15 hover:border-white/30 focus:border-amber-400/80 text-zinc-100 placeholder:text-zinc-400',
+  },
+  yellow: {
+    zoomOutSurface: 'bg-[#3B2908] border-[#F59E0B]/80 hover:border-[#FBBF24]',
+    hoverSurface: 'bg-[#3B2908] border-[#F59E0B]/85 hover:border-[#FBBF24]',
+    expandedSurface: 'bg-[#47310A] border-[#FBBF24] ring-1 ring-[#F59E0B]/45',
+    focusRing: 'focus-visible:ring-amber-400',
+    dragRing: 'ring-2 ring-amber-400/70 shadow-lg',
+    mutedText: 'text-amber-200/90',
+    boxIconText: 'text-amber-300',
+    tzHoverText: 'text-amber-300',
+    tzExpandedText: 'text-amber-200',
+    boxValueText: 'text-amber-300',
+    noteMetaText: 'text-zinc-300',
+    inputClasses:
+      'border-amber-400/35 hover:border-amber-300/60 focus:border-[#FBBF24] text-zinc-100 placeholder:text-amber-200/75',
+  },
+  freed: {
+    zoomOutSurface: 'animate-taller-card-freed border-[#10B981]/85 hover:border-[#34D399]',
+    hoverSurface: 'bg-[#0B3B2E] border-[#10B981] hover:border-[#34D399]',
+    expandedSurface: 'bg-[#064E3B] border-[#34D399] ring-1 ring-[#10B981]/50',
+    focusRing: 'focus-visible:ring-emerald-400',
+    dragRing: 'ring-2 ring-emerald-400/70 shadow-lg',
+    mutedText: 'text-emerald-200/90',
+    boxIconText: 'text-emerald-300',
+    tzHoverText: 'text-emerald-300',
+    tzExpandedText: 'text-emerald-200',
+    boxValueText: 'text-emerald-300',
+    noteMetaText: 'text-zinc-300',
+    inputClasses:
+      'border-emerald-400/35 hover:border-emerald-300/60 focus:border-[#34D399] text-zinc-100 placeholder:text-emerald-200/75',
+  },
+};
 
 type ZoneMatrixCardState = 'reposo' | 'hover' | 'pinned';
 
@@ -155,10 +227,13 @@ function formatDurationMin(mins: number | null): string {
 
 export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   item,
+  timelineSteps,
   isBusy,
   layout = 'vertical',
   compact = false,
   isContainerHovered = false,
+  canManageOperarios = false,
+  onRemoveOperario,
   onDeployChange,
   onNoteAdded,
   onUndoCard,
@@ -172,6 +247,12 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   const [noteText, setNoteText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [draggingBadge, setDraggingBadge] = useState<{
+    operarioId: string;
+    isOutside: boolean;
+  } | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const badgeDragCleanupRef = useRef<(() => void) | null>(null);
   const isDraggingRef = useRef(false);
   const isExpandedRef = useRef(false);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -199,6 +280,10 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
     return () => {
       if (leaveTimerRef.current) {
         clearTimeout(leaveTimerRef.current);
+      }
+      if (badgeDragCleanupRef.current) {
+        badgeDragCleanupRef.current();
+        badgeDragCleanupRef.current = null;
       }
       if (isExpandedRef.current) {
         onDeployChangeRef.current?.(item.id, false);
@@ -357,6 +442,16 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
     }
   };
 
+  const isHoldYellow = item.col === 'HOLD' && Boolean(item.en_proceso_activo);
+  const isHoldFreed =
+    item.col === 'HOLD' && !isHoldYellow && Boolean(item.liberado_circuito);
+  const holdTone: TallerHoldVisualTone = isHoldYellow
+    ? 'yellow'
+    : isHoldFreed
+    ? 'freed'
+    : 'standard';
+  const holdToneSpec = TALLER_HOLD_TONE_SPEC[holdTone];
+
   const colAccent =
     item.col === 'HOLD'
       ? 'border-amber-500/25 hover:border-amber-400/60'
@@ -439,7 +534,9 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
       onKeyDown={(e) => e.stopPropagation()}
       title="Deshacer card"
       aria-label={`Deshacer card de unidad ${item.tractor_plate || item.semi_plate || 'seleccionada'}`}
-      className="w-5 h-5 rounded inline-flex items-center justify-center shrink-0 text-zinc-400 hover:text-red-300 hover:bg-red-500/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+      className={`w-5 h-5 rounded inline-flex items-center justify-center shrink-0 ${
+        holdTone === 'standard' ? 'text-zinc-400' : 'text-zinc-200'
+      } hover:text-red-300 hover:bg-red-500/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400`}
     >
       <X size={12} strokeWidth={2.25} aria-hidden="true" focusable="false" />
     </button>
@@ -467,8 +564,100 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
     </div>
   );
 
+  const isPointOutsideCard = (rect: DOMRect | null, x: number, y: number): boolean => {
+    if (!rect) return false;
+    if (x === 0 && y === 0) return false;
+    return x < rect.left || x > rect.right || y < rect.top || y > rect.bottom;
+  };
+
+  const handleBadgeDragStart = (
+    e: React.DragEvent<HTMLSpanElement>,
+    operarioId: string,
+    operarioNombre: string
+  ) => {
+    e.stopPropagation();
+    if (!canManageOperarios || !onRemoveOperario || item.col !== 'INICIO' || isBusy) {
+      e.preventDefault();
+      return;
+    }
+
+    if (badgeDragCleanupRef.current) {
+      badgeDragCleanupRef.current();
+      badgeDragCleanupRef.current = null;
+    }
+
+    const initialRect = cardRef.current?.getBoundingClientRect() ?? null;
+    let cancelled = false;
+    let handled = false;
+    let lastOutside = false;
+
+    e.dataTransfer.setData(
+      CARD_OPERARIO_DRAG_MIME,
+      JSON.stringify({ procesoId: item.id, operarioId, operarioNombre })
+    );
+    e.dataTransfer.setData('text/plain', operarioNombre);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggingBadge({ operarioId, isOutside: false });
+
+    const cleanup = () => {
+      window.removeEventListener('dragover', onWindowDragOver, true);
+      window.removeEventListener('drop', onWindowDrop, true);
+      window.removeEventListener('keydown', onWindowKeyDown, true);
+      badgeDragCleanupRef.current = null;
+      setDraggingBadge(null);
+    };
+
+    const onWindowDragOver = (ev: DragEvent) => {
+      const currentRect = cardRef.current?.getBoundingClientRect() ?? initialRect;
+      const outside = isPointOutsideCard(currentRect, ev.clientX, ev.clientY);
+      if (outside) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+      }
+      if (outside !== lastOutside) {
+        lastOutside = outside;
+        setDraggingBadge({ operarioId, isOutside: outside });
+      }
+    };
+
+    const onWindowKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        cancelled = true;
+        cleanup();
+      }
+    };
+
+    const onWindowDrop = (ev: DragEvent) => {
+      const currentRect = cardRef.current?.getBoundingClientRect() ?? initialRect;
+      const outside =
+        ev.clientX === 0 && ev.clientY === 0
+          ? lastOutside
+          : isPointOutsideCard(currentRect, ev.clientX, ev.clientY);
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (outside && !cancelled && !handled) {
+        handled = true;
+        cleanup();
+        onRemoveOperario(item.id, operarioId, operarioNombre);
+      } else {
+        cleanup();
+      }
+    };
+
+    window.addEventListener('dragover', onWindowDragOver, true);
+    window.addEventListener('drop', onWindowDrop, true);
+    window.addEventListener('keydown', onWindowKeyDown, true);
+
+    badgeDragCleanupRef.current = () => {
+      cleanup();
+    };
+  };
+
   const renderAssignedBadges = (className = '') => {
     if (!hasAssignedBadges) return null;
+
+    const canDragBadges = Boolean(canManageOperarios && onRemoveOperario && item.col === 'INICIO' && !isBusy);
 
     return (
       <div
@@ -480,15 +669,55 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
             {item.box_name}
           </span>
         )}
-        {item.usuarios_nombres.map((uname, idx) => (
-          <span
-            key={`${uname}-${idx}`}
-            className="inline-flex items-center gap-1 max-w-full text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#141A26] border border-[#263042] text-zinc-200"
-          >
-            <User size={11} strokeWidth={2} aria-hidden="true" focusable="false" className="text-[#10B981] shrink-0" />
-            <span className="truncate">{uname}</span>
-          </span>
-        ))}
+        {item.usuarios_nombres.map((uname, idx) => {
+          const operarioId = item.usuarios_ids?.[idx] || null;
+          const isBadgeDraggable = canDragBadges && Boolean(operarioId);
+          const isThisDragging = draggingBadge?.operarioId === operarioId;
+          const isOutside = isThisDragging && draggingBadge?.isOutside;
+
+          return (
+            <span
+              key={`${operarioId || uname}-${idx}`}
+              data-drag-card="true"
+              draggable={isBadgeDraggable}
+              title={
+                isBadgeDraggable
+                  ? 'Arrastrá fuera de la card para quitar del proceso'
+                  : uname
+              }
+              onDragStart={
+                isBadgeDraggable && operarioId
+                  ? (e) => handleBadgeDragStart(e, operarioId, uname)
+                  : undefined
+              }
+              onDragEnd={(e) => {
+                e.stopPropagation();
+                if (badgeDragCleanupRef.current) {
+                  badgeDragCleanupRef.current();
+                  badgeDragCleanupRef.current = null;
+                }
+              }}
+              className={`inline-flex items-center gap-1 max-w-full text-[10px] font-medium px-1.5 py-0.5 rounded border transition-colors ${
+                isOutside
+                  ? 'bg-red-500/20 border-red-400/70 text-red-200 opacity-75'
+                  : isThisDragging
+                  ? 'bg-[#141A26] border-sky-400/60 text-zinc-300 opacity-50'
+                  : isBadgeDraggable
+                  ? 'bg-[#141A26] border-[#263042] hover:border-amber-400/60 hover:bg-[#1A2232] text-zinc-200 cursor-grab active:cursor-grabbing'
+                  : 'bg-[#141A26] border-[#263042] text-zinc-200'
+              }`}
+            >
+              <User
+                size={11}
+                strokeWidth={2}
+                aria-hidden="true"
+                focusable="false"
+                className={`${isOutside ? 'text-red-300' : 'text-[#10B981]'} shrink-0 pointer-events-none`}
+              />
+              <span className="truncate pointer-events-none">{uname}</span>
+            </span>
+          );
+        })}
         {hasEncargadoBadge && (
           <span
             className="inline-flex items-center gap-1 max-w-full text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
@@ -523,14 +752,14 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
                 strokeWidth={2}
                 aria-hidden="true"
                 focusable="false"
-                className="text-zinc-400 shrink-0"
+                className={`${holdToneSpec.noteMetaText} shrink-0`}
               />
               <span className="truncate">{opts.author}</span>
             </span>
           )}
         </div>
         {opts.timestamp && (
-          <span className="font-numeric font-medium text-zinc-400 text-[10px] tabular-nums shrink-0 text-right">
+          <span className={`font-numeric font-medium ${holdToneSpec.noteMetaText} text-[10px] tabular-nums shrink-0 text-right`}>
             {formatDateTimeShort(opts.timestamp)}
           </span>
         )}
@@ -573,7 +802,7 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
 
     if (effectiveNotes.length === 0) {
       return (
-        <p className="text-[11px] text-zinc-400 italic pt-1.5 pb-1 border-t border-white/10 w-full">
+        <p className={`text-[11px] ${holdToneSpec.noteMetaText} italic pt-1.5 pb-1 border-t border-white/10 w-full`}>
           Sin comentarios registrados
         </p>
       );
@@ -611,26 +840,39 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
   if (layout === 'horizontal') {
     const isZoomedOut = !isContainerHovered && !isExpanded;
     const showHoverPane = isContainerHovered && !isExpanded;
+    const holdSurfaceClass = isExpanded
+      ? holdToneSpec.expandedSurface
+      : isContainerHovered
+      ? holdToneSpec.hoverSurface
+      : holdToneSpec.zoomOutSurface;
 
     return (
       <div
         data-drag-card="true"
+        data-card-tone={holdTone}
         role="button"
         tabIndex={0}
         aria-expanded={isExpanded}
+        aria-label={`Pendiente ${item.tractor_plate || ''} ${item.semi_plate || ''}${
+          isHoldYellow
+            ? ' · Ocupada en otra zona'
+            : isHoldFreed
+            ? ' · Unidad libre tras finalizar'
+            : ''
+        }.`}
         draggable={!isBusy}
         onClick={toggleExpand}
         onKeyDown={handleKeyDown}
         onDragStart={handleDragStartInternal}
         onDragEnd={handleDragEndInternal}
-        className={`shrink-0 border rounded-xl flex flex-col justify-between overflow-hidden transition-[width,height,padding,border-color,background-color,transform] ${SMOOTH_EASE} select-none outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] ${
+        className={`shrink-0 border rounded-xl flex flex-col justify-between overflow-hidden transition-[width,height,padding,border-color,background-color,transform] ${SMOOTH_EASE} select-none outline-none focus-visible:ring-2 ${holdToneSpec.focusRing} focus-visible:ring-offset-2 focus-visible:ring-offset-[#070A0F] ${
           isExpanded
-            ? 'w-[330px] h-[244px] p-2.5 bg-[#1B2230] border-amber-400/60'
+            ? `w-[330px] h-[244px] p-2.5 ${holdSurfaceClass}`
             : isContainerHovered
-            ? `w-[290px] h-[160px] p-2.5 bg-[#0E131E] ${colAccent}`
-            : `w-[146px] h-[68px] p-2 bg-[#0E131E] ${colAccent}`
+            ? `w-[290px] h-[160px] p-2.5 ${holdSurfaceClass}`
+            : `w-[146px] h-[68px] p-2 ${holdSurfaceClass}`
         } ${
-          isDragging ? 'opacity-40 scale-[0.98] ring-2 ring-amber-400/50 shadow-lg' : ''
+          isDragging ? `opacity-40 scale-[0.98] ${holdToneSpec.dragRing}` : ''
         } ${isBusy ? 'opacity-60 cursor-wait' : 'cursor-pointer'}`}
       >
         <div className="flex flex-col gap-1.5 w-full min-h-0 flex-1">
@@ -642,7 +884,7 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
                 strokeWidth={2}
                 aria-hidden="true"
                 focusable="false"
-                className="text-zinc-400 shrink-0 cursor-grab active:cursor-grabbing"
+                className={`${holdTone === 'standard' ? 'text-zinc-400' : 'text-zinc-200'} shrink-0 cursor-grab active:cursor-grabbing`}
               />
               {renderPlates(!isExpanded, 'sm')}
             </div>
@@ -657,13 +899,13 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               }`}
             >
               <div className="flex items-center justify-between gap-1 w-full">
-                <span className="text-[9.5px] font-mono font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1 truncate">
-                  <MapPin size={10} strokeWidth={2} aria-hidden="true" className="text-emerald-400 shrink-0" />
+                <span className={`text-[9.5px] font-mono font-bold uppercase tracking-wider ${holdToneSpec.mutedText} flex items-center gap-1 truncate`}>
+                  <MapPin size={10} strokeWidth={2} aria-hidden="true" className={`${holdToneSpec.boxIconText} shrink-0`} />
                   ÚLT. UBICACIÓN
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
                   {stageTz && (
-                    <span className="text-[9.5px] font-mono text-emerald-400 font-bold tabular-nums shrink-0">
+                    <span className={`text-[9.5px] font-mono ${holdToneSpec.tzHoverText} font-bold tabular-nums shrink-0`}>
                       {formatDateTimeShort(stageTz)}
                     </span>
                   )}
@@ -672,12 +914,12 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               </div>
               <div className="flex flex-col gap-0.5 mt-1">
                 <div className="flex items-center gap-1 text-[12px] leading-tight">
-                  <span className="text-[9.5px] font-mono font-bold text-zinc-400 uppercase">ZONA:</span>
+                  <span className={`text-[9.5px] font-mono font-bold ${holdToneSpec.mutedText} uppercase`}>ZONA:</span>
                   <span className="font-extrabold text-white truncate" title={ultimaZona}>{ultimaZona}</span>
                 </div>
                 <div className="flex items-center gap-1 text-[12px] leading-tight">
-                  <span className="text-[9.5px] font-mono font-bold text-zinc-400 uppercase">BOX:</span>
-                  <span className="font-extrabold text-emerald-400 font-mono truncate" title={ultimoBox}>{ultimoBox}</span>
+                  <span className={`text-[9.5px] font-mono font-bold ${holdToneSpec.mutedText} uppercase`}>BOX:</span>
+                  <span className={`font-extrabold ${holdToneSpec.boxValueText} font-mono truncate`} title={ultimoBox}>{ultimoBox}</span>
                 </div>
               </div>
             </div>
@@ -690,7 +932,7 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               }`}
             >
               {stageTz && (
-                <span className="text-[10px] font-numeric tabular-nums text-emerald-300 font-bold">
+                <span className={`text-[10px] font-numeric tabular-nums ${holdToneSpec.tzExpandedText} font-bold`}>
                   {formatDateTimeShort(stageTz)}
                 </span>
               )}
@@ -725,12 +967,12 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
           >
             <div className="overflow-hidden min-h-0 flex flex-col gap-1.5">
               <div className="flex items-center gap-2 text-[12px] leading-tight flex-wrap shrink-0">
-                <MapPin size={10} strokeWidth={2} aria-hidden="true" className="text-emerald-400 shrink-0" />
-                <span className="text-[9.5px] font-mono font-bold text-zinc-400 uppercase">ZONA:</span>
+                <MapPin size={10} strokeWidth={2} aria-hidden="true" className={`${holdToneSpec.boxIconText} shrink-0`} />
+                <span className={`text-[9.5px] font-mono font-bold ${holdToneSpec.mutedText} uppercase`}>ZONA:</span>
                 <span className="font-extrabold text-white">{ultimaZona}</span>
                 <span className="text-zinc-500">|</span>
-                <span className="text-[9.5px] font-mono font-bold text-zinc-400 uppercase">BOX:</span>
-                <span className="font-extrabold text-emerald-400 font-mono">{ultimoBox}</span>
+                <span className={`text-[9.5px] font-mono font-bold ${holdToneSpec.mutedText} uppercase`}>BOX:</span>
+                <span className={`font-extrabold ${holdToneSpec.boxValueText} font-mono`}>{ultimoBox}</span>
               </div>
 
               {renderAssignedBadges('shrink-0')}
@@ -738,21 +980,6 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               <div className="flex-1 min-h-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {renderAllComments('max-h-[105px]')}
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Hover (indicador dropdown sin contador de comentarios) */}
-        <div
-          aria-hidden={!showHoverPane}
-          className={`grid transition-[grid-template-rows,opacity] ${SMOOTH_EASE} shrink-0 ${
-            showHoverPane ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
-          }`}
-        >
-          <div className="overflow-hidden min-h-0">
-            <div className="pt-1 flex items-center justify-between text-[10px] font-medium text-zinc-300 border-t border-white/10">
-              <span>Desplegar detalles</span>
-              <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
             </div>
           </div>
         </div>
@@ -780,10 +1007,20 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
               onKeyDown={handleKeyDownNote}
               placeholder="+ Nota..."
               aria-label={`Ingresar nota para unidad ${item.tractor_plate || item.semi_plate || 'seleccionada'}`}
-              className="w-full bg-transparent border-0 border-b border-white/15 hover:border-white/30 focus:border-amber-400/80 text-[10.5px] text-zinc-100 placeholder:text-zinc-400 placeholder:italic placeholder:text-[10px] pb-0.5 outline-none transition-colors disabled:opacity-50"
+              className={`w-full bg-transparent border-0 border-b ${holdToneSpec.inputClasses} text-[10.5px] placeholder:italic placeholder:text-[10px] pb-0.5 outline-none transition-colors disabled:opacity-50`}
             />
           </div>
         </div>
+
+        {/* Estado Hover / Expandido: Timeline de procesos (tied bottom, solo lectura en Taller) */}
+        {(isContainerHovered || isExpanded) && timelineSteps && timelineSteps.length > 0 && (
+          <div
+            className="w-[calc(100%+1.25rem)] -mx-2.5 -mb-2 mt-1 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ProcesoTimelineBar steps={timelineSteps} theme="dark" canReorder={false} />
+          </div>
+        )}
       </div>
     );
   }
@@ -811,6 +1048,7 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
 
   return (
     <div
+      ref={cardRef}
       data-drag-card="true"
       data-card-state={isZoneMatrixCard ? zoneCardState : undefined}
       role="button"
@@ -976,10 +1214,6 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
         >
           <div className="overflow-hidden min-h-0">
             {renderPreviewComment('mt-2')}
-            <div className="mt-2 pt-1.5 border-t border-white/10 flex items-center justify-between text-[10px] font-medium text-zinc-300">
-              <span>Ver todos los datos</span>
-              <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
-            </div>
           </div>
         </div>
       )}
@@ -1034,6 +1268,32 @@ export const TallerUnitCard: React.FC<TallerUnitCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Estado 2 (Hover) y Estado 3 (Fijada): Timeline de procesos (tied bottom, solo lectura en Taller) */}
+      {(() => {
+        const showVerticalTimeline =
+          Boolean(timelineSteps && timelineSteps.length > 0) &&
+          (isZoneMatrixCard
+            ? zoneCardState === 'hover' || zoneCardState === 'pinned'
+            : !isZoomedOut);
+        return (
+          <div
+            aria-hidden={!showVerticalTimeline}
+            className={`w-[calc(100%+1rem)] -mx-2 -mb-2 grid transition-[grid-template-rows,opacity,margin] ${SMOOTH_EASE} ${
+              showVerticalTimeline
+                ? 'grid-rows-[1fr] opacity-100 mt-1.5'
+                : 'grid-rows-[0fr] opacity-0 mt-0 pointer-events-none'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="overflow-hidden min-h-0">
+              {timelineSteps && timelineSteps.length > 0 && (
+                <ProcesoTimelineBar steps={timelineSteps} theme="dark" canReorder={false} />
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -4,6 +4,7 @@ exports.createPlaneacionRouter = createPlaneacionRouter;
 const express_1 = require("express");
 const zod_1 = require("zod");
 const hotRamBaseService_js_1 = require("../services/hotRamBaseService.js");
+const sessionTokenService_js_1 = require("../services/sessionTokenService.js");
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function extractActorContext(req) {
     const tallerId = req.headers['x-taller-user-id']
@@ -14,10 +15,20 @@ function extractActorContext(req) {
         : '';
     const genericId = req.headers['x-user-id'] ? String(req.headers['x-user-id']).trim() : '';
     const rawOrigen = req.headers['x-origen'] ? String(req.headers['x-origen']).trim().toLowerCase() : '';
-    const origen = rawOrigen === 'coordinacion' || (Boolean(coordId) && !tallerId) ? 'coordinacion' : 'taller';
-    const candidateId = origen === 'coordinacion' ? coordId || genericId : tallerId || genericId;
-    const actorUsuarioId = UUID_REGEX.test(candidateId) ? candidateId : null;
-    return { actorUsuarioId, origen };
+    if (coordId || tallerId || genericId) {
+        const origen = rawOrigen === 'coordinacion' || (Boolean(coordId) && !tallerId) ? 'coordinacion' : 'taller';
+        const candidateId = origen === 'coordinacion' ? coordId || genericId : tallerId || genericId;
+        const actorUsuarioId = UUID_REGEX.test(candidateId) ? candidateId : null;
+        return { actorUsuarioId, origen };
+    }
+    const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req);
+    if (tokenSession) {
+        return { actorUsuarioId: tokenSession.sub, origen: tokenSession.rol };
+    }
+    return {
+        actorUsuarioId: null,
+        origen: rawOrigen === 'coordinacion' ? 'coordinacion' : 'taller',
+    };
 }
 /**
  * Jerarquía de permisos estricta (/db-render-arch):
@@ -26,20 +37,22 @@ function extractActorContext(req) {
  * Los usuarios de taller (base.usuarios_taller) tienen acceso denegado.
  */
 async function requireCoordinacionAuth(req, res, actionLabel = 'ejecutar esta operación') {
-    const coordId = req.headers['x-coordinacion-user-id']
+    const headerCoordId = req.headers['x-coordinacion-user-id']
         ? String(req.headers['x-coordinacion-user-id']).trim()
         : '';
     const tallerId = req.headers['x-taller-user-id']
         ? String(req.headers['x-taller-user-id']).trim()
         : '';
     const rawOrigen = req.headers['x-origen'] ? String(req.headers['x-origen']).trim().toLowerCase() : '';
-    if (rawOrigen === 'taller' || (tallerId && !coordId)) {
+    if (rawOrigen === 'taller' || (tallerId && !headerCoordId)) {
         res.status(403).json({
             success: false,
             error: `Permiso denegado: usuarios_taller no tienen permiso para ${actionLabel}.`,
         });
         return null;
     }
+    const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req, 'coordinacion');
+    const coordId = headerCoordId || tokenSession?.sub || '';
     if (!coordId) {
         res.status(401).json({
             success: false,
@@ -65,13 +78,16 @@ async function requireCoordinacionAuth(req, res, actionLabel = 'ejecutar esta op
     return coordId;
 }
 async function requireTallerOrCoordinacionAuth(req, res, actionLabel = 'acceder a este recurso') {
-    const coordId = req.headers['x-coordinacion-user-id']
+    const headerCoordId = req.headers['x-coordinacion-user-id']
         ? String(req.headers['x-coordinacion-user-id']).trim()
         : '';
-    const tallerId = req.headers['x-taller-user-id']
+    const headerTallerId = req.headers['x-taller-user-id']
         ? String(req.headers['x-taller-user-id']).trim()
         : '';
     const rawOrigen = req.headers['x-origen'] ? String(req.headers['x-origen']).trim().toLowerCase() : '';
+    const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req);
+    const coordId = headerCoordId || (tokenSession?.rol === 'coordinacion' ? tokenSession.sub : '');
+    const tallerId = headerTallerId || (tokenSession?.rol === 'taller' ? tokenSession.sub : '');
     if (rawOrigen === 'coordinacion' || (coordId && !tallerId)) {
         const verifiedCoordId = await requireCoordinacionAuth(req, res, actionLabel);
         if (!verifiedCoordId)
@@ -101,6 +117,43 @@ async function requireTallerOrCoordinacionAuth(req, res, actionLabel = 'acceder 
         error: `Autenticación requerida para ${actionLabel}.`,
     });
     return null;
+}
+/**
+ * Jerarquía estricta para ingreso QR (/qr):
+ * Únicamente usuarios autenticados en base.usuarios_taller con rol='encargado_zona'.
+ * Operarios y usuarios no autenticados tienen acceso denegado (403 / 401).
+ */
+async function requireEncargadoZonaAuth(req, res, actionLabel = 'ejecutar esta operación QR') {
+    const headerTallerId = req.headers['x-taller-user-id']
+        ? String(req.headers['x-taller-user-id']).trim()
+        : '';
+    const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req, 'taller');
+    const tallerId = headerTallerId || tokenSession?.sub || '';
+    if (!tallerId) {
+        res.status(401).json({
+            success: false,
+            error: `Autenticación requerida: iniciá sesión como Encargado de Zona para ${actionLabel}.`,
+        });
+        return null;
+    }
+    if (!UUID_REGEX.test(tallerId)) {
+        res.status(403).json({
+            success: false,
+            error: `Permiso denegado: identificador de sesión inválido para ${actionLabel}.`,
+        });
+        return null;
+    }
+    const check = await hotRamBaseService_js_1.hotRamBaseService.isEncargadoZonaAuthorized(tallerId);
+    if (!check.authorized) {
+        res.status(403).json({
+            success: false,
+            error: check.existsInTaller
+                ? `Acceso restringido: solo Encargados de Zona pueden ${actionLabel}.`
+                : 'Permiso denegado: el usuario no pertenece a base.usuarios_taller.',
+        });
+        return null;
+    }
+    return { userId: tallerId, nombre_usuario: check.nombre_usuario };
 }
 function formatZodError(err, fallback = 'Datos de entrada inválidos.') {
     const flat = err.flatten();
@@ -165,6 +218,7 @@ const patchProcesoSchema = zod_1.z.object({
         'DESHACER_INICIO',
         'DESHACER',
         'REVERTIR_A_HOLD',
+        'VOLVER_A_RESERVADO',
         'REINTEGRAR_A_PREASIGNADO',
         'ARCHIVAR',
     ]).optional(),
@@ -199,6 +253,9 @@ const altaCircuitoSchema = zod_1.z.object({
 const desunirCircuitoSchema = zod_1.z.object({
     mantenerEn: zod_1.z.enum(['TRACTOR', 'SEMI']).optional(),
 });
+const reordenarProcesosCircuitoSchema = zod_1.z.object({
+    procesoIds: zod_1.z.array(zod_1.z.string().uuid()).min(1).max(50),
+});
 const patchHoldSchema = zod_1.z.object({
     zoneId: zod_1.z.string().uuid().optional(),
     boxId: zod_1.z.string().uuid().nullable().optional(),
@@ -221,6 +278,16 @@ const archiveColdSchema = zod_1.z.object({
 const loginTallerSchema = zod_1.z.object({
     nombre_usuario: zod_1.z.string().trim().min(1, 'El nombre de usuario es requerido'),
     password: zod_1.z.string().min(1, 'La contraseña es requerida'),
+});
+const patchOperarioBoxSchema = zod_1.z.object({
+    boxId: zod_1.z.string().uuid().nullable(),
+});
+const qrAltaCircuitoSchema = zod_1.z.object({
+    dominioTractor: zod_1.z
+        .string()
+        .trim()
+        .min(3, 'Dominio de tractor inválido.')
+        .max(32, 'Dominio de tractor demasiado largo.'),
 });
 function createPlaneacionRouter(io) {
     const router = (0, express_1.Router)();
@@ -248,10 +315,13 @@ function createPlaneacionRouter(io) {
                 });
                 return;
             }
+            const sessionToken = (0, sessionTokenService_js_1.signSessionToken)(result.user.id, 'taller');
+            (0, sessionTokenService_js_1.setPersistentSessionCookie)(res, req, 'taller', sessionToken);
             res.json({
                 success: true,
                 authenticated: true,
                 user: result.user,
+                sessionToken,
                 redirect: '/taller',
             });
         }
@@ -263,9 +333,15 @@ function createPlaneacionRouter(io) {
             });
         }
     });
-    // Verificación de acceso a /taller delimitada estrictamente por base.usuarios_taller + auth.users
+    // Cierre explícito de sesión en dispositivo (Taller)
+    router.post('/auth/logout', (req, res) => {
+        (0, sessionTokenService_js_1.clearPersistentSessionCookie)(res, req, 'taller');
+        res.json({ success: true });
+    });
+    // Verificación de acceso a /taller delimitada estrictamente por base.usuarios_taller (C1 Hot RAM + Token/Cookie)
     router.get('/auth/verify', async (req, res) => {
-        const userId = String(req.headers['x-taller-user-id'] || req.query.user_id || '').trim();
+        const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req, 'taller');
+        const userId = String(tokenSession?.sub || req.headers['x-taller-user-id'] || req.query.user_id || '').trim();
         if (!userId) {
             res.status(401).json({
                 success: false,
@@ -277,6 +353,7 @@ function createPlaneacionRouter(io) {
         try {
             const result = await hotRamBaseService_js_1.hotRamBaseService.verificarAccesoTaller(userId);
             if (!result.authorized || !result.user) {
+                (0, sessionTokenService_js_1.clearPersistentSessionCookie)(res, req, 'taller');
                 res.status(403).json({
                     success: false,
                     authorized: false,
@@ -284,10 +361,14 @@ function createPlaneacionRouter(io) {
                 });
                 return;
             }
+            // Renovación deslizante (sliding 30d) para mantener la sesión persistente en el dispositivo
+            const sessionToken = (0, sessionTokenService_js_1.signSessionToken)(String(result.user.id), 'taller');
+            (0, sessionTokenService_js_1.setPersistentSessionCookie)(res, req, 'taller', sessionToken);
             res.json({
                 success: true,
                 authorized: true,
                 user: result.user,
+                sessionToken,
             });
         }
         catch (err) {
@@ -322,10 +403,13 @@ function createPlaneacionRouter(io) {
                 });
                 return;
             }
+            const sessionToken = (0, sessionTokenService_js_1.signSessionToken)(result.user.id, 'coordinacion');
+            (0, sessionTokenService_js_1.setPersistentSessionCookie)(res, req, 'coordinacion', sessionToken);
             res.json({
                 success: true,
                 authenticated: true,
                 user: result.user,
+                sessionToken,
                 redirect: '/coordinacion',
             });
         }
@@ -337,9 +421,15 @@ function createPlaneacionRouter(io) {
             });
         }
     });
-    // Verificación de acceso a Coordinación delimitada por base.user_coordinacion + auth.users
+    // Cierre explícito de sesión en dispositivo (Coordinación)
+    router.post('/auth/coordinacion/logout', (req, res) => {
+        (0, sessionTokenService_js_1.clearPersistentSessionCookie)(res, req, 'coordinacion');
+        res.json({ success: true });
+    });
+    // Verificación de acceso a Coordinación delimitada por base.user_coordinacion (C1 Hot RAM + Token/Cookie)
     router.get('/auth/coordinacion/verify', async (req, res) => {
-        const userId = String(req.headers['x-coordinacion-user-id'] || req.query.user_id || '').trim();
+        const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req, 'coordinacion');
+        const userId = String(tokenSession?.sub || req.headers['x-coordinacion-user-id'] || req.query.user_id || '').trim();
         if (!userId) {
             res.status(401).json({
                 success: false,
@@ -351,6 +441,7 @@ function createPlaneacionRouter(io) {
         try {
             const result = await hotRamBaseService_js_1.hotRamBaseService.verificarAccesoCoordinacion(userId);
             if (!result.authorized || !result.user) {
+                (0, sessionTokenService_js_1.clearPersistentSessionCookie)(res, req, 'coordinacion');
                 res.status(403).json({
                     success: false,
                     authorized: false,
@@ -358,10 +449,14 @@ function createPlaneacionRouter(io) {
                 });
                 return;
             }
+            // Renovación deslizante (sliding 30d) para mantener la sesión persistente en el dispositivo
+            const sessionToken = (0, sessionTokenService_js_1.signSessionToken)(String(result.user.id), 'coordinacion');
+            (0, sessionTokenService_js_1.setPersistentSessionCookie)(res, req, 'coordinacion', sessionToken);
             res.json({
                 success: true,
                 authorized: true,
                 user: result.user,
+                sessionToken,
             });
         }
         catch (err) {
@@ -392,11 +487,11 @@ function createPlaneacionRouter(io) {
             const snapshot = await hotRamBaseService_js_1.hotRamBaseService.getBoardSnapshot();
             const effectiveEtag = includeCatalog
                 ? validZoneId
-                    ? `${snapshot.etag.slice(0, -1)}-coord-v2-${validZoneId}"`
-                    : `${snapshot.etag.slice(0, -1)}-coord-v2"`
+                    ? `${snapshot.coordEtag.slice(0, -1)}-coord-v4-${validZoneId}"`
+                    : `${snapshot.coordEtag.slice(0, -1)}-coord-v4"`
                 : sectorZoneId
-                    ? `${snapshot.etag.slice(0, -1)}-taller-v5-${sectorZoneId}"`
-                    : `${snapshot.etag.slice(0, -1)}-taller"`;
+                    ? `${snapshot.etag.slice(0, -1)}-taller-v6-${sectorZoneId}"`
+                    : `${snapshot.etag.slice(0, -1)}-taller-v6"`;
             const clientEtag = req.headers['if-none-match'];
             if (clientEtag && clientEtag === effectiveEtag) {
                 res.status(304).end();
@@ -410,6 +505,7 @@ function createPlaneacionRouter(io) {
                     success: true,
                     activos: lite.activos,
                     holds: lite.holds,
+                    circuitos_timelines: lite.circuitos_timelines,
                     taller_zone_map: lite.taller_zone_map,
                     updatedAt: snapshot.updatedAt,
                 });
@@ -423,6 +519,8 @@ function createPlaneacionRouter(io) {
                     activos: coordPayload.activos,
                     holds: coordPayload.holds,
                     circuitos_abiertos: coordPayload.circuitos_abiertos,
+                    circuitos_terminados: coordPayload.circuitos_terminados,
+                    circuitos_timelines: coordPayload.circuitos_timelines,
                     catalog: coordPayload.catalog,
                     ...(validZoneId ? { taller_zone_map: tallerZoneMap } : {}),
                     updatedAt: snapshot.updatedAt,
@@ -433,6 +531,7 @@ function createPlaneacionRouter(io) {
                 success: true,
                 activos: snapshot.activos,
                 holds: snapshot.holds,
+                circuitos_timelines: snapshot.circuitos_timelines,
                 ...(validZoneId ? { taller_zone_map: tallerZoneMap } : {}),
                 updatedAt: snapshot.updatedAt,
             });
@@ -543,6 +642,61 @@ function createPlaneacionRouter(io) {
             sendRouteError(res, err, 'Error dando de alta el circuito');
         }
     });
+    // =========================================================================
+    // INGRESO QR SOLO-TRACTOR (Exclusivo Encargados de Zona · Hot RAM C1)
+    // =========================================================================
+    router.get('/qr/resolve', async (req, res) => {
+        const actor = await requireEncargadoZonaAuth(req, res, 'consultar dominios por QR');
+        if (!actor)
+            return;
+        const rawDominio = typeof req.query.dominio === 'string' ? req.query.dominio.trim() : '';
+        if (!rawDominio || rawDominio.length > 32) {
+            res.status(400).json({
+                success: false,
+                error: 'Parámetro dominio requerido (3 a 32 caracteres).',
+            });
+            return;
+        }
+        try {
+            const resolved = await hotRamBaseService_js_1.hotRamBaseService.resolveDominioTractorForQr(rawDominio);
+            res.setHeader('Cache-Control', 'no-store');
+            res.json({
+                success: true,
+                ...resolved,
+            });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error resolviendo dominio de tractor');
+        }
+    });
+    router.post('/qr/alta-circuito', async (req, res) => {
+        const actor = await requireEncargadoZonaAuth(req, res, 'registrar ingreso de tractor por QR');
+        if (!actor)
+            return;
+        const parsed = qrAltaCircuitoSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: formatZodError(parsed.error, 'Dominio de tractor inválido.'),
+            });
+            return;
+        }
+        try {
+            const circuito = await hotRamBaseService_js_1.hotRamBaseService.altaCircuitoPorDominioTractor(parsed.data.dominioTractor);
+            io.emit('planeacion_board_updated', {
+                action: 'CIRCUITO_ALTA',
+                circuitoId: circuito.circuito_id,
+                updatedAt: Date.now(),
+            });
+            res.status(201).json({
+                success: true,
+                circuito,
+            });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error registrando ingreso de tractor al circuito');
+        }
+    });
     router.post('/circuitos/:id/baja', async (req, res) => {
         const coordId = await requireCoordinacionAuth(req, res, 'dar de baja un circuito');
         if (!coordId)
@@ -593,6 +747,33 @@ function createPlaneacionRouter(io) {
             sendRouteError(res, err, 'Error desuniendo el circuito');
         }
     });
+    router.patch('/circuitos/:id/procesos-orden', async (req, res) => {
+        const coordId = await requireCoordinacionAuth(req, res, 'reordenar procesos del circuito');
+        if (!coordId)
+            return;
+        const circuitoId = String(req.params.id || '').trim();
+        if (!UUID_REGEX.test(circuitoId)) {
+            res.status(400).json({ success: false, error: 'ID de circuito inválido.' });
+            return;
+        }
+        const parsed = reordenarProcesosCircuitoSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            res.status(400).json({ success: false, error: formatZodError(parsed.error) });
+            return;
+        }
+        try {
+            const result = await hotRamBaseService_js_1.hotRamBaseService.reordenarProcesosCircuito(circuitoId, parsed.data.procesoIds);
+            io.emit('planeacion_board_updated', {
+                action: 'CIRCUITO_PROCESOS_REORDERED',
+                circuitoId,
+                updatedAt: Date.now(),
+            });
+            res.json({ success: true, ...result });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error reordenando procesos del circuito');
+        }
+    });
     // Sweep semanal hacia base.procesos_cold (circuitos cerrados con >= retencion, default '7 days')
     router.post('/board/archive-cold', async (req, res) => {
         if (!(await requireCoordinacionAuth(req, res, 'ejecutar el archivado a cold')))
@@ -605,6 +786,16 @@ function createPlaneacionRouter(io) {
         try {
             const retencion = parsed.data.retencion || '7 days';
             const result = await hotRamBaseService_js_1.hotRamBaseService.ejecutarSweepSemanalCold(retencion);
+            if (result.archivedRows > 0 || result.archivedCircuits > 0) {
+                hotRamBaseService_js_1.hotRamBaseService.invalidate();
+                const snap = await hotRamBaseService_js_1.hotRamBaseService.hydrateBoard();
+                io.emit('planeacion_board_updated', {
+                    reason: 'cold_sweep',
+                    archivedRows: result.archivedRows,
+                    archivedCircuits: result.archivedCircuits,
+                    updatedAt: snap.updatedAt,
+                });
+            }
             res.json({
                 success: true,
                 retencion,
@@ -961,6 +1152,91 @@ function createPlaneacionRouter(io) {
         }
         catch (err) {
             sendRouteError(res, err, 'Error activando preasignación');
+        }
+    });
+    // Jerarquía j1 (encargado_zona): Cambiar box_id (FK en base.usuarios_taller) de un operario de su zona
+    router.patch('/taller/operarios/:id/box', async (req, res) => {
+        const auth = await requireTallerOrCoordinacionAuth(req, res, 'reasignar operario de box');
+        if (!auth)
+            return;
+        if (auth.role !== 'taller') {
+            res.status(403).json({
+                success: false,
+                error: 'Permiso denegado: operación reservada al rol encargado_zona (j1) en /taller.',
+            });
+            return;
+        }
+        const operarioId = String(req.params.id || '').trim();
+        if (!UUID_REGEX.test(operarioId)) {
+            res.status(400).json({
+                success: false,
+                error: 'Identificador de operario inválido.',
+            });
+            return;
+        }
+        const parsed = patchOperarioBoxSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: formatZodError(parsed.error, 'Datos inválidos para reasignar box de operario.'),
+            });
+            return;
+        }
+        try {
+            const result = await hotRamBaseService_js_1.hotRamBaseService.reasignarBoxOperario(operarioId, parsed.data.boxId, auth.userId);
+            if (result.changed) {
+                io.emit('planeacion_board_updated', {
+                    action: 'OPERARIO_BOX_UPDATED',
+                    operarioId: result.operario.id,
+                    previousBoxId: result.previousBoxId,
+                    boxId: result.operario.box_id,
+                    zoneId: result.operario.zone_id,
+                    assignedProcesosIds: result.assignedProcesosIds,
+                    updatedAt: Date.now(),
+                });
+            }
+            res.json({ success: true, ...result });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error reasignando box de operario');
+        }
+    });
+    // Jerarquía j1 (encargado_zona): Quitar un operario de base.procesos.usuarios_ids en un proceso activo de su zona
+    router.delete('/procesos/:id/usuarios/:operarioId', async (req, res) => {
+        const auth = await requireTallerOrCoordinacionAuth(req, res, 'quitar operario de proceso');
+        if (!auth)
+            return;
+        if (auth.role !== 'taller') {
+            res.status(403).json({
+                success: false,
+                error: 'Permiso denegado: operación reservada al rol encargado_zona (j1) en /taller.',
+            });
+            return;
+        }
+        const procesoId = String(req.params.id || '').trim();
+        const operarioId = String(req.params.operarioId || '').trim();
+        if (!UUID_REGEX.test(procesoId) || !UUID_REGEX.test(operarioId)) {
+            res.status(400).json({
+                success: false,
+                error: 'Identificador de proceso u operario inválido.',
+            });
+            return;
+        }
+        try {
+            const result = await hotRamBaseService_js_1.hotRamBaseService.quitarOperarioDeProceso(procesoId, operarioId, auth.userId);
+            if (result.changed) {
+                io.emit('planeacion_board_updated', {
+                    action: 'PROCESO_OPERARIO_REMOVED',
+                    procesoId: result.procesoId,
+                    operarioId: result.operarioId,
+                    zoneId: result.zoneId,
+                    updatedAt: Date.now(),
+                });
+            }
+            res.json({ success: true, ...result });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error quitando operario del proceso');
         }
     });
     return router;

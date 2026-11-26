@@ -1,9 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, GripVertical, Loader2, MapPin, Pin, User } from 'lucide-react';
+import { GripVertical, Loader2, MapPin, Pin, User } from 'lucide-react';
 import { toast } from 'sonner';
-import type { IdleDockItem, IdleHierarchyTier, ProcesoNota } from '../../types/planeacion';
+import type {
+  CircuitoTimelineStep,
+  IdleDockItem,
+  IdleHierarchyTier,
+  ProcesoNota,
+} from '../../types/planeacion';
 import { agregarNotaProceso, fetchProcesoNotas } from '../../services/planeacionApi';
 import { UnitLicensePlate } from '../common/UnitLicensePlate';
+import { ProcesoTimelineBar } from '../common/ProcesoTimelineBar';
 import {
   IDLE_CARD_STATE_SPEC,
   IDLE_SMOOTH_EASE,
@@ -14,6 +20,8 @@ import {
 interface IdleHorizontalCardProps {
   item: IdleDockItem;
   dockState: IdleDockState;
+  timelineSteps?: CircuitoTimelineStep[];
+  onReorderTimeline?: (circuitoId: string, orderedPreasignadoIds: string[]) => void;
   isHiddenForFlight?: boolean;
   isJustLanded?: boolean;
   registerCardRef?: (item: IdleDockItem, el: HTMLDivElement | null) => void;
@@ -71,6 +79,8 @@ function formatDateTimeShort(iso: string | null | undefined): string {
 export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
   item,
   dockState,
+  timelineSteps,
+  onReorderTimeline,
   isHiddenForFlight = false,
   isJustLanded = false,
   registerCardRef,
@@ -96,6 +106,15 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
   const tierMeta = TIER_META[item.tier];
   const isUnfinalizedPreasignado =
     item.tier === 'PREASIGNADO' && Boolean(item.en_proceso_activo);
+  const isFreedPreasignado =
+    item.tier === 'PREASIGNADO' &&
+    !isUnfinalizedPreasignado &&
+    Boolean(item.liberado_circuito);
+  const cardTone = isUnfinalizedPreasignado
+    ? 'yellow'
+    : isFreedPreasignado
+    ? 'freed'
+    : 'standard';
 
   const cardState = resolveIdleCardState({ dockState, isCardPinned: isPinned });
   const stateSpec = IDLE_CARD_STATE_SPEC[cardState];
@@ -194,6 +213,8 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             unidadId: item.unidad_id,
             tractorId: item.tractor_id,
             semiId: item.semi_id,
+            tractorPlate: item.tractor_plate || '',
+            semiPlate: item.semi_plate || '',
             plate: plateLabel,
             fromIdleDock: true,
           }
@@ -206,9 +227,13 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             unidadId: item.unidad_id,
             tractorId: item.tractor_id,
             semiId: item.semi_id,
+            tractorPlate: item.tractor_plate || '',
+            semiPlate: item.semi_plate || '',
             plate: plateLabel,
             zoneId: item.zone_id,
+            zoneName: item.zone_name || '',
             boxId: item.box_id || null,
+            boxName: item.box_name || '',
             fromIdleDock: true,
           }
         : {
@@ -218,6 +243,8 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             unidadId: item.unidad_id,
             tractorId: item.tractor_id,
             semiId: item.semi_id,
+            tractorPlate: item.tractor_plate || '',
+            semiPlate: item.semi_plate || '',
             plate: plateLabel,
             boxId: item.box_id || '',
             boxName: item.box_name || '',
@@ -348,7 +375,9 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
     return (
       <div
         ref={notesListRef}
-        className="max-h-[104px] overflow-y-auto space-y-2 pr-0.5 pt-1 border-t border-zinc-300/80 no-scrollbar"
+        className={`max-h-[104px] overflow-y-auto space-y-2 pr-0.5 pt-1 border-t no-scrollbar ${
+          isFreedPreasignado ? 'border-emerald-600/35' : 'border-zinc-300/80'
+        }`}
       >
         {effectiveNotes.map((note, idx) => {
           const isCoord =
@@ -364,7 +393,11 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             <div key={note.id || `${note.timestamp}-${idx}`} className="space-y-0.5">
               <div className="flex items-center justify-between gap-2 leading-tight">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-[11px] font-bold tracking-wide shrink-0 text-[#B45309]">
+                  <span
+                    className={`text-[11px] font-bold tracking-wide shrink-0 ${
+                      isFreedPreasignado ? 'text-[#065F46]' : 'text-[#B45309]'
+                    }`}
+                  >
                     {noteLoc}
                   </span>
                   {noteAuthor && (
@@ -401,18 +434,23 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
       ref={(el) => registerCardRef?.(item, el)}
       data-drag-card="true"
       data-card-state={cardState}
+      data-card-tone={cardTone}
       role="button"
       tabIndex={0}
       aria-expanded={isPinned}
       aria-pressed={isPinned}
-      aria-label={`Idle ${tierMeta.label}: ${item.tractor_plate || ''} ${item.semi_plate || ''}. Arrastrar a una zona o clic para ${isPinned ? 'desfijar' : 'fijar y ver notas'}.`}
+      aria-label={`Idle ${tierMeta.label}: ${item.tractor_plate || ''} ${item.semi_plate || ''}${isFreedPreasignado ? ' · Unidad libre' : ''}. Arrastrar a una zona o clic para ${isPinned ? 'desfijar' : 'fijar y ver notas'}.`}
       draggable={!isHiddenForFlight}
       onClick={togglePin}
       onKeyDown={handleKeyDown}
       onDragStart={handleDragStartInternal}
       onDragEnd={handleDragEndInternal}
       className={`shrink-0 rounded-lg border flex flex-col justify-between overflow-hidden transition-[width,height,padding,border-color,background-color,box-shadow,opacity,transform] ${IDLE_SMOOTH_EASE} select-none outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-[#EDEDED] ${stateSpec.sizeClass} ${
-        isUnfinalizedPreasignado ? stateSpec.surfacePreasignadoClass : stateSpec.surfaceStandardClass
+        isUnfinalizedPreasignado
+          ? stateSpec.surfacePreasignadoClass
+          : isFreedPreasignado
+          ? stateSpec.surfaceFreedClass
+          : stateSpec.surfaceStandardClass
       } ${
         isJustLanded ? 'ring-2 ring-emerald-600/60 shadow-md' : ''
       } ${isHiddenForFlight ? 'opacity-0 pointer-events-none' : ''} ${
@@ -455,7 +493,9 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
           >
             <div className="flex items-center justify-between gap-1 w-full">
               <span
-                className={`text-[9.5px] font-mono font-extrabold uppercase tracking-wider truncate ${tierMeta.badgeTextClass}`}
+                className={`text-[9.5px] font-mono font-extrabold uppercase tracking-wider truncate ${
+                  isFreedPreasignado ? 'text-[#065F46]' : tierMeta.badgeTextClass
+                }`}
               >
                 {tierMeta.label}
               </span>
@@ -520,7 +560,11 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
               <div className="mt-0.5 pl-5 space-y-0.5">
                 <div className="flex items-center justify-between gap-2 leading-tight">
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-[10.5px] font-bold text-[#B45309] tracking-wide shrink-0">
+                    <span
+                      className={`text-[10.5px] font-bold tracking-wide shrink-0 ${
+                        isFreedPreasignado ? 'text-[#065F46]' : 'text-[#B45309]'
+                      }`}
+                    >
                       {previewLocation}
                     </span>
                     {previewAuthor && (
@@ -559,7 +603,11 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
         >
           <div className="overflow-hidden min-h-0 flex flex-col gap-1.5">
             <div className="pl-5 flex items-center gap-1.5 text-[11.5px] leading-tight flex-wrap shrink-0">
-              <span className={`text-[9.5px] font-mono font-extrabold uppercase ${tierMeta.badgeTextClass}`}>
+              <span
+                className={`text-[9.5px] font-mono font-extrabold uppercase ${
+                  isFreedPreasignado ? 'text-[#065F46]' : tierMeta.badgeTextClass
+                }`}
+              >
                 {tierMeta.label}
               </span>
               <span className="text-zinc-400">·</span>
@@ -572,21 +620,6 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             <div className="pl-5 flex-1 min-h-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
               {renderAllComments()}
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer Hover */}
-      <div
-        aria-hidden={!slots.showHoverFooterHint}
-        className={`grid transition-[grid-template-rows,opacity] ${IDLE_SMOOTH_EASE} shrink-0 ${
-          slots.showHoverFooterHint ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 pointer-events-none'
-        }`}
-      >
-        <div className="overflow-hidden min-h-0">
-          <div className="pl-5 pt-1 flex items-center justify-between text-[10px] font-medium text-zinc-600 border-t border-zinc-200/80">
-            <span>Clic para fijar y ver notas</span>
-            <ChevronDown size={13} strokeWidth={2} aria-hidden="true" />
           </div>
         </div>
       </div>
@@ -614,10 +647,34 @@ export const IdleHorizontalCard: React.FC<IdleHorizontalCardProps> = ({
             onKeyDown={handleKeyDownNote}
             placeholder="+ Nota..."
             aria-label={`Ingresar nota para unidad ${item.tractor_plate || item.semi_plate || 'seleccionada'}`}
-            className="w-full bg-transparent border-0 border-b border-zinc-300 hover:border-zinc-500 focus:border-zinc-950 text-[11px] text-zinc-900 placeholder:text-zinc-500 placeholder:italic placeholder:text-[10px] pb-0.5 outline-none transition-colors disabled:opacity-50"
+            className={`w-full bg-transparent border-0 border-b ${
+              isFreedPreasignado
+                ? 'border-[#047857]/60 hover:border-[#065F46] focus:border-zinc-950 text-zinc-950 placeholder:text-[#065F46]/75'
+                : 'border-zinc-300 hover:border-zinc-500 focus:border-zinc-950 text-zinc-900 placeholder:text-zinc-500'
+            } text-[11px] placeholder:italic placeholder:text-[10px] pb-0.5 outline-none transition-colors disabled:opacity-50`}
           />
         </div>
       </div>
+
+      {/* Estado 2 (Hover) y Estado 3 (Fijada): Timeline horizontal de procesos (tied bottom) */}
+      {cardState !== 'zoom-out' && timelineSteps && timelineSteps.length > 0 && (
+        <div
+          className="w-[calc(100%+1.25rem)] -mx-2.5 -mb-2 mt-1 shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ProcesoTimelineBar
+            steps={timelineSteps}
+            theme="light"
+            canReorder={Boolean(onReorderTimeline && (item.circuito_id || item.targetId))}
+            onReorder={(orderedIds) => {
+              const circId = item.circuito_id || (item.tier === 'SIN_ASIGNACION' ? item.targetId : undefined);
+              if (circId) {
+                onReorderTimeline?.(circId, orderedIds);
+              }
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

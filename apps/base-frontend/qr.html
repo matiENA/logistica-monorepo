@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <title>Flowsite · Ingreso QR</title>
+    <meta name="theme-color" content="#070A0F" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest-qr.json" />
+  </head>
+  <body class="bg-[#070A0F] text-[#F3F4F6] antialiased">
+    <div id="root"></div>
+    <script>
+      if (!window.location.pathname.startsWith('/qr')) {
+        window.history.replaceState(null, '', '/qr' + window.location.search);
+      }
+    </script>
+    <script type="module" src="/src/qrMain.tsx"></script>
+  </body>
+</html>

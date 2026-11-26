@@ -160,3 +160,20 @@ services:
         value: https://diaria-operativas.onrender.com
       - key: VITE_SOCKET_URL
         value: https://diaria-operativas.onrender.com
+
+  # ------------------------------------------------------------
+  # 6. FRONTEND INGRESO QR (Static Site — Ingreso Solo-Tractor Encargados)
+  # ------------------------------------------------------------
+  - type: web
+    name: ingreso-qr
+    runtime: static
+    rootDir: apps/base-frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /qr.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://diaria-operativas.onrender.com

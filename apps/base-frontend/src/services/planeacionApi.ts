@@ -2,10 +2,13 @@ import { io, type Socket } from 'socket.io-client';
 import type {
   BoardResponse,
   CircuitoAbierto,
+  CircuitoTimelineStep,
   EstadoBox,
   PlaneacionCard,
   PlaneacionUnidadDetalle,
   ProcesoNota,
+  QuitarOperarioProcesoResponse,
+  ReasignarOperarioBoxResponse,
   TrayectoriaResponse,
   UsuarioCoordinacionSession,
   UsuarioTallerSession,
@@ -44,59 +47,197 @@ function extractApiErrorMessage(errBody: unknown, fallback: string): string {
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const REQUEST_TIMEOUT_MS = 50_000; // Poka-Yoke Cold Start (Render)
-const TALLER_AUTH_STORAGE_KEY = 'base_taller_user';
-const COORDINACION_AUTH_STORAGE_KEY = 'base_coordinacion_user';
+export const TALLER_AUTH_STORAGE_KEY = 'base_taller_user';
+export const COORDINACION_AUTH_STORAGE_KEY = 'base_coordinacion_user';
+const TALLER_TOKEN_STORAGE_KEY = 'base_taller_session_token';
+const COORDINACION_TOKEN_STORAGE_KEY = 'base_coordinacion_session_token';
+const DEVICE_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30 días
+
+function readDeviceCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const prefix = `${name}=`;
+    const parts = document.cookie.split(';');
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed.startsWith(prefix)) {
+        return decodeURIComponent(trimmed.slice(prefix.length));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function writeDeviceCookie(name: string, value: string): void {
+  if (typeof document === 'undefined') return;
+  try {
+    const secureAttr = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${DEVICE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secureAttr}`;
+  } catch {
+    // ignore
+  }
+}
+
+function deleteDeviceCookie(name: string): void {
+  if (typeof document === 'undefined') return;
+  try {
+    const secureAttr = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secureAttr}`;
+  } catch {
+    // ignore
+  }
+}
+
+export function getSavedTallerToken(): string | null {
+  try {
+    const ls = localStorage.getItem(TALLER_TOKEN_STORAGE_KEY);
+    if (ls) return ls;
+  } catch {
+    // ignore
+  }
+  const ck = readDeviceCookie(TALLER_TOKEN_STORAGE_KEY);
+  if (ck) {
+    try {
+      localStorage.setItem(TALLER_TOKEN_STORAGE_KEY, ck);
+    } catch {
+      // ignore
+    }
+  }
+  return ck;
+}
+
+export function saveTallerToken(token: string) {
+  try {
+    localStorage.setItem(TALLER_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // ignore
+  }
+  writeDeviceCookie(TALLER_TOKEN_STORAGE_KEY, token);
+}
+
+export function getSavedCoordinacionToken(): string | null {
+  try {
+    const ls = localStorage.getItem(COORDINACION_TOKEN_STORAGE_KEY);
+    if (ls) return ls;
+  } catch {
+    // ignore
+  }
+  const ck = readDeviceCookie(COORDINACION_TOKEN_STORAGE_KEY);
+  if (ck) {
+    try {
+      localStorage.setItem(COORDINACION_TOKEN_STORAGE_KEY, ck);
+    } catch {
+      // ignore
+    }
+  }
+  return ck;
+}
+
+export function saveCoordinacionToken(token: string) {
+  try {
+    localStorage.setItem(COORDINACION_TOKEN_STORAGE_KEY, token);
+  } catch {
+    // ignore
+  }
+  writeDeviceCookie(COORDINACION_TOKEN_STORAGE_KEY, token);
+}
 
 export function getSavedTallerUser(): UsuarioTallerSession | null {
   try {
     const raw = localStorage.getItem(TALLER_AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as UsuarioTallerSession;
+    if (raw) return JSON.parse(raw) as UsuarioTallerSession;
   } catch {
-    return null;
+    // ignore
   }
+  const ck = readDeviceCookie(TALLER_AUTH_STORAGE_KEY);
+  if (ck) {
+    try {
+      const parsed = JSON.parse(ck) as UsuarioTallerSession;
+      try {
+        localStorage.setItem(TALLER_AUTH_STORAGE_KEY, ck);
+      } catch {
+        // ignore
+      }
+      return parsed;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
 }
 
-export function saveTallerUser(user: UsuarioTallerSession) {
+export function saveTallerUser(user: UsuarioTallerSession, sessionToken?: string) {
+  const serialized = JSON.stringify(user);
   try {
-    localStorage.setItem(TALLER_AUTH_STORAGE_KEY, JSON.stringify(user));
+    localStorage.setItem(TALLER_AUTH_STORAGE_KEY, serialized);
   } catch {
     // ignore storage quota errors
+  }
+  writeDeviceCookie(TALLER_AUTH_STORAGE_KEY, serialized);
+  if (sessionToken) {
+    saveTallerToken(sessionToken);
   }
 }
 
 export function clearTallerUser() {
   try {
     localStorage.removeItem(TALLER_AUTH_STORAGE_KEY);
+    localStorage.removeItem(TALLER_TOKEN_STORAGE_KEY);
   } catch {
     // ignore
   }
+  deleteDeviceCookie(TALLER_AUTH_STORAGE_KEY);
+  deleteDeviceCookie(TALLER_TOKEN_STORAGE_KEY);
 }
 
 export function getSavedCoordinacionUser(): UsuarioCoordinacionSession | null {
   try {
     const raw = localStorage.getItem(COORDINACION_AUTH_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as UsuarioCoordinacionSession;
+    if (raw) return JSON.parse(raw) as UsuarioCoordinacionSession;
   } catch {
-    return null;
+    // ignore
   }
+  const ck = readDeviceCookie(COORDINACION_AUTH_STORAGE_KEY);
+  if (ck) {
+    try {
+      const parsed = JSON.parse(ck) as UsuarioCoordinacionSession;
+      try {
+        localStorage.setItem(COORDINACION_AUTH_STORAGE_KEY, ck);
+      } catch {
+        // ignore
+      }
+      return parsed;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
 }
 
-export function saveCoordinacionUser(user: UsuarioCoordinacionSession) {
+export function saveCoordinacionUser(user: UsuarioCoordinacionSession, sessionToken?: string) {
+  const serialized = JSON.stringify(user);
   try {
-    localStorage.setItem(COORDINACION_AUTH_STORAGE_KEY, JSON.stringify(user));
+    localStorage.setItem(COORDINACION_AUTH_STORAGE_KEY, serialized);
   } catch {
     // ignore storage quota errors
+  }
+  writeDeviceCookie(COORDINACION_AUTH_STORAGE_KEY, serialized);
+  if (sessionToken) {
+    saveCoordinacionToken(sessionToken);
   }
 }
 
 export function clearCoordinacionUser() {
   try {
     localStorage.removeItem(COORDINACION_AUTH_STORAGE_KEY);
+    localStorage.removeItem(COORDINACION_TOKEN_STORAGE_KEY);
   } catch {
     // ignore
   }
+  deleteDeviceCookie(COORDINACION_AUTH_STORAGE_KEY);
+  deleteDeviceCookie(COORDINACION_TOKEN_STORAGE_KEY);
 }
 
 function isTallerPathname(): boolean {
@@ -145,28 +286,41 @@ function buildAuthHeaders(
   const useTaller = mode === 'lite' || (mode === undefined && isTallerPathname());
   if (useTaller) {
     const taller = getSavedTallerUser();
+    const tallerToken = getSavedTallerToken();
     if (taller) {
       headers['x-taller-user-id'] = taller.id;
       headers['x-user-id'] = taller.id;
+      headers['x-origen'] = 'taller';
+      if (tallerToken) headers['Authorization'] = `Bearer ${tallerToken}`;
+      return headers;
+    }
+    if (tallerToken) {
+      headers['Authorization'] = `Bearer ${tallerToken}`;
       headers['x-origen'] = 'taller';
       return headers;
     }
     if (mode === 'lite') {
       const coordFallback = getSavedCoordinacionUser();
+      const coordToken = getSavedCoordinacionToken();
       if (coordFallback) {
         headers['x-coordinacion-user-id'] = coordFallback.id;
         headers['x-user-id'] = coordFallback.id;
         headers['x-origen'] = 'coordinacion';
+        if (coordToken) headers['Authorization'] = `Bearer ${coordToken}`;
       }
     }
     return headers;
   }
 
   const coord = getSavedCoordinacionUser();
+  const coordToken = getSavedCoordinacionToken();
   if (coord) {
     headers['x-coordinacion-user-id'] = coord.id;
     headers['x-user-id'] = coord.id;
     headers['x-origen'] = 'coordinacion';
+  }
+  if (coordToken) {
+    headers['Authorization'] = `Bearer ${coordToken}`;
   }
   return headers;
 }
@@ -175,7 +329,11 @@ async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): P
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetch(input, {
+      credentials: 'include',
+      ...init,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(id);
   }
@@ -217,6 +375,8 @@ async function loadBoardWithEtag(mode: 'full' | 'lite', zoneId?: string): Promis
     activos: raw.activos || [],
     holds: raw.holds || [],
     circuitos_abiertos: raw.circuitos_abiertos || [],
+    circuitos_terminados: raw.circuitos_terminados || [],
+    circuitos_timelines: raw.circuitos_timelines || {},
     catalog: raw.catalog || { zones: [], boxes: [], usuarios: [], unidades: [] },
     taller_zone_map: raw.taller_zone_map ?? null,
     updatedAt: raw.updatedAt || Date.now(),
@@ -315,6 +475,7 @@ export async function actualizarProceso(
       | 'DESHACER_INICIO'
       | 'DESHACER'
       | 'REVERTIR_A_HOLD'
+      | 'VOLVER_A_RESERVADO'
       | 'REINTEGRAR_A_PREASIGNADO'
       | 'ARCHIVAR';
   }
@@ -390,6 +551,29 @@ export async function bajaCircuito(circuitoId: string) {
     const err = await res.json().catch(() => ({}));
     throw new PlaneacionApiError(
       typeof err.error === 'string' ? err.error : 'Error dando de baja el circuito',
+      res.status
+    );
+  }
+  clearBoardCache();
+  return res.json();
+}
+
+export async function reordenarProcesosCircuito(
+  circuitoId: string,
+  procesoIds: string[]
+): Promise<{ success: boolean; circuitoId: string; timeline: CircuitoTimelineStep[] }> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/planeacion/circuitos/${circuitoId}/procesos-orden`,
+    {
+      method: 'PATCH',
+      headers: buildSessionHeaders(),
+      body: JSON.stringify({ procesoIds }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new PlaneacionApiError(
+      extractApiErrorMessage(err, 'Error reordenando procesos del circuito'),
       res.status
     );
   }
@@ -478,7 +662,12 @@ export async function agregarNotaProceso(
 export async function loginUsuarioCoordinacion(payload: {
   nombre_usuario: string;
   password: string;
-}): Promise<{ authenticated: boolean; user?: UsuarioCoordinacionSession; error?: string }> {
+}): Promise<{
+  authenticated: boolean;
+  user?: UsuarioCoordinacionSession;
+  sessionToken?: string;
+  error?: string;
+}> {
   const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/coordinacion/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -488,37 +677,77 @@ export async function loginUsuarioCoordinacion(payload: {
   if (!res.ok || !data.authenticated || !data.user) {
     throw new Error(data.error || 'Usuario o contraseña de coordinación incorrectos');
   }
-  saveCoordinacionUser(data.user);
+  saveCoordinacionUser(data.user, typeof data.sessionToken === 'string' ? data.sessionToken : undefined);
   return data;
 }
 
+export async function logoutUsuarioCoordinacion(): Promise<void> {
+  clearCoordinacionUser();
+  clearBoardCache();
+  try {
+    await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/coordinacion/logout`, {
+      method: 'POST',
+    });
+  } catch {
+    // Best-effort: el estado local ya se limpió
+  }
+}
+
 export async function verificarAccesoCoordinacion(
-  userId: string
-): Promise<{ authorized: boolean; user?: UsuarioCoordinacionSession; error?: string }> {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/api/planeacion/auth/coordinacion/verify?user_id=${encodeURIComponent(userId)}`,
-    {
-      headers: {
-        'x-coordinacion-user-id': userId,
-      },
+  userId?: string
+): Promise<{
+  authorized: boolean;
+  user?: UsuarioCoordinacionSession;
+  error?: string;
+  transientError?: boolean;
+}> {
+  const token = getSavedCoordinacionToken();
+  const headers: Record<string, string> = {};
+  if (userId) headers['x-coordinacion-user-id'] = userId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const qs = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/coordinacion/verify${qs}`, {
+      headers,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      clearCoordinacionUser();
+      return {
+        authorized: false,
+        error: data.error || 'Acceso delimitado a base.user_coordinacion',
+      };
     }
-  );
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.authorized || !data.user) {
-    clearCoordinacionUser();
+    if (!res.ok || !data.authorized || !data.user) {
+      // Error transitorio (5xx / cold start): conservar la sesión persistida en el dispositivo
+      return {
+        authorized: false,
+        transientError: true,
+        error: data.error || `Error temporal verificando sesión (${res.status})`,
+      };
+    }
+    saveCoordinacionUser(data.user, typeof data.sessionToken === 'string' ? data.sessionToken : undefined);
+    return { authorized: true, user: data.user };
+  } catch {
+    // Fallo de red / timeout: nunca borrar sesión persistida
     return {
       authorized: false,
-      error: data.error || 'Acceso delimitado a base.user_coordinacion',
+      transientError: true,
+      error: 'Sin conexión temporal con el servidor',
     };
   }
-  saveCoordinacionUser(data.user);
-  return { authorized: true, user: data.user };
 }
 
 export async function loginUsuarioTaller(payload: {
   nombre_usuario: string;
   password: string;
-}): Promise<{ authenticated: boolean; user?: UsuarioTallerSession; error?: string }> {
+}): Promise<{
+  authenticated: boolean;
+  user?: UsuarioTallerSession;
+  sessionToken?: string;
+  error?: string;
+}> {
   const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -528,31 +757,66 @@ export async function loginUsuarioTaller(payload: {
   if (!res.ok || !data.authenticated || !data.user) {
     throw new Error(data.error || 'Usuario o contraseña incorrectos');
   }
-  saveTallerUser(data.user);
+  saveTallerUser(data.user, typeof data.sessionToken === 'string' ? data.sessionToken : undefined);
   return data;
 }
 
+export async function logoutUsuarioTaller(): Promise<void> {
+  clearTallerUser();
+  clearBoardCache();
+  try {
+    await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/logout`, {
+      method: 'POST',
+    });
+  } catch {
+    // Best-effort: el estado local ya se limpió
+  }
+}
+
 export async function verificarAccesoTaller(
-  userId: string
-): Promise<{ authorized: boolean; user?: UsuarioTallerSession; error?: string }> {
-  const res = await fetchWithTimeout(
-    `${API_BASE}/api/planeacion/auth/verify?user_id=${encodeURIComponent(userId)}`,
-    {
-      headers: {
-        'x-taller-user-id': userId,
-      },
+  userId?: string
+): Promise<{
+  authorized: boolean;
+  user?: UsuarioTallerSession;
+  error?: string;
+  transientError?: boolean;
+}> {
+  const token = getSavedTallerToken();
+  const headers: Record<string, string> = {};
+  if (userId) headers['x-taller-user-id'] = userId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const qs = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/auth/verify${qs}`, {
+      headers,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      clearTallerUser();
+      return {
+        authorized: false,
+        error: data.error || 'Acceso delimitado a base.usuarios_taller',
+      };
     }
-  );
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.authorized || !data.user) {
-    clearTallerUser();
+    if (!res.ok || !data.authorized || !data.user) {
+      // Error transitorio (5xx / cold start): conservar la sesión persistida en el dispositivo
+      return {
+        authorized: false,
+        transientError: true,
+        error: data.error || `Error temporal verificando sesión (${res.status})`,
+      };
+    }
+    saveTallerUser(data.user, typeof data.sessionToken === 'string' ? data.sessionToken : undefined);
+    return { authorized: true, user: data.user };
+  } catch {
+    // Fallo de red / timeout: nunca borrar sesión persistida
     return {
       authorized: false,
-      error: data.error || 'Acceso delimitado a base.usuarios_taller',
+      transientError: true,
+      error: 'Sin conexión temporal con el servidor',
     };
   }
-  saveTallerUser(data.user);
-  return { authorized: true, user: data.user };
 }
 
 export async function editarNotaProceso(
@@ -718,7 +982,55 @@ export interface PlaneacionBoardUpdateEvent {
   procesoId?: string;
   holdId?: string;
   circuitoId?: string;
+  operarioId?: string;
+  boxId?: string | null;
+  zoneId?: string | null;
   updatedAt?: number;
+}
+
+export async function reasignarBoxOperario(
+  operarioId: string,
+  boxId: string | null
+): Promise<ReasignarOperarioBoxResponse> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/planeacion/taller/operarios/${operarioId}/box`,
+    {
+      method: 'PATCH',
+      headers: buildSessionHeaders(),
+      body: JSON.stringify({ boxId }),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new PlaneacionApiError(
+      extractApiErrorMessage(err, 'Error reasignando box de operario'),
+      res.status
+    );
+  }
+  clearBoardCache();
+  return res.json();
+}
+
+export async function quitarOperarioDeProceso(
+  procesoId: string,
+  operarioId: string
+): Promise<QuitarOperarioProcesoResponse> {
+  const res = await fetchWithTimeout(
+    `${API_BASE}/api/planeacion/procesos/${procesoId}/usuarios/${operarioId}`,
+    {
+      method: 'DELETE',
+      headers: buildSessionHeaders(),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new PlaneacionApiError(
+      extractApiErrorMessage(err, 'Error quitando operario del proceso'),
+      res.status
+    );
+  }
+  clearBoardCache();
+  return res.json();
 }
 
 export function subscribePlaneacionSocket(

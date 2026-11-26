@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  CARD_OPERARIO_DRAG_MIME,
   TallerUnitCard,
   type TallerCardItem,
   type TallerColumnId,
@@ -28,6 +29,7 @@ import { DragScrollContainer } from '../components/common/DragScrollContainer';
 import { useDragAutoScroll, useIsCardDragging } from '../hooks/useDragAutoScroll';
 import {
   PlaneacionApiError,
+  TALLER_AUTH_STORAGE_KEY,
   activarHoldProceso,
   actualizarProceso,
   clearBoardCache,
@@ -35,6 +37,10 @@ import {
   fetchTallerBoard,
   getSavedTallerUser,
   loginUsuarioTaller,
+  logoutUsuarioTaller,
+  quitarOperarioDeProceso,
+  reasignarBoxOperario,
+  saveTallerUser,
   subscribePlaneacionSocket,
   verificarAccesoTaller,
 } from '../services/planeacionApi';
@@ -67,8 +73,14 @@ interface PendingMoveConfirm {
   kind: TallerConfirmMoveKind;
   title: string;
   unitLabel: string;
+  tractorPlate: string | null;
+  semiPlate: string | null;
   sourceBoxName: string | null;
   targetBoxName: string | null;
+  sourceUsers: string[];
+  targetUsers: string[];
+  sourceEncargado: string | null;
+  targetEncargado: string | null;
   estadoAplicar: string;
   rowEffectNote: string | null;
 }
@@ -157,6 +169,7 @@ function playNotificationTone() {
 function canDropTarget(source: DragPayload, target: DropTarget): boolean {
   if (source.sourceCol === 'HOLD' && target.col === 'SALIDA') return false;
   if (source.sourceCol === 'SALIDA' && target.col === 'HOLD') return false;
+  if (source.sourceCol === 'INICIO' && target.col === 'HOLD') return false;
   if (source.sourceCol === 'INICIO' && target.col === 'INICIO') {
     if (!target.estado) return false;
     const srcEstado: EstadoBox = source.sourceEstado === 'afuera' ? 'afuera' : 'adentro';
@@ -180,6 +193,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
   const [dragging, setDragging] = useState<DragPayload | null>(null);
   const [dragOverTarget, setDragOverTarget] = useState<DropTarget | null>(null);
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
+  const [busyOperarioIds, setBusyOperarioIds] = useState<Record<string, boolean>>({});
   const [isHoldHovered, setIsHoldHovered] = useState(false);
   const [hoveredCol, setHoveredCol] = useState<'LLEGADA' | 'SALIDA' | null>(null);
   const [deployedCardIds, setDeployedCardIds] = useState<{
@@ -318,6 +332,20 @@ export const TallerLoginTerminalPage: React.FC = () => {
       );
   }, [board?.taller_zone_map, board?.catalog?.boxes, board?.catalog?.usuarios, user?.zone_id]);
 
+  const unassignedOperarios = useMemo<TallerBoxOperario[]>(() => {
+    if (board?.taller_zone_map?.sin_box?.operarios) {
+      return board.taller_zone_map.sin_box.operarios;
+    }
+    const catalogUsers = board?.catalog?.usuarios || [];
+    if (!user?.zone_id) return [];
+    return catalogUsers
+      .filter((u) => u.rol === 'operario' && u.zone_id === user.zone_id && !u.box_id)
+      .map((u) => ({ id: u.id, nombre_usuario: u.nombre_usuario }))
+      .sort((a, b) =>
+        a.nombre_usuario.localeCompare(b.nombre_usuario, 'es', { sensitivity: 'base' })
+      );
+  }, [board?.taller_zone_map?.sin_box?.operarios, board?.catalog?.usuarios, user?.zone_id]);
+
   const refreshBoard = useCallback(async () => {
     try {
       const zoneParam = user?.zone_id ? user.zone_id : undefined;
@@ -381,18 +409,20 @@ export const TallerLoginTerminalPage: React.FC = () => {
     [refreshBoard]
   );
 
-  // Verificación estricta de sesión (1 vez por user.id)
+  // Verificación persistente de sesión en dispositivo (Cookie HttpOnly + Token + LocalStorage)
   useEffect(() => {
-    if (!user?.id) return;
     let active = true;
 
-    verificarAccesoTaller(user.id).then((res) => {
+    verificarAccesoTaller(user?.id).then((res) => {
       if (!active) return;
-      if (!res.authorized || !res.user) {
+      if (res.authorized && res.user) {
+        setUser(res.user);
+      } else if (res.transientError) {
+        // Error transitorio (cold start / red): conservar sesión persistida en el dispositivo
+        return;
+      } else if (user?.id) {
         setUser(null);
         setAuthError(res.error || 'Sesión expirada o usuario no habilitado.');
-      } else {
-        setUser(res.user);
       }
     });
 
@@ -401,13 +431,44 @@ export const TallerLoginTerminalPage: React.FC = () => {
     };
   }, [user?.id]);
 
+  // Sincronización de sesión entre pestañas del mismo dispositivo
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== TALLER_AUTH_STORAGE_KEY) return;
+      const synced = getSavedTallerUser();
+      if (!synced) {
+        clearBoardCache();
+        setUser(null);
+        setPassword('');
+      } else {
+        setUser(synced);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   // Suscripción Socket.IO y carga inicial / por rol-zona (0 polling agresivo)
   useEffect(() => {
     if (!user?.id) return;
+    const currentUserId = user.id;
+    const currentUserRol = user.rol;
     refreshBoard();
     const unsub = subscribePlaneacionSocket(
-      () => {
+      (event) => {
         refreshBoard();
+        if (
+          event?.action === 'OPERARIO_BOX_UPDATED' &&
+          currentUserRol === 'operario' &&
+          event.operarioId === currentUserId
+        ) {
+          verificarAccesoTaller(currentUserId).then((res) => {
+            if (res.authorized && res.user) {
+              setUser(res.user);
+              saveTallerUser(res.user);
+            }
+          });
+        }
       },
       () => {
         playNotificationTone();
@@ -417,7 +478,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
     return () => {
       unsub();
     };
-  }, [user?.id, refreshBoard]);
+  }, [user?.id, user?.rol, refreshBoard]);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -447,8 +508,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
   };
 
   const handleLogout = () => {
-    clearTallerUser();
-    clearBoardCache();
+    void logoutUsuarioTaller();
     setUser(null);
     setPassword('');
     setAuthError(null);
@@ -509,6 +569,8 @@ export const TallerLoginTerminalPage: React.FC = () => {
         ultima_tarea: h.ultima_tarea,
         ultima_tarea_usuario: h.ultima_tarea_usuario,
         ultima_tarea_at: h.ultima_tarea_at,
+        en_proceso_activo: Boolean(h.en_proceso_activo),
+        liberado_circuito: Boolean(h.liberado_circuito),
       });
     }
 
@@ -672,14 +734,14 @@ export const TallerLoginTerminalPage: React.FC = () => {
     const targetEstado: EstadoBox | undefined =
       targetCol === 'INICIO' ? targetOptions?.estado ?? 'adentro' : undefined;
 
-    if (item.col === 'HOLD' && (targetCol === 'LLEGADA' || targetCol === 'INICIO') && !targetBoxId) {
+    if (item.col === 'HOLD' && targetCol === 'INICIO' && !targetBoxId) {
       toast.error('Asigná un box antes de ingresar la unidad desde Pendiente.');
       return;
     }
 
     setItemBusy(item.id, true);
     try {
-      // 1. HOLD -> LLEGADA / INICIO (boxId + estado adentro/afuera)
+      // 1. HOLD -> LLEGADA / INICIO (HOLD -> LLEGADA imprime solo zona; HOLD -> INICIO usa boxId + estado)
       if (item.col === 'HOLD' && (targetCol === 'LLEGADA' || targetCol === 'INICIO')) {
         const iniciarInmediato = targetCol === 'INICIO';
         const tempId = item.id;
@@ -693,8 +755,8 @@ export const TallerLoginTerminalPage: React.FC = () => {
           semi_id: item.semi_id,
           semi_plate: item.semi_plate,
           modalidad_tracking: 'EQUIPO_ACOPLADO',
-          box_id: targetBoxId || '',
-          box_name: targetBoxName,
+          box_id: iniciarInmediato ? targetBoxId || '' : '',
+          box_name: iniciarInmediato ? targetBoxName : '',
           estado: iniciarInmediato ? targetEstado ?? 'adentro' : null,
           zone_id: user.zone_id || item.zone_id || '',
           zone_name: user.zone_name || item.zone_name || 'Zona',
@@ -702,25 +764,27 @@ export const TallerLoginTerminalPage: React.FC = () => {
           llegada_at: nowIso,
           inicio_at: iniciarInmediato ? nowIso : null,
           salida_at: null,
-          usuarios_ids:
-            isEncargado && iniciarInmediato
+          usuarios_ids: iniciarInmediato
+            ? isEncargado
               ? targetBoxOperarios.map((o) => o.id)
               : item.usuarios_ids && item.usuarios_ids.length > 0
               ? item.usuarios_ids
-              : !isEncargado && iniciarInmediato
+              : !isEncargado
               ? [user.id]
-              : [],
-          usuarios_nombres:
-            isEncargado && iniciarInmediato
+              : []
+            : [],
+          usuarios_nombres: iniciarInmediato
+            ? isEncargado
               ? targetBoxOperarios.map((o) => o.nombre_usuario)
               : item.usuarios_nombres && item.usuarios_nombres.length > 0
               ? item.usuarios_nombres
-              : !isEncargado && iniciarInmediato
+              : !isEncargado
               ? [user.nombre_usuario]
-              : [],
-          encargado_id: isEncargado ? user.id : item.encargado_id ?? null,
-          encargado_nombre: isEncargado ? user.nombre_usuario : item.encargado_nombre ?? null,
-          encargado_at: isEncargado ? nowIso : item.encargado_at ?? null,
+              : []
+            : [],
+          encargado_id: iniciarInmediato && isEncargado ? user.id : null,
+          encargado_nombre: iniciarInmediato && isEncargado ? user.nombre_usuario : null,
+          encargado_at: iniciarInmediato && isEncargado ? nowIso : null,
           notes: item.notes && item.notes.length > 0 ? item.notes : [],
           notes_count: item.notes_count ?? item.notes?.length ?? 0,
           salida_previa_at: item.salida_previa_at,
@@ -739,7 +803,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
         try {
           const res = await activarHoldProceso(
             item.id,
-            targetBoxId,
+            iniciarInmediato ? targetBoxId : null,
             iniciarInmediato,
             iniciarInmediato ? targetEstado ?? 'adentro' : null
           );
@@ -950,7 +1014,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
         return;
       }
 
-      // 3. INICIO -> LLEGADA (Deshacer inicio preservando llegada_zona_at original)
+      // 3. INICIO -> LLEGADA (cierra proceso actual y abre nuevo proceso en RESERVADO para la misma zona)
       if (item.col === 'INICIO' && targetCol === 'LLEGADA') {
         setBoard((prev) => {
           if (!prev) return prev;
@@ -958,23 +1022,56 @@ export const TallerLoginTerminalPage: React.FC = () => {
             ...prev,
             activos: (prev.activos || []).map((a) =>
               a.proceso_id === item.id
-                ? { ...a, inicio_at: null, salida_at: null, estado: null, estado_proceso: 'EN_ESPERA' }
+                ? {
+                    ...a,
+                    box_id: '',
+                    box_name: '',
+                    llegada_at: nowIso,
+                    inicio_at: null,
+                    salida_at: null,
+                    estado: null,
+                    estado_proceso: 'EN_ESPERA',
+                    usuarios_ids: [],
+                    usuarios_nombres: [],
+                    encargado_id: null,
+                    encargado_nombre: null,
+                    encargado_at: null,
+                  }
                 : a
             ),
           };
         });
 
         try {
-          await actualizarProceso(item.id, { action: 'DESHACER_INICIO' });
+          const res = await actualizarProceso(item.id, { action: 'VOLVER_A_RESERVADO' });
+          const nextProcesoId = res?.proceso?.proceso_id || res?.proceso?.id || null;
+          if (nextProcesoId) {
+            setBoard((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                activos: (prev.activos || []).map((a) =>
+                  a.proceso_id === item.id
+                    ? {
+                        ...a,
+                        proceso_id: String(nextProcesoId),
+                        llegada_at: res.proceso?.llegada_at || a.llegada_at,
+                      }
+                    : a
+                ),
+              };
+            });
+          }
         } catch (err) {
-          console.error('Error deshaciendo inicio:', err);
+          console.error('Error volviendo a reservado:', err);
+          toast.error(err instanceof Error ? err.message : 'No se pudo volver a Reservado');
           setBoard(prevBoard);
         }
         return;
       }
 
-      // 4. LLEGADA / INICIO -> HOLD (Revertir in-place preservando todas las notas)
-      if ((item.col === 'LLEGADA' || item.col === 'INICIO') && targetCol === 'HOLD') {
+      // 4. LLEGADA -> HOLD (Revertir in-place preservando todas las notas)
+      if (item.col === 'LLEGADA' && targetCol === 'HOLD') {
         const tempHoldId = item.id;
         const restoredHold: PlaneacionHold = {
           hold_id: tempHoldId,
@@ -997,8 +1094,15 @@ export const TallerLoginTerminalPage: React.FC = () => {
           nota_planificacion: null,
           notes: item.notes || [],
           proceso_origen_id: item.id,
-          created_at: nowIso,
+          created_at: item.created_at || nowIso,
           updated_at: nowIso,
+          en_proceso_activo: false,
+          liberado_circuito: Boolean(
+            item.salida_previa_at &&
+              (item.created_at || nowIso) &&
+              new Date(item.salida_previa_at).getTime() >=
+                new Date(item.created_at || nowIso).getTime()
+          ),
         };
 
         setBoard((prev) => {
@@ -1046,6 +1150,26 @@ export const TallerLoginTerminalPage: React.FC = () => {
           );
           return {
             ...prev,
+            holds: (prev.holds || []).map((h) => {
+              const matchesHold =
+                (item.circuito_id && h.circuito_id === item.circuito_id) ||
+                (item.unidad_id && h.unidad_id === item.unidad_id) ||
+                (item.tractor_id && h.tractor_id === item.tractor_id) ||
+                (item.semi_id && h.semi_id === item.semi_id);
+              if (!matchesHold) return h;
+              const wasActive = Boolean(h.en_proceso_activo);
+              return {
+                ...h,
+                en_proceso_activo: false,
+                salida_previa_at: nowIso,
+                liberado_circuito:
+                  wasActive ||
+                  Boolean(
+                    h.created_at &&
+                      new Date(nowIso).getTime() >= new Date(h.created_at).getTime()
+                  ),
+              };
+            }),
             activos: hasPreasignacion
               ? (prev.activos || []).filter((a) => a.proceso_id !== item.id)
               : (prev.activos || []).map((a) =>
@@ -1143,6 +1267,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
   };
 
   const handleTargetDragOver = (e: React.DragEvent<HTMLElement>, target: DropTarget) => {
+    if (Array.from(e.dataTransfer.types || []).includes(CARD_OPERARIO_DRAG_MIME)) return;
     if (!dragging || !canDropTarget(dragging, target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -1162,6 +1287,11 @@ export const TallerLoginTerminalPage: React.FC = () => {
   ): PendingMoveConfirm | null => {
     if (!user) return null;
 
+    const tractorPlate = item.tractor_plate?.trim() || null;
+    const semiPlate = item.semi_plate?.trim() || null;
+    const sourceUsers = item.usuarios_nombres || [];
+    const sourceEncargado = item.encargado_nombre || null;
+
     if (target.col === 'SALIDA') {
       return {
         item,
@@ -1169,10 +1299,37 @@ export const TallerLoginTerminalPage: React.FC = () => {
         kind: 'TERMINADO',
         title: 'Confirmar terminado',
         unitLabel: formatUnitLabel(item),
+        tractorPlate,
+        semiPlate,
         sourceBoxName: item.box_name || null,
         targetBoxName: null,
+        sourceUsers,
+        targetUsers: sourceUsers,
+        sourceEncargado,
+        targetEncargado: sourceEncargado,
         estadoAplicar: 'TERMINADO',
         rowEffectNote: 'Registra el cierre (TERMINADO) de la etapa actual.',
+      };
+    }
+
+    if (item.col === 'INICIO' && target.col === 'LLEGADA') {
+      return {
+        item,
+        target,
+        kind: 'VOLVER_RESERVADO',
+        title: 'Confirmar salida a Reservado',
+        unitLabel: formatUnitLabel(item),
+        tractorPlate,
+        semiPlate,
+        sourceBoxName: item.box_name || null,
+        targetBoxName: null,
+        sourceUsers,
+        targetUsers: [],
+        sourceEncargado,
+        targetEncargado: null,
+        estadoAplicar: 'RESERVADO · MISMA ZONA',
+        rowEffectNote:
+          'Aviso DB: se cierra el proceso actual y se abre un nuevo proceso en RESERVADO para la misma zona (sin box ni usuarios asignados).',
       };
     }
 
@@ -1196,28 +1353,77 @@ export const TallerLoginTerminalPage: React.FC = () => {
       const targetBoxObj = resolvedBoxId
         ? sectorBoxes.find((b) => b.id === resolvedBoxId) || null
         : null;
+      const targetBoxOperarios = targetBoxObj?.operarios || [];
       const resolvedTargetBoxName =
         targetBoxObj?.box_name || item.box_name || user.box_name || 'Box';
 
       if (item.col === 'INICIO') {
         const boxChanged = Boolean(resolvedBoxId && resolvedBoxId !== item.box_id);
+        let targetUsers = sourceUsers;
+        let targetEncargado = sourceEncargado;
+        let rowEffectNote: string;
+
+        if (isEncargado) {
+          targetUsers = boxChanged
+            ? targetBoxOperarios.map((o) => o.nombre_usuario)
+            : sourceUsers;
+          targetEncargado = user.nombre_usuario;
+          rowEffectNote = boxChanged
+            ? 'Edita la fila actual en procesos, actualiza su horario (tz) y reasigna los usuarios al box destino.'
+            : 'Edita la fila actual en procesos y actualiza su horario (tz).';
+        } else if (boxChanged) {
+          const nextOperarioTransferUsers =
+            resolvedBoxId === user.box_id &&
+            !targetBoxOperarios.some((o) => o.id === user.id)
+              ? [...targetBoxOperarios, { id: user.id, nombre_usuario: user.nombre_usuario }]
+              : targetBoxOperarios;
+          targetUsers = nextOperarioTransferUsers.map((o) => o.nombre_usuario);
+          targetEncargado = null;
+          rowEffectNote =
+            'Cierra la fila actual y asigna una nueva fila con los usuarios del box destino.';
+        } else {
+          rowEffectNote = 'Actualiza la posición dentro del mismo box.';
+        }
+
         return {
           item,
           target: { ...target, boxId: resolvedBoxId },
           kind: 'CAMBIO_ZONA',
           title: boxChanged ? 'Confirmar movimiento al box' : 'Confirmar cambio en zona',
           unitLabel: formatUnitLabel(item),
+          tractorPlate,
+          semiPlate,
           sourceBoxName: item.box_name || null,
           targetBoxName: resolvedTargetBoxName,
+          sourceUsers,
+          targetUsers,
+          sourceEncargado,
+          targetEncargado,
           estadoAplicar: boxChanged
             ? `MOVIMIENTO AL BOX · ${nextEstadoLabel}`
             : nextEstadoLabel,
-          rowEffectNote: isEncargado
-            ? 'Edita la fila actual en procesos y actualiza su horario (tz).'
-            : boxChanged
-            ? 'Cierra la fila actual y asigna una nueva fila al box destino.'
-            : 'Actualiza la posición dentro del mismo box.',
+          rowEffectNote,
         };
+      }
+
+      let targetUsers = sourceUsers;
+      let targetEncargado = sourceEncargado;
+      let rowEffectNote: string;
+
+      if (isEncargado) {
+        targetUsers = targetBoxOperarios.map((o) => o.nombre_usuario);
+        targetEncargado = user.nombre_usuario;
+        rowEffectNote =
+          item.col === 'SALIDA'
+            ? 'Reabre el proceso en el box seleccionado y actualiza los usuarios asignados.'
+            : targetBoxOperarios.length > 0
+            ? 'Ingresa la unidad al box seleccionado y asigna los usuarios del box.'
+            : 'Ingresa la unidad al box seleccionado.';
+      } else if (item.col === 'SALIDA') {
+        rowEffectNote = 'Reabre el proceso en el box seleccionado.';
+      } else {
+        targetUsers = Array.from(new Set([...sourceUsers, user.nombre_usuario]));
+        rowEffectNote = 'Ingresa la unidad al box seleccionado.';
       }
 
       return {
@@ -1226,10 +1432,16 @@ export const TallerLoginTerminalPage: React.FC = () => {
         kind: 'MOVIMIENTO_BOX',
         title: 'Confirmar movimiento al box',
         unitLabel: formatUnitLabel(item),
+        tractorPlate,
+        semiPlate,
         sourceBoxName: item.box_name || null,
         targetBoxName: resolvedTargetBoxName,
+        sourceUsers,
+        targetUsers,
+        sourceEncargado,
+        targetEncargado,
         estadoAplicar: `MOVIMIENTO AL BOX · ${nextEstadoLabel}`,
-        rowEffectNote: 'Ingresa la unidad al box seleccionado.',
+        rowEffectNote,
       };
     }
 
@@ -1256,6 +1468,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
   };
 
   const handleTargetDrop = async (e: React.DragEvent<HTMLElement>, target: DropTarget) => {
+    if (Array.from(e.dataTransfer.types || []).includes(CARD_OPERARIO_DRAG_MIME)) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOverTarget(null);
@@ -1276,7 +1489,8 @@ export const TallerLoginTerminalPage: React.FC = () => {
     const item = sourceList.find((x) => x.id === payload.id);
     if (!item) return;
 
-    const requiresConfirm = target.col === 'SALIDA' || target.col === 'INICIO';
+    const requiresConfirm =
+      target.col === 'SALIDA' || target.col === 'INICIO' || item.col === 'INICIO';
     if (requiresConfirm) {
       const confirmData = buildPendingMoveConfirm(item, target);
       if (confirmData) {
@@ -1330,6 +1544,207 @@ export const TallerLoginTerminalPage: React.FC = () => {
       setItemBusy(item.id, false);
     }
   };
+
+  const handleMoveOperarioToBox = useCallback(
+    async (operarioId: string, targetBoxId: string | null) => {
+      if (!user || !isEncargado || busyOperarioIds[operarioId]) return;
+
+      let opEntry: TallerBoxOperario | null = null;
+      let currentBoxId: string | null = null;
+
+      for (const box of sectorBoxes) {
+        const found = box.operarios.find((o) => o.id === operarioId);
+        if (found) {
+          opEntry = found;
+          currentBoxId = box.id;
+          break;
+        }
+      }
+      if (!opEntry) {
+        const foundUnassigned = unassignedOperarios.find((o) => o.id === operarioId);
+        if (foundUnassigned) {
+          opEntry = foundUnassigned;
+          currentBoxId = null;
+        }
+      }
+
+      if (!opEntry || currentBoxId === targetBoxId) return;
+
+      const targetBoxName = targetBoxId
+        ? sectorBoxes.find((b) => b.id === targetBoxId)?.box_name || 'Box'
+        : null;
+      const prevBoard = board;
+
+      setBusyOperarioIds((prev) => ({ ...prev, [operarioId]: true }));
+
+      setBoard((prev) => {
+        if (!prev) return prev;
+        const sortOps = (list: TallerBoxOperario[]) =>
+          [...list].sort((a, b) =>
+            a.nombre_usuario.localeCompare(b.nombre_usuario, 'es', { sensitivity: 'base' })
+          );
+
+        const nextZoneMap = prev.taller_zone_map
+          ? {
+              ...prev.taller_zone_map,
+              boxes: prev.taller_zone_map.boxes.map((b) => {
+                const filtered = (b.operarios || []).filter((o) => o.id !== operarioId);
+                if (targetBoxId && b.box_id === targetBoxId) {
+                  return {
+                    ...b,
+                    operarios: sortOps([...filtered, opEntry!]),
+                  };
+                }
+                return { ...b, operarios: filtered };
+              }),
+              sin_box: {
+                adentro: prev.taller_zone_map.sin_box?.adentro || [],
+                afuera: prev.taller_zone_map.sin_box?.afuera || [],
+                operarios:
+                  targetBoxId === null
+                    ? sortOps([
+                        ...(prev.taller_zone_map.sin_box?.operarios || []).filter(
+                          (o) => o.id !== operarioId
+                        ),
+                        opEntry!,
+                      ])
+                    : (prev.taller_zone_map.sin_box?.operarios || []).filter(
+                        (o) => o.id !== operarioId
+                      ),
+              },
+            }
+          : prev.taller_zone_map;
+
+        const nextCatalog = prev.catalog
+          ? {
+              ...prev.catalog,
+              usuarios: prev.catalog.usuarios.map((u) =>
+                u.id === operarioId
+                  ? { ...u, box_id: targetBoxId, box_name: targetBoxName }
+                  : u
+              ),
+            }
+          : prev.catalog;
+
+        const nextActivos = targetBoxId
+          ? prev.activos.map((c) => {
+              if (
+                c.box_id === targetBoxId &&
+                Boolean(c.inicio_at) &&
+                !c.salida_at &&
+                !(c.usuarios_ids || []).includes(operarioId)
+              ) {
+                return {
+                  ...c,
+                  usuarios_ids: [...(c.usuarios_ids || []), operarioId],
+                  usuarios_nombres: [...(c.usuarios_nombres || []), opEntry!.nombre_usuario],
+                };
+              }
+              return c;
+            })
+          : prev.activos;
+
+        return {
+          ...prev,
+          activos: nextActivos,
+          taller_zone_map: nextZoneMap,
+          catalog: nextCatalog,
+        };
+      });
+
+      try {
+        const res = await reasignarBoxOperario(operarioId, targetBoxId);
+        const resolvedBoxName = res.operario.box_name || targetBoxName;
+        const assignedCount = res.assignedProcesosIds?.length ?? 0;
+        toast.success(
+          targetBoxId
+            ? assignedCount > 0
+              ? `${opEntry.nombre_usuario} asignado a ${resolvedBoxName} (+${assignedCount} ${
+                  assignedCount === 1 ? 'unidad en proceso' : 'unidades en proceso'
+                })`
+              : `${opEntry.nombre_usuario} asignado a ${resolvedBoxName}`
+            : `${opEntry.nombre_usuario} quedó sin box`
+        );
+        void refreshBoard();
+      } catch (err) {
+        console.error('Error reasignando operario de box:', err);
+        setBoard(prevBoard);
+        toast.error(
+          err instanceof Error ? err.message : 'No se pudo cambiar el box del operario'
+        );
+        if (err instanceof PlaneacionApiError && err.status === 401) {
+          clearTallerUser();
+          clearBoardCache();
+          setUser(null);
+          setAuthError(err.message);
+        }
+      } finally {
+        setBusyOperarioIds((prev) => {
+          const copy = { ...prev };
+          delete copy[operarioId];
+          return copy;
+        });
+      }
+    },
+    [user, isEncargado, busyOperarioIds, sectorBoxes, unassignedOperarios, board, refreshBoard]
+  );
+
+  const handleRemoveOperarioFromProceso = useCallback(
+    async (procesoId: string, operarioId: string, operarioNombre: string) => {
+      if (!user || !isEncargado || busyIds[procesoId]) return;
+
+      const prevBoard = board;
+      setItemBusy(procesoId, true);
+
+      setBoard((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          activos: prev.activos.map((c) => {
+            if (c.proceso_id !== procesoId) return c;
+            const currentIds = c.usuarios_ids || [];
+            const currentNames = c.usuarios_nombres || [];
+            const nextIds: string[] = [];
+            const nextNames: string[] = [];
+            currentIds.forEach((uid, idx) => {
+              if (uid !== operarioId) {
+                nextIds.push(uid);
+                if (currentNames[idx] !== undefined) {
+                  nextNames.push(currentNames[idx]);
+                }
+              }
+            });
+            return {
+              ...c,
+              usuarios_ids: nextIds,
+              usuarios_nombres: nextNames,
+            };
+          }),
+        };
+      });
+
+      try {
+        await quitarOperarioDeProceso(procesoId, operarioId);
+        toast.success(`${operarioNombre} quitado del proceso`);
+        void refreshBoard();
+      } catch (err) {
+        console.error('Error quitando operario del proceso:', err);
+        setBoard(prevBoard);
+        toast.error(
+          err instanceof Error ? err.message : 'No se pudo quitar el operario del proceso'
+        );
+        if (err instanceof PlaneacionApiError && err.status === 401) {
+          clearTallerUser();
+          clearBoardCache();
+          setUser(null);
+          setAuthError(err.message);
+        }
+      } finally {
+        setItemBusy(procesoId, false);
+      }
+    },
+    [user, isEncargado, busyIds, board, setItemBusy, refreshBoard]
+  );
 
   // ============================================================================
   // 1. UI LOGIN (Delimitado a base.usuarios_taller)
@@ -1519,6 +1934,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
                       zoneLabel={columnTitle}
                       totalCount={items.length}
                       slots={zoneBoxSlots}
+                      circuitosTimelines={board?.circuitos_timelines}
                       colSpanClass="min-w-0"
                       borderIdle={col.borderIdle}
                       borderOver={col.borderOver}
@@ -1542,6 +1958,13 @@ export const TallerLoginTerminalPage: React.FC = () => {
                       onUndoCard={isEncargado ? handleUndoCard : undefined}
                       onDragStart={handleDragStart}
                       onDragEnd={handleDragEnd}
+                      canManageOperarios={isEncargado}
+                      busyOperarioIds={busyOperarioIds}
+                      unassignedOperarios={unassignedOperarios}
+                      onMoveOperarioToBox={handleMoveOperarioToBox}
+                      onRemoveOperarioFromProceso={
+                        isEncargado ? handleRemoveOperarioFromProceso : undefined
+                      }
                     />
                   );
                 }
@@ -1566,12 +1989,12 @@ export const TallerLoginTerminalPage: React.FC = () => {
                       }
                     }}
                     onDrop={(e) => handleTargetDrop(e, colTarget)}
-                    className={`h-full min-h-[220px] md:min-h-0 min-w-0 overflow-hidden rounded-2xl border-2 border-dashed flex flex-col transition-[padding,border-color,background-color] ${SMOOTH_EASE} ${
+                    className={`h-full min-h-[220px] md:min-h-0 min-w-0 overflow-hidden rounded-2xl ui-stroke-dashed flex flex-col transition-[padding,border-color,background-color] ${SMOOTH_EASE} ${
                       isColExpanded ? 'p-3' : 'p-2'
                     } ${isOver ? col.borderOver : col.borderIdle}`}
                   >
                     {/* Header de Contenedor */}
-                    <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-[#1A2232] shrink-0 gap-1">
+                    <div className="flex items-center justify-between pb-2 mb-2.5 ui-divider-dashed-subtle-b border-[#1A2232] shrink-0 gap-1">
                       <h2
                         className={`font-helvetica font-bold tracking-wide text-white uppercase truncate transition-[font-size] ${SMOOTH_EASE} ${
                           isColExpanded ? 'text-sm' : 'text-xs lg:text-[13px]'
@@ -1589,7 +2012,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
 
                     {/* Drop Hint cuando se arrastra una card sobre otro contenedor */}
                     {isOver && (
-                      <div className="mb-2.5 px-2.5 py-1.5 rounded-xl border border-dashed border-white/30 bg-white/5 text-[11px] font-semibold text-center text-white shrink-0">
+                      <div className="mb-2.5 px-2.5 py-1.5 rounded-xl ui-stroke-dashed-subtle border-white/30 bg-white/5 text-[11px] font-semibold text-center text-white shrink-0">
                         {col.dropHint}
                       </div>
                     )}
@@ -1617,6 +2040,11 @@ export const TallerLoginTerminalPage: React.FC = () => {
                           <TallerUnitCard
                             key={item.id}
                             item={item}
+                            timelineSteps={
+                              item.circuito_id
+                                ? board?.circuitos_timelines?.[item.circuito_id]
+                                : undefined
+                            }
                             isBusy={Boolean(busyIds[item.id])}
                             isContainerHovered={isColExpanded}
                             onDeployChange={(id, isDeployed) =>
@@ -1665,14 +2093,14 @@ export const TallerLoginTerminalPage: React.FC = () => {
                 }
               }}
               onDrop={(e) => handleTargetDrop(e, holdTarget)}
-              className={`w-full shrink-0 rounded-2xl border-2 border-dashed transition-[height,border-color,background-color] ${SMOOTH_EASE} flex flex-col overflow-hidden ${
+              className={`w-full shrink-0 rounded-2xl ui-stroke-dashed transition-[height,border-color,background-color] ${SMOOTH_EASE} flex flex-col overflow-hidden ${
                 hasDeployedHold ? 'h-[292px]' : isHoldExpanded ? 'h-[208px]' : 'h-[110px]'
               } ${isOverHold ? HOLD_CONFIG.borderOver : HOLD_CONFIG.borderIdle}`}
             >
               {/* Header con indicativo de hover */}
               <div
                 onClick={() => setIsHoldHovered((prev) => !prev)}
-                className="h-8 px-4 flex items-center justify-between border-b border-[#1A2232] bg-[#0A0E15]/95 shrink-0 cursor-pointer select-none"
+                className="h-8 px-4 flex items-center justify-between ui-divider-dashed-subtle-b border-[#1A2232] bg-[#0A0E15]/95 shrink-0 cursor-pointer select-none"
               >
                 <h2 className="font-helvetica font-bold text-sm tracking-wide text-white uppercase truncate">
                   {HOLD_CONFIG.title}
@@ -1687,7 +2115,7 @@ export const TallerLoginTerminalPage: React.FC = () => {
 
               {/* Drop hint al arrastrar sobre HOLD */}
               {isOverHold && (
-                <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-400/40 bg-amber-500/10 text-[11px] font-semibold text-center text-amber-200 shrink-0">
+                <div className="mx-3 mt-2 px-3 py-1.5 rounded-lg ui-stroke-dashed-subtle border-amber-400/40 bg-amber-500/10 text-[11px] font-semibold text-center text-amber-200 shrink-0">
                   {HOLD_CONFIG.dropHint}
                 </div>
               )}
@@ -1707,6 +2135,11 @@ export const TallerLoginTerminalPage: React.FC = () => {
                     <TallerUnitCard
                       key={item.id}
                       item={item}
+                      timelineSteps={
+                        item.circuito_id
+                          ? board?.circuitos_timelines?.[item.circuito_id]
+                          : undefined
+                      }
                       layout="horizontal"
                       isContainerHovered={isHoldExpanded}
                       isBusy={Boolean(busyIds[item.id])}
@@ -1731,8 +2164,14 @@ export const TallerLoginTerminalPage: React.FC = () => {
         kind={pendingMove?.kind ?? 'MOVIMIENTO_BOX'}
         title={pendingMove?.title ?? ''}
         unitLabel={pendingMove?.unitLabel ?? ''}
+        tractorPlate={pendingMove?.tractorPlate}
+        semiPlate={pendingMove?.semiPlate}
         sourceBoxName={pendingMove?.sourceBoxName}
         targetBoxName={pendingMove?.targetBoxName}
+        sourceUsers={pendingMove?.sourceUsers}
+        targetUsers={pendingMove?.targetUsers}
+        sourceEncargado={pendingMove?.sourceEncargado}
+        targetEncargado={pendingMove?.targetEncargado}
         estadoAplicar={pendingMove?.estadoAplicar ?? ''}
         rowEffectNote={pendingMove?.rowEffectNote}
         isSubmitting={isConfirmingMove}

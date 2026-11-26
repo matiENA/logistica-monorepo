@@ -20,8 +20,56 @@
   font-display: swap;
 }
 
-.no-scrollbar::-webkit-scrollbar {
+:root {
+  --ui-stroke-dashed-width: 2px;
+  --ui-stroke-dashed-subtle-width: 1px;
+}
+
+@layer base {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  /* Estándar UI Design System: stroke dashed estructural (2px) y sutil/interno (1px) */
+  .ui-stroke-dashed {
+    border-width: var(--ui-stroke-dashed-width);
+    border-style: dashed;
+  }
+
+  .ui-stroke-dashed-subtle {
+    border-width: var(--ui-stroke-dashed-subtle-width);
+    border-style: dashed;
+  }
+
+  .ui-divider-dashed-r {
+    border-right-width: var(--ui-stroke-dashed-width);
+    border-right-style: dashed;
+  }
+
+  .ui-divider-dashed-t {
+    border-top-width: var(--ui-stroke-dashed-width);
+    border-top-style: dashed;
+  }
+
+  .ui-divider-dashed-subtle-t {
+    border-top-width: var(--ui-stroke-dashed-subtle-width);
+    border-top-style: dashed;
+  }
+
+  .ui-divider-dashed-subtle-b {
+    border-bottom-width: var(--ui-stroke-dashed-subtle-width);
+    border-bottom-style: dashed;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar:horizontal {
   display: none;
+  width: 0;
+  height: 0;
 }
 .no-scrollbar {
   -ms-overflow-style: none;
@@ -58,9 +106,51 @@
   animation: idleTabEnterPrev 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Transición WCAG 2.2 AA/AAA entre hex blank (#FFFFFF) y verde paleta (#D1FAE5) para unidades liberadas */
+@keyframes cardFreedBlankGreen {
+  0%,
+  100% {
+    background-color: #ffffff;
+  }
+  50% {
+    background-color: #d1fae5;
+  }
+}
+
+.animate-card-freed {
+  background-color: #ffffff;
+  animation: cardFreedBlankGreen 2.8s ease-in-out infinite;
+}
+
+/* Transición WCAG 2.2 AA/AAA en modo oscuro (/taller PENDIENTE) entre dark blank (#0E131E) y verde paleta (#064E3B) */
+@keyframes tallerCardFreedDarkGreen {
+  0%,
+  100% {
+    background-color: #0e131e;
+  }
+  50% {
+    background-color: #064e3b;
+  }
+}
+
+.animate-taller-card-freed {
+  background-color: #0e131e;
+  animation: tallerCardFreedDarkGreen 2.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-idle-tab-next,
   .animate-idle-tab-prev {
     animation: none;
+  }
+
+  .animate-card-freed {
+    animation: none;
+    background-color: #ecfdf5;
+  }
+
+  .animate-taller-card-freed {
+    animation: none;
+    background-color: #09352b;
   }
 }

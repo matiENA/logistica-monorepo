@@ -91,6 +91,7 @@ exports.procesos = exports.baseSchema.table('procesos', {
     zoneId: (0, pg_core_1.uuid)('zone_id')
         .notNull()
         .references(() => exports.zones.id, { onDelete: 'restrict' }),
+    orden: (0, pg_core_1.smallint)('orden'),
     pendienteAt: (0, pg_core_1.timestamp)('pendiente_at', { withTimezone: true }).notNull().defaultNow(),
     llegadaZonaAt: (0, pg_core_1.timestamp)('llegada_zona_at', { withTimezone: true }),
     boxId: (0, pg_core_1.uuid)('box_id').references(() => exports.boxes.id, { onDelete: 'restrict' }),
@@ -125,6 +126,7 @@ exports.procesosCold = exports.baseSchema.table('procesos_cold', {
         .notNull()
         .references(() => exports.circuitos.id, { onDelete: 'restrict' }),
     zoneId: (0, pg_core_1.uuid)('zone_id').references(() => exports.zones.id, { onDelete: 'set null' }),
+    orden: (0, pg_core_1.smallint)('orden'),
     pendienteAt: (0, pg_core_1.timestamp)('pendiente_at', { withTimezone: true }).notNull(),
     llegadaZonaAt: (0, pg_core_1.timestamp)('llegada_zona_at', { withTimezone: true }),
     boxId: (0, pg_core_1.uuid)('box_id').references(() => exports.boxes.id, { onDelete: 'set null' }),

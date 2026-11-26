@@ -28,11 +28,11 @@ export interface IdleCardStateSpec {
   plateSize: 'sm';
   surfaceStandardClass: string;
   surfacePreasignadoClass: string;
+  surfaceFreedClass: string;
   slots: {
     showGrip: boolean;
     showHoverMetadata: boolean;
     showHoverNotePreview: boolean;
-    showHoverFooterHint: boolean;
     showPinnedHeaderMeta: boolean;
     showPinnedBody: boolean;
     showPinnedNoteInput: boolean;
@@ -91,11 +91,12 @@ export const IDLE_CARD_STATE_SPEC: Record<IdleCardState, IdleCardStateSpec> = {
       'bg-white border-zinc-300/90 shadow-2xs hover:border-zinc-500 hover:shadow-sm',
     surfacePreasignadoClass:
       'bg-[#FDE68A] border-amber-400/80 shadow-xs hover:bg-[#FCD34D]',
+    surfaceFreedClass:
+      'animate-card-freed border-[#047857]/80 shadow-2xs hover:border-[#047857] hover:shadow-sm',
     slots: {
       showGrip: false,
       showHoverMetadata: false,
       showHoverNotePreview: false,
-      showHoverFooterHint: false,
       showPinnedHeaderMeta: false,
       showPinnedBody: false,
       showPinnedNoteInput: false,
@@ -116,11 +117,11 @@ export const IDLE_CARD_STATE_SPEC: Record<IdleCardState, IdleCardStateSpec> = {
       'bg-white border-zinc-300/90 shadow-2xs hover:border-zinc-500 hover:shadow-sm',
     surfacePreasignadoClass:
       'bg-[#FDE68A] border-amber-400/80 shadow-xs hover:bg-[#FCD34D]',
+    surfaceFreedClass: 'bg-[#DCFCE7] border-[#047857] shadow-xs',
     slots: {
       showGrip: true,
       showHoverMetadata: true,
       showHoverNotePreview: true,
-      showHoverFooterHint: true,
       showPinnedHeaderMeta: false,
       showPinnedBody: false,
       showPinnedNoteInput: false,
@@ -140,11 +141,12 @@ export const IDLE_CARD_STATE_SPEC: Record<IdleCardState, IdleCardStateSpec> = {
     surfaceStandardClass: 'bg-[#F1F2F4] border-zinc-400/90 shadow-sm',
     surfacePreasignadoClass:
       'bg-[#FDE68A] border-amber-500/70 ring-1 ring-amber-600/45 shadow-sm',
+    surfaceFreedClass:
+      'bg-[#D1FAE5] border-[#047857] ring-1 ring-emerald-700/40 shadow-sm',
     slots: {
       showGrip: true,
       showHoverMetadata: false,
       showHoverNotePreview: false,
-      showHoverFooterHint: false,
       showPinnedHeaderMeta: true,
       showPinnedBody: true,
       showPinnedNoteInput: true,

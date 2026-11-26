@@ -76,6 +76,7 @@ export interface PlaneacionHold {
   ultima_tarea_usuario?: string | null;
   ultima_tarea_at?: string | null;
   en_proceso_activo?: boolean;
+  liberado_circuito?: boolean;
   ubicacion_actual_box?: string | null;
   ubicacion_actual_zone?: string | null;
 }
@@ -114,6 +115,7 @@ export interface PlaneacionCard {
   ultima_tarea_usuario?: string | null;
   ultima_tarea_at?: string | null;
   en_proceso_activo?: boolean;
+  liberado_circuito?: boolean;
   ubicacion_actual_box?: string | null;
   ubicacion_actual_zone?: string | null;
   etapa_ciclo?: 'HISTORICO_COLD' | 'ACTIVO_HOT' | 'PLANIFICADO_HOLD';
@@ -185,6 +187,7 @@ export interface TallerZoneRenderMap {
   };
   boxes: TallerBoxSlot[];
   sin_box?: {
+    operarios?: TallerBoxOperario[];
     adentro: PlaneacionCard[];
     afuera: PlaneacionCard[];
   };
@@ -213,6 +216,23 @@ export interface CircuitoAbierto {
   notes_count: number;
 }
 
+export interface CircuitoTerminado {
+  circuito_id: string;
+  parent_circuito_id: string | null;
+  unidad_id: string | null;
+  n_ute: string;
+  tractor_id: string | null;
+  tractor_plate: string;
+  semi_id: string | null;
+  semi_plate: string;
+  modalidad_tracking: 'EQUIPO_ACOPLADO' | 'SOLO_TRACTOR' | 'SOLO_SEMI' | 'UNIDAD';
+  es_desunido: boolean;
+  patente_cruzada: string | null;
+  ingreso_at: string;
+  egreso_at: string;
+  baja_coord_nombre: string | null;
+}
+
 export interface IdleDockItem {
   key: string;
   tier: IdleHierarchyTier;
@@ -234,6 +254,7 @@ export interface IdleDockItem {
   preasignado_zones?: string[];
   holds_count?: number;
   en_proceso_activo?: boolean;
+  liberado_circuito?: boolean;
   ubicacion_actual_box?: string | null;
   ubicacion_actual_zone?: string | null;
   salida_origen_box?: string | null;
@@ -247,11 +268,24 @@ export interface IdleDockItem {
   is_temp?: boolean;
 }
 
+export type ProcesoTimelineStatus = 'TERMINADO' | 'EN_CURSO' | 'PREASIGNADO';
+
+export interface CircuitoTimelineStep {
+  proceso_id: string;
+  zone_id: string;
+  zone_name: string;
+  status: ProcesoTimelineStatus;
+  orden: number | null;
+  pendiente_at: string;
+}
+
 export interface BoardResponse {
   success: boolean;
   activos: PlaneacionCard[];
   holds?: PlaneacionHold[];
   circuitos_abiertos?: CircuitoAbierto[];
+  circuitos_terminados?: CircuitoTerminado[];
+  circuitos_timelines?: Record<string, CircuitoTimelineStep[]>;
   catalog: PlaneacionCatalog;
   taller_zone_map?: TallerZoneRenderMap | null;
   updatedAt: number;
@@ -304,4 +338,29 @@ export interface TrayectoriaResponse {
   timeline: TrayectoriaStep[];
   eventos?: ProcesoEvento[];
   queryMs: number;
+}
+
+export interface ReasignarOperarioBoxResponse {
+  success: boolean;
+  changed: boolean;
+  previousBoxId: string | null;
+  assignedProcesosIds?: string[];
+  operario: {
+    id: string;
+    nombre_usuario: string;
+    rol: 'operario';
+    zone_id: string;
+    box_id: string | null;
+    box_name: string | null;
+  };
+}
+
+export interface QuitarOperarioProcesoResponse {
+  success: boolean;
+  changed: boolean;
+  procesoId: string;
+  operarioId: string;
+  zoneId: string;
+  usuarios_ids: string[];
+  usuarios_nombres: string[];
 }

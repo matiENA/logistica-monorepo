@@ -1,0 +1,11 @@
+{
+  "name": "Flowsite · Ingreso QR",
+  "short_name": "Ingreso QR",
+  "description": "Ingreso rápido de tractores al circuito por QR para Encargados de Zona",
+  "start_url": "/qr",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#070A0F",
+  "theme_color": "#070A0F"
+}
