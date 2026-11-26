@@ -99,36 +99,57 @@ class HotRamBaseService {
     async isEncargadoZonaAuthorized(userId) {
         const cleanId = (userId || '').trim();
         if (!cleanId) {
-            return { authorized: false, existsInTaller: false, role: null, nombre_usuario: null };
-        }
-        const cached = this.runtimeIndex?.tallerUsersMetaMap.get(cleanId);
-        if (cached) {
             return {
-                authorized: cached.rol === 'encargado_zona',
-                existsInTaller: true,
-                role: cached.rol,
-                nombre_usuario: this.runtimeIndex?.usersMap.get(cleanId) ?? null,
+                authorized: false,
+                existsInTaller: false,
+                role: null,
+                nombre_usuario: null,
+                zone_id: null,
+                zone_name: null,
             };
+        }
+        const resolveFromIndex = (idx, meta) => {
+            const boxMeta = meta.box_id ? idx.boxesMap.get(meta.box_id) : null;
+            const resolvedZoneId = meta.zone_id || boxMeta?.zone_id || null;
+            const resolvedZoneName = resolvedZoneId
+                ? idx.zonesMap.get(resolvedZoneId) || boxMeta?.zone_name || null
+                : null;
+            return {
+                authorized: meta.rol === 'encargado_zona',
+                existsInTaller: true,
+                role: meta.rol,
+                nombre_usuario: idx.usersMap.get(cleanId) ?? null,
+                zone_id: resolvedZoneId,
+                zone_name: resolvedZoneName,
+            };
+        };
+        const cached = this.runtimeIndex?.tallerUsersMetaMap.get(cleanId);
+        if (cached && this.runtimeIndex) {
+            return resolveFromIndex(this.runtimeIndex, cached);
         }
         const { index } = await this.ensureRuntimeIndex();
         const hydrated = index.tallerUsersMetaMap.get(cleanId);
         if (hydrated) {
-            return {
-                authorized: hydrated.rol === 'encargado_zona',
-                existsInTaller: true,
-                role: hydrated.rol,
-                nombre_usuario: index.usersMap.get(cleanId) ?? null,
-            };
+            return resolveFromIndex(index, hydrated);
         }
         const check = await this.verificarAccesoTaller(cleanId);
         if (!check.authorized || !check.user) {
-            return { authorized: false, existsInTaller: false, role: null, nombre_usuario: null };
+            return {
+                authorized: false,
+                existsInTaller: false,
+                role: null,
+                nombre_usuario: null,
+                zone_id: null,
+                zone_name: null,
+            };
         }
         return {
             authorized: check.user.rol === 'encargado_zona',
             existsInTaller: true,
             role: check.user.rol,
             nombre_usuario: check.user.nombre_usuario ?? null,
+            zone_id: check.user.zone_id ?? null,
+            zone_name: check.user.zone_name ?? null,
         };
     }
     computeEtag(payload) {
@@ -2061,10 +2082,11 @@ class HotRamBaseService {
         });
     }
     /**
-     * Resolución C1 Hot RAM (0 DB I/O) para ingreso QR de Encargado de Zona.
-     * Compara estrictamente dominioTractor contra base.tractores y deriva semi_id desde el índice base.unidades.
+     * Resolución C1 Hot RAM (0 DB I/O) para operación de campo QR del Encargado de Zona.
+     * Compara dominioTractor contra base.tractores, deriva semi_id desde base.unidades
+     * y proyecta el estado contextual del circuito dentro de la zona del encargado (`mi_zona`).
      */
-    async resolveDominioTractorForQr(dominioRaw) {
+    async resolveDominioTractorForQr(dominioRaw, actorZoneId) {
         const normalized = normalizeDominioKey(dominioRaw);
         if (!normalized) {
             return {
@@ -2079,6 +2101,7 @@ class HotRamBaseService {
                 semi_ya_en_circuito: false,
                 circuito_abierto_id: null,
                 ingreso_at: null,
+                mi_zona: null,
             };
         }
         const [snapshot, { index }] = await Promise.all([
@@ -2099,6 +2122,7 @@ class HotRamBaseService {
                 semi_ya_en_circuito: false,
                 circuito_abierto_id: null,
                 ingreso_at: null,
+                mi_zona: null,
             };
         }
         const dominioRegistrado = index.tractoresMap.get(tractorId) || normalized;
@@ -2111,6 +2135,79 @@ class HotRamBaseService {
             ? snapshot.circuitos_abiertos.find((c) => c.semi_id === semiId) || null
             : null;
         const openCircuito = openByTractor || openBySemi;
+        let miZona = null;
+        if (actorZoneId) {
+            const zoneName = index.zonesMap.get(actorZoneId) || '';
+            const circId = openByTractor?.circuito_id || null;
+            const activeInOtherZone = circId
+                ? snapshot.activos.find((a) => a.circuito_id === circId && a.zone_id !== actorZoneId && !a.salida_at) || null
+                : null;
+            if (circId) {
+                const activeInMyZone = snapshot.activos.find((a) => a.circuito_id === circId && a.zone_id === actorZoneId && !a.salida_at) || null;
+                const holdInMyZone = snapshot.holds.find((h) => h.circuito_id === circId && h.zone_id === actorZoneId) || null;
+                const finishedInMyZone = snapshot.activos.find((a) => a.circuito_id === circId && a.zone_id === actorZoneId && Boolean(a.salida_at)) || null;
+                if (activeInMyZone) {
+                    miZona = {
+                        zone_id: actorZoneId,
+                        zone_name: zoneName,
+                        estado_en_zona: activeInMyZone.inicio_at ? 'TRABAJANDO' : 'RESERVADO',
+                        hold_id: null,
+                        proceso_id: activeInMyZone.proceso_id,
+                        box_name: activeInMyZone.box_name || null,
+                        estado_box: activeInMyZone.estado ?? null,
+                        en_otra_zona: activeInOtherZone?.zone_name || null,
+                    };
+                }
+                else if (holdInMyZone) {
+                    miZona = {
+                        zone_id: actorZoneId,
+                        zone_name: zoneName,
+                        estado_en_zona: 'PREASIGNADO',
+                        hold_id: holdInMyZone.hold_id,
+                        proceso_id: null,
+                        box_name: holdInMyZone.box_name || null,
+                        estado_box: holdInMyZone.estado ?? null,
+                        en_otra_zona: activeInOtherZone?.zone_name || null,
+                    };
+                }
+                else if (finishedInMyZone) {
+                    miZona = {
+                        zone_id: actorZoneId,
+                        zone_name: zoneName,
+                        estado_en_zona: 'TERMINADO',
+                        hold_id: null,
+                        proceso_id: finishedInMyZone.proceso_id,
+                        box_name: finishedInMyZone.box_name || null,
+                        estado_box: finishedInMyZone.estado ?? null,
+                        en_otra_zona: activeInOtherZone?.zone_name || null,
+                    };
+                }
+                else {
+                    miZona = {
+                        zone_id: actorZoneId,
+                        zone_name: zoneName,
+                        estado_en_zona: 'NINGUNO',
+                        hold_id: null,
+                        proceso_id: null,
+                        box_name: null,
+                        estado_box: null,
+                        en_otra_zona: activeInOtherZone?.zone_name || null,
+                    };
+                }
+            }
+            else {
+                miZona = {
+                    zone_id: actorZoneId,
+                    zone_name: zoneName,
+                    estado_en_zona: 'NINGUNO',
+                    hold_id: null,
+                    proceso_id: null,
+                    box_name: null,
+                    estado_box: null,
+                    en_otra_zona: null,
+                };
+            }
+        }
         return {
             found: true,
             dominio_normalizado: normalized,
@@ -2123,6 +2220,155 @@ class HotRamBaseService {
             semi_ya_en_circuito: Boolean(openBySemi && openBySemi.circuito_id !== openByTractor?.circuito_id),
             circuito_abierto_id: openCircuito?.circuito_id ?? null,
             ingreso_at: openCircuito?.ingreso_at ?? null,
+            mi_zona: miZona,
+        };
+    }
+    /**
+     * Llegada / Reserva en Zona vía QR para Encargado de Zona:
+     * - Exige circuito abierto en base.circuitos para el tractor.
+     * - Si ya tiene PREASIGNADO en esta zona -> promueve PENDIENTE -> RESERVADO (activarHold).
+     * - Si no tiene proceso en esta zona -> cierra estadía previa abierta en otra zona (Doble Carta)
+     *   e inserta proceso RESERVADO (llegada_zona_at = now(), box_id = NULL) con stamp encargado_id.
+     * - Si ya está RESERVADO o TRABAJANDO en esta zona -> 409 Conflict.
+     */
+    async reservarEnZonaPorDominioQr(dominioRaw, actorZoneId, encargadoUserId) {
+        const normalized = normalizeDominioKey(dominioRaw);
+        if (!normalized) {
+            throw new NotFoundError('Dominio de tractor vacío o inválido.');
+        }
+        const cleanZoneId = (actorZoneId || '').trim();
+        const { index } = await this.ensureRuntimeIndex();
+        if (!cleanZoneId || !index.zonesMap.has(cleanZoneId)) {
+            throw new ForbiddenError('Tu usuario Encargado de Zona no tiene una zona válida asignada.');
+        }
+        const tractorId = index.tractorIdByDominio.get(normalized) || null;
+        if (!tractorId) {
+            throw new NotFoundError(`El dominio "${normalized}" no está registrado en el padrón de tractores (base.tractores).`);
+        }
+        const openCircs = await index_js_1.db
+            .select({ id: schema_js_1.circuitos.id })
+            .from(schema_js_1.circuitos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, tractorId), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt)))
+            .limit(1);
+        if (openCircs.length === 0) {
+            throw new NotFoundError('La unidad aún no está ingresada en Base. Realizá primero el Ingreso a Base.');
+        }
+        const circuitoId = openCircs[0].id;
+        // Verificar si ya está activa (RESERVADO o TRABAJANDO) en esta zona
+        const activeSameZone = await index_js_1.db
+            .select({ id: schema_js_1.procesos.id, ingresoBoxAt: schema_js_1.procesos.ingresoBoxAt })
+            .from(schema_js_1.procesos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circuitoId), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, cleanZoneId), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+            .limit(1);
+        if (activeSameZone.length > 0) {
+            throw new ConflictError(activeSameZone[0].ingresoBoxAt
+                ? 'La unidad ya se encuentra trabajando en box dentro de esta zona.'
+                : 'La unidad ya se encuentra reservada (esperando box) en esta zona.');
+        }
+        // Si tiene PREASIGNADO pendiente en esta zona -> promover con activarHold ACID (boxId=null, iniciarInmediato=false)
+        const pendingSameZone = await index_js_1.db
+            .select({ id: schema_js_1.procesos.id })
+            .from(schema_js_1.procesos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circuitoId), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, cleanZoneId), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+            .orderBy((0, drizzle_orm_1.asc)(schema_js_1.procesos.pendienteAt))
+            .limit(1);
+        if (pendingSameZone.length > 0) {
+            const activated = await this.activarHold(pendingSameZone[0].id, null, false, encargadoUserId, null);
+            return {
+                mode: 'PROMOTED_HOLD',
+                circuito_id: circuitoId,
+                proceso_id: activated.proceso_id,
+                zone_id: cleanZoneId,
+                zone_name: index.zonesMap.get(cleanZoneId) || '',
+            };
+        }
+        // Alta directa en estado RESERVADO para la zona del encargado
+        const createdId = await index_js_1.db.transaction(async (tx) => {
+            // Cerrar cualquier estadía activa previa no finalizada del mismo circuito en otra zona
+            await tx
+                .update(schema_js_1.procesos)
+                .set({
+                salidaAt: (0, drizzle_orm_1.sql) `GREATEST(now(), COALESCE(${schema_js_1.procesos.ingresoBoxAt}, ${schema_js_1.procesos.llegadaZonaAt}, ${schema_js_1.procesos.pendienteAt}))`,
+                updatedAt: (0, drizzle_orm_1.sql) `now()`,
+            })
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circuitoId), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)));
+            const now = new Date();
+            const [inserted] = await tx
+                .insert(schema_js_1.procesos)
+                .values({
+                circuitoId,
+                zoneId: cleanZoneId,
+                boxId: null,
+                estado: null,
+                pendienteAt: now,
+                llegadaZonaAt: now,
+                ingresoBoxAt: null,
+                usuariosIds: [],
+                encargadoId: encargadoUserId,
+                encargadoAt: now,
+                updatedAt: now,
+            })
+                .returning({ id: schema_js_1.procesos.id });
+            return inserted.id;
+        });
+        this.invalidate();
+        await this.hydrateBoard();
+        return {
+            mode: 'CREATED_RESERVADO',
+            circuito_id: circuitoId,
+            proceso_id: createdId,
+            zone_id: cleanZoneId,
+            zone_name: index.zonesMap.get(cleanZoneId) || '',
+        };
+    }
+    /**
+     * Salida de Zona (Terminado) vía QR para Encargado de Zona:
+     * - Finaliza el proceso activo (TRABAJANDO o RESERVADO) dentro de la zona del encargado
+     *   reutilizando actualizarProceso(..., action: 'FINALIZAR') con todas sus garantías ACID.
+     */
+    async finalizarEnZonaPorDominioQr(dominioRaw, actorZoneId, encargadoUserId) {
+        const normalized = normalizeDominioKey(dominioRaw);
+        if (!normalized) {
+            throw new NotFoundError('Dominio de tractor vacío o inválido.');
+        }
+        const cleanZoneId = (actorZoneId || '').trim();
+        const { index } = await this.ensureRuntimeIndex();
+        if (!cleanZoneId || !index.zonesMap.has(cleanZoneId)) {
+            throw new ForbiddenError('Tu usuario Encargado de Zona no tiene una zona válida asignada.');
+        }
+        const tractorId = index.tractorIdByDominio.get(normalized) || null;
+        if (!tractorId) {
+            throw new NotFoundError(`El dominio "${normalized}" no está registrado en el padrón de tractores (base.tractores).`);
+        }
+        const openCircs = await index_js_1.db
+            .select({ id: schema_js_1.circuitos.id })
+            .from(schema_js_1.circuitos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.circuitos.tractorId, tractorId), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.egresoAt), (0, drizzle_orm_1.isNull)(schema_js_1.circuitos.desunionAt)))
+            .limit(1);
+        if (openCircs.length === 0) {
+            throw new NotFoundError('La unidad no posee un circuito abierto en Base.');
+        }
+        const circuitoId = openCircs[0].id;
+        const activeRows = await index_js_1.db
+            .select({ id: schema_js_1.procesos.id, ingresoBoxAt: schema_js_1.procesos.ingresoBoxAt })
+            .from(schema_js_1.procesos)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_js_1.procesos.circuitoId, circuitoId), (0, drizzle_orm_1.eq)(schema_js_1.procesos.zoneId, cleanZoneId), (0, drizzle_orm_1.isNotNull)(schema_js_1.procesos.llegadaZonaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.salidaAt), (0, drizzle_orm_1.isNull)(schema_js_1.procesos.anuladoAt)))
+            .orderBy((0, drizzle_orm_1.desc)(schema_js_1.procesos.ingresoBoxAt), (0, drizzle_orm_1.desc)(schema_js_1.procesos.llegadaZonaAt))
+            .limit(1);
+        if (activeRows.length === 0) {
+            throw new NotFoundError(`La unidad no tiene un proceso activo en ${index.zonesMap.get(cleanZoneId) || 'tu zona'} para registrar salida.`);
+        }
+        const updated = await this.actualizarProceso(activeRows[0].id, {
+            action: 'FINALIZAR',
+            actorUsuarioId: encargadoUserId,
+            origen: 'taller',
+        });
+        return {
+            proceso_id: activeRows[0].id,
+            circuito_id: circuitoId,
+            zone_id: cleanZoneId,
+            zone_name: index.zonesMap.get(cleanZoneId) || '',
+            updated,
         };
     }
     /**

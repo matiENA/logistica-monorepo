@@ -153,7 +153,12 @@ async function requireEncargadoZonaAuth(req, res, actionLabel = 'ejecutar esta o
         });
         return null;
     }
-    return { userId: tallerId, nombre_usuario: check.nombre_usuario };
+    return {
+        userId: tallerId,
+        nombre_usuario: check.nombre_usuario,
+        zone_id: check.zone_id,
+        zone_name: check.zone_name,
+    };
 }
 /**
  * Jerarquía unificada de alta de circuito (POST /api/planeacion/circuitos):
@@ -322,6 +327,14 @@ const qrAltaCircuitoSchema = zod_1.z.object({
         .trim()
         .min(3, 'Dominio de tractor inválido.')
         .max(32, 'Dominio de tractor demasiado largo.'),
+});
+const qrSalidaSchema = zod_1.z.object({
+    dominioTractor: zod_1.z
+        .string()
+        .trim()
+        .min(3, 'Dominio de tractor inválido.')
+        .max(32, 'Dominio de tractor demasiado largo.'),
+    tipo: zod_1.z.enum(['zona']).optional().default('zona'),
 });
 function createPlaneacionRouter(io) {
     const router = (0, express_1.Router)();
@@ -693,7 +706,7 @@ function createPlaneacionRouter(io) {
             return;
         }
         try {
-            const resolved = await hotRamBaseService_js_1.hotRamBaseService.resolveDominioTractorForQr(rawDominio);
+            const resolved = await hotRamBaseService_js_1.hotRamBaseService.resolveDominioTractorForQr(rawDominio, actor.zone_id);
             res.setHeader('Cache-Control', 'no-store');
             res.json({
                 success: true,
@@ -730,6 +743,81 @@ function createPlaneacionRouter(io) {
         }
         catch (err) {
             sendRouteError(res, err, 'Error registrando ingreso de tractor al circuito');
+        }
+    });
+    router.post('/qr/llegada-zona', async (req, res) => {
+        const actor = await requireEncargadoZonaAuth(req, res, 'registrar llegada a zona por QR');
+        if (!actor)
+            return;
+        const parsed = qrAltaCircuitoSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: formatZodError(parsed.error, 'Dominio de tractor inválido.'),
+            });
+            return;
+        }
+        try {
+            const result = await hotRamBaseService_js_1.hotRamBaseService.reservarEnZonaPorDominioQr(parsed.data.dominioTractor, actor.zone_id, actor.userId);
+            io.emit('planeacion_board_updated', {
+                action: 'QR_LLEGADA_ZONA',
+                procesoId: result.proceso_id,
+                circuitoId: result.circuito_id,
+                updatedAt: Date.now(),
+            });
+            res.status(201).json({
+                success: true,
+                ...result,
+            });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error registrando llegada a zona por QR');
+        }
+    });
+    router.post('/qr/salida', async (req, res) => {
+        const actor = await requireEncargadoZonaAuth(req, res, 'registrar salida de zona por QR');
+        if (!actor)
+            return;
+        const parsed = qrSalidaSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: formatZodError(parsed.error, 'Dominio de tractor inválido.'),
+            });
+            return;
+        }
+        try {
+            const result = await hotRamBaseService_js_1.hotRamBaseService.finalizarEnZonaPorDominioQr(parsed.data.dominioTractor, actor.zone_id, actor.userId);
+            io.emit('planeacion_board_updated', {
+                action: 'FINALIZAR',
+                procesoId: result.proceso_id,
+                circuitoId: result.circuito_id,
+                updatedAt: Date.now(),
+            });
+            const u = (result.updated || {});
+            io.emit('unidad_salida_hold', {
+                procesoId: result.proceso_id,
+                unidadId: u.unidad_id || null,
+                tractorId: u.tractor_id || null,
+                semiId: u.semi_id || null,
+                origenBox: u.box_name || result.zone_name || 'Zona previa',
+                salidaAt: u.salida_at || new Date().toISOString(),
+                ultimaTarea: u.ultima_tarea || null,
+                pendingHold: u.pending_hold || null,
+                updatedAt: Date.now(),
+            });
+            res.json({
+                success: true,
+                tipo: parsed.data.tipo,
+                proceso_id: result.proceso_id,
+                circuito_id: result.circuito_id,
+                zone_id: result.zone_id,
+                zone_name: result.zone_name,
+                salida_at: u.salida_at || new Date().toISOString(),
+            });
+        }
+        catch (err) {
+            sendRouteError(res, err, 'Error registrando salida de zona por QR');
         }
     });
     router.post('/circuitos/:id/baja', async (req, res) => {

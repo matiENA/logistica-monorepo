@@ -8,6 +8,19 @@ export interface EncargadoZonaSession {
   zone_name: string;
 }
 
+export type QrZoneEstado = 'NINGUNO' | 'PREASIGNADO' | 'RESERVADO' | 'TRABAJANDO' | 'TERMINADO';
+
+export interface QrResolveZoneState {
+  zone_id: string;
+  zone_name: string;
+  estado_en_zona: QrZoneEstado;
+  hold_id: string | null;
+  proceso_id: string | null;
+  box_name: string | null;
+  estado_box: 'adentro' | 'afuera' | null;
+  en_otra_zona: string | null;
+}
+
 export interface QrResolveTractorResult {
   found: boolean;
   dominio_normalizado: string;
@@ -20,6 +33,7 @@ export interface QrResolveTractorResult {
   semi_ya_en_circuito: boolean;
   circuito_abierto_id: string | null;
   ingreso_at: string | null;
+  mi_zona: QrResolveZoneState | null;
 }
 
 export interface QrAltaCircuitoResult {
@@ -27,6 +41,23 @@ export interface QrAltaCircuitoResult {
   tractor_id: string | null;
   semi_id: string | null;
   ingreso_at: string;
+}
+
+export interface QrLlegadaZonaResult {
+  mode: 'PROMOTED_HOLD' | 'CREATED_RESERVADO';
+  circuito_id: string;
+  proceso_id: string;
+  zone_id: string;
+  zone_name: string;
+}
+
+export interface QrSalidaZonaResult {
+  tipo: 'zona';
+  proceso_id: string;
+  circuito_id: string;
+  zone_id: string;
+  zone_name: string;
+  salida_at: string;
 }
 
 export class QrApiError extends Error {
@@ -299,6 +330,11 @@ export async function resolveDominioTractor(dominio: string): Promise<QrResolveT
     );
   }
 
+  const rawZone =
+    body.mi_zona && typeof body.mi_zona === 'object'
+      ? (body.mi_zona as Record<string, unknown>)
+      : null;
+
   return {
     found: Boolean(body.found),
     dominio_normalizado: String(body.dominio_normalizado || ''),
@@ -311,6 +347,21 @@ export async function resolveDominioTractor(dominio: string): Promise<QrResolveT
     semi_ya_en_circuito: Boolean(body.semi_ya_en_circuito),
     circuito_abierto_id: typeof body.circuito_abierto_id === 'string' ? body.circuito_abierto_id : null,
     ingreso_at: typeof body.ingreso_at === 'string' ? body.ingreso_at : null,
+    mi_zona: rawZone
+      ? {
+          zone_id: String(rawZone.zone_id || ''),
+          zone_name: String(rawZone.zone_name || ''),
+          estado_en_zona: (rawZone.estado_en_zona as QrZoneEstado) || 'NINGUNO',
+          hold_id: typeof rawZone.hold_id === 'string' ? rawZone.hold_id : null,
+          proceso_id: typeof rawZone.proceso_id === 'string' ? rawZone.proceso_id : null,
+          box_name: typeof rawZone.box_name === 'string' ? rawZone.box_name : null,
+          estado_box:
+            rawZone.estado_box === 'adentro' || rawZone.estado_box === 'afuera'
+              ? rawZone.estado_box
+              : null,
+          en_otra_zona: typeof rawZone.en_otra_zona === 'string' ? rawZone.en_otra_zona : null,
+        }
+      : null,
   };
 }
 
@@ -332,4 +383,57 @@ export async function confirmarAltaCircuitoQr(
   }
 
   return body.circuito as QrAltaCircuitoResult;
+}
+
+export async function confirmarLlegadaZonaQr(
+  dominioTractor: string
+): Promise<QrLlegadaZonaResult> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/qr/llegada-zona`, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+    body: JSON.stringify({ dominioTractor }),
+  });
+  const body = await parseJsonSafe(res);
+
+  if (!res.ok || !body.success) {
+    throw new QrApiError(
+      typeof body.error === 'string' ? body.error : 'No se pudo registrar la llegada a zona.',
+      res.status
+    );
+  }
+
+  return {
+    mode: body.mode === 'PROMOTED_HOLD' ? 'PROMOTED_HOLD' : 'CREATED_RESERVADO',
+    circuito_id: String(body.circuito_id || ''),
+    proceso_id: String(body.proceso_id || ''),
+    zone_id: String(body.zone_id || ''),
+    zone_name: String(body.zone_name || ''),
+  };
+}
+
+export async function confirmarSalidaZonaQr(
+  dominioTractor: string
+): Promise<QrSalidaZonaResult> {
+  const res = await fetchWithTimeout(`${API_BASE}/api/planeacion/qr/salida`, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+    body: JSON.stringify({ dominioTractor, tipo: 'zona' }),
+  });
+  const body = await parseJsonSafe(res);
+
+  if (!res.ok || !body.success) {
+    throw new QrApiError(
+      typeof body.error === 'string' ? body.error : 'No se pudo registrar la salida de zona.',
+      res.status
+    );
+  }
+
+  return {
+    tipo: 'zona',
+    proceso_id: String(body.proceso_id || ''),
+    circuito_id: String(body.circuito_id || ''),
+    zone_id: String(body.zone_id || ''),
+    zone_name: String(body.zone_name || ''),
+    salida_at: typeof body.salida_at === 'string' ? body.salida_at : new Date().toISOString(),
+  };
 }
