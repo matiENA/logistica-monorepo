@@ -76,6 +76,7 @@ exports.circuitos = exports.baseSchema.table('circuitos', {
     desunionAt: (0, pg_core_1.timestamp)('desunion_at', { withTimezone: true }),
     egresoAt: (0, pg_core_1.timestamp)('egreso_at', { withTimezone: true }),
     altaCoordId: (0, pg_core_1.uuid)('alta_coord_id').references(() => exports.userCoordinacion.id, { onDelete: 'set null' }),
+    altaEncargadoId: (0, pg_core_1.uuid)('alta_encargado_id').references(() => exports.usuariosTaller.id, { onDelete: 'set null' }),
     bajaCoordId: (0, pg_core_1.uuid)('baja_coord_id').references(() => exports.userCoordinacion.id, { onDelete: 'set null' }),
     archivedAt: (0, pg_core_1.timestamp)('archived_at', { withTimezone: true }),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -192,6 +193,10 @@ exports.circuitosRelations = (0, drizzle_orm_1.relations)(exports.circuitos, ({ 
     altaCoord: one(exports.userCoordinacion, {
         fields: [exports.circuitos.altaCoordId],
         references: [exports.userCoordinacion.id],
+    }),
+    altaEncargado: one(exports.usuariosTaller, {
+        fields: [exports.circuitos.altaEncargadoId],
+        references: [exports.usuariosTaller.id],
     }),
     bajaCoord: one(exports.userCoordinacion, {
         fields: [exports.circuitos.bajaCoordId],

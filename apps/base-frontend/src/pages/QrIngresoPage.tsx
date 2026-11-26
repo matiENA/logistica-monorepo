@@ -311,9 +311,11 @@ export const QrIngresoPage: React.FC = () => {
     void lookupDominio(norm);
   };
 
-  // Confirmar alta de circuito solo-tractor
+  // Confirmar alta de circuito (tractor + semi desde índice base.unidades)
   const handleConfirmAlta = async () => {
-    if (!resolved || !resolved.found || resolved.ya_en_circuito) return;
+    if (!resolved || !resolved.found || resolved.ya_en_circuito || resolved.semi_ya_en_circuito) {
+      return;
+    }
     const dominioToSubmit = resolved.dominio_registrado || resolved.dominio_normalizado;
 
     setConfirmError(null);
@@ -627,16 +629,25 @@ export const QrIngresoPage: React.FC = () => {
 
         {(phase === 'confirm' || phase === 'submitting') && resolved && (
           <div className="bg-[#11161F] border border-zinc-800 rounded-xl p-6 space-y-5">
-            <div className="text-center space-y-2">
+            <div className="text-center space-y-2.5">
               <p className="text-xs uppercase tracking-widest text-zinc-400">
                 Dominio de Tractor Detectado
               </p>
               <div className="inline-block px-5 py-2.5 rounded-lg bg-[#070A0F] border-2 border-zinc-600 font-mono text-3xl font-bold tracking-[0.14em] text-white">
                 {resolved.dominio_registrado || resolved.dominio_normalizado}
               </div>
+
+              {resolved.found && resolved.semi_dominio && (
+                <div className="pt-1 flex items-center justify-center gap-2 text-xs text-zinc-300">
+                  <span className="text-zinc-400">Semi acoplado (unidades):</span>
+                  <span className="px-2.5 py-0.5 rounded bg-[#070A0F] border border-zinc-700 font-mono font-semibold tracking-wider text-emerald-300">
+                    {resolved.semi_dominio}
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Estado de validación contra base.tractores */}
+            {/* Estado de validación contra base.tractores + base.unidades */}
             {!resolved.found ? (
               <div className="rounded-lg bg-red-950/60 border border-red-700/60 p-4 flex items-start gap-3">
                 <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
@@ -659,10 +670,25 @@ export const QrIngresoPage: React.FC = () => {
                   </p>
                 </div>
               </div>
+            ) : resolved.semi_ya_en_circuito ? (
+              <div className="rounded-lg bg-amber-950/60 border border-amber-700/60 p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-100 space-y-1">
+                  <p className="font-semibold text-sm">Semi acoplado ya está en circuito</p>
+                  <p className="text-amber-200/90">
+                    El semi <strong>{resolved.semi_dominio}</strong> (asociado en{' '}
+                    <code>base.unidades</code>) ya posee un circuito abierto
+                    {resolved.ingreso_at ? ` desde ${formatShortTime(resolved.ingreso_at)}` : ''}.
+                    Ingreso bloqueado.
+                  </p>
+                </div>
+              </div>
             ) : (
               <div className="rounded-lg bg-emerald-950/40 border border-emerald-700/50 p-3.5 text-center">
                 <p className="text-xs text-emerald-200">
-                  Tractor validado en padrón. Confirmá para registrar su ingreso al circuito.
+                  {resolved.semi_dominio
+                    ? `Tractor y semi (${resolved.semi_dominio}) validados. Confirmá para ingresar al circuito.`
+                    : 'Tractor validado en padrón (sin semi acoplado en unidades). Confirmá para ingresar al circuito.'}
                 </p>
               </div>
             )}
@@ -679,7 +705,7 @@ export const QrIngresoPage: React.FC = () => {
 
             {/* Acciones de confirmación */}
             <div className="flex flex-col gap-2.5 pt-1">
-              {resolved.found && !resolved.ya_en_circuito && (
+              {resolved.found && !resolved.ya_en_circuito && !resolved.semi_ya_en_circuito && (
                 <button
                   type="button"
                   disabled={phase === 'submitting'}
@@ -706,7 +732,7 @@ export const QrIngresoPage: React.FC = () => {
                 onClick={resetToScan}
                 className="w-full h-12 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-zinc-200 text-sm font-medium"
               >
-                {resolved.found && !resolved.ya_en_circuito
+                {resolved.found && !resolved.ya_en_circuito && !resolved.semi_ya_en_circuito
                   ? 'Cancelar y re-escanear'
                   : 'Escanear otra unidad'}
               </button>
@@ -725,6 +751,11 @@ export const QrIngresoPage: React.FC = () => {
               <p className="font-mono text-2xl font-bold tracking-[0.14em] text-emerald-300">
                 {resolved.dominio_registrado || resolved.dominio_normalizado}
               </p>
+              {resolved.semi_dominio && (
+                <p className="font-mono text-sm font-semibold tracking-wider text-zinc-300">
+                  Semi: {resolved.semi_dominio}
+                </p>
+              )}
               {createdCircuito?.ingreso_at && (
                 <p className="text-xs text-zinc-400">
                   Circuito abierto · {formatShortTime(createdCircuito.ingreso_at)}

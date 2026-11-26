@@ -13,7 +13,11 @@ export interface QrResolveTractorResult {
   dominio_normalizado: string;
   tractor_id: string | null;
   dominio_registrado: string | null;
+  semi_id: string | null;
+  semi_dominio: string | null;
+  n_ute: string | null;
   ya_en_circuito: boolean;
+  semi_ya_en_circuito: boolean;
   circuito_abierto_id: string | null;
   ingreso_at: string | null;
 }
@@ -300,7 +304,11 @@ export async function resolveDominioTractor(dominio: string): Promise<QrResolveT
     dominio_normalizado: String(body.dominio_normalizado || ''),
     tractor_id: typeof body.tractor_id === 'string' ? body.tractor_id : null,
     dominio_registrado: typeof body.dominio_registrado === 'string' ? body.dominio_registrado : null,
+    semi_id: typeof body.semi_id === 'string' ? body.semi_id : null,
+    semi_dominio: typeof body.semi_dominio === 'string' ? body.semi_dominio : null,
+    n_ute: typeof body.n_ute === 'string' ? body.n_ute : null,
     ya_en_circuito: Boolean(body.ya_en_circuito),
+    semi_ya_en_circuito: Boolean(body.semi_ya_en_circuito),
     circuito_abierto_id: typeof body.circuito_abierto_id === 'string' ? body.circuito_abierto_id : null,
     ingreso_at: typeof body.ingreso_at === 'string' ? body.ingreso_at : null,
   };

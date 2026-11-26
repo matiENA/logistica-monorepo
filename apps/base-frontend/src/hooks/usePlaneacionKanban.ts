@@ -45,7 +45,7 @@ export function usePlaneacionKanban(enabled = true) {
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 15,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
   });
 
   const finalizadosQuery = useQuery({

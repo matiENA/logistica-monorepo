@@ -155,6 +155,40 @@ async function requireEncargadoZonaAuth(req, res, actionLabel = 'ejecutar esta o
     }
     return { userId: tallerId, nombre_usuario: check.nombre_usuario };
 }
+/**
+ * Jerarquía unificada de alta de circuito (POST /api/planeacion/circuitos):
+ * Autoriza Coordinación (base.user_coordinacion) y Encargado de Zona (base.usuarios_taller rol='encargado_zona').
+ * Operarios y anónimos son rechazados (403 / 401).
+ */
+async function requireCoordinacionOrEncargadoZonaAuth(req, res, actionLabel = 'dar de alta un circuito') {
+    const headerCoordId = req.headers['x-coordinacion-user-id']
+        ? String(req.headers['x-coordinacion-user-id']).trim()
+        : '';
+    const headerTallerId = req.headers['x-taller-user-id']
+        ? String(req.headers['x-taller-user-id']).trim()
+        : '';
+    const rawOrigen = req.headers['x-origen'] ? String(req.headers['x-origen']).trim().toLowerCase() : '';
+    const tokenSession = (0, sessionTokenService_js_1.extractSessionFromRequest)(req);
+    const coordId = headerCoordId || (tokenSession?.rol === 'coordinacion' ? tokenSession.sub : '');
+    const tallerId = headerTallerId || (tokenSession?.rol === 'taller' ? tokenSession.sub : '');
+    if (rawOrigen === 'coordinacion' || (coordId && !tallerId)) {
+        const verifiedCoordId = await requireCoordinacionAuth(req, res, actionLabel);
+        if (!verifiedCoordId)
+            return null;
+        return { role: 'coordinacion', userId: verifiedCoordId };
+    }
+    if (tallerId) {
+        const verifiedEnc = await requireEncargadoZonaAuth(req, res, actionLabel);
+        if (!verifiedEnc)
+            return null;
+        return { role: 'encargado_zona', userId: verifiedEnc.userId };
+    }
+    res.status(401).json({
+        success: false,
+        error: `Autenticación requerida: se requiere sesión de Coordinación o Encargado de Zona para ${actionLabel}.`,
+    });
+    return null;
+}
 function formatZodError(err, fallback = 'Datos de entrada inválidos.') {
     const flat = err.flatten();
     const parts = [];
@@ -618,8 +652,8 @@ function createPlaneacionRouter(io) {
         }
     });
     router.post('/circuitos', async (req, res) => {
-        const coordId = await requireCoordinacionAuth(req, res, 'dar de alta un circuito');
-        if (!coordId)
+        const actor = await requireCoordinacionOrEncargadoZonaAuth(req, res, 'dar de alta un circuito');
+        if (!actor)
             return;
         const parsed = altaCircuitoSchema.safeParse(req.body || {});
         if (!parsed.success) {
@@ -629,7 +663,8 @@ function createPlaneacionRouter(io) {
         try {
             const circuito = await hotRamBaseService_js_1.hotRamBaseService.altaCircuito({
                 ...parsed.data,
-                coordUserId: coordId,
+                coordUserId: actor.role === 'coordinacion' ? actor.userId : null,
+                encargadoUserId: actor.role === 'encargado_zona' ? actor.userId : null,
             });
             io.emit('planeacion_board_updated', {
                 action: 'CIRCUITO_ALTA',
@@ -682,7 +717,7 @@ function createPlaneacionRouter(io) {
             return;
         }
         try {
-            const circuito = await hotRamBaseService_js_1.hotRamBaseService.altaCircuitoPorDominioTractor(parsed.data.dominioTractor);
+            const circuito = await hotRamBaseService_js_1.hotRamBaseService.altaCircuitoPorDominioTractor(parsed.data.dominioTractor, actor.userId);
             io.emit('planeacion_board_updated', {
                 action: 'CIRCUITO_ALTA',
                 circuitoId: circuito.circuito_id,

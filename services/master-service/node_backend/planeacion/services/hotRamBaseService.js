@@ -667,6 +667,7 @@ class HotRamBaseService {
                         egresoAt: schema_js_1.circuitos.egresoAt,
                         archivedAt: schema_js_1.circuitos.archivedAt,
                         altaCoordId: schema_js_1.circuitos.altaCoordId,
+                        altaEncargadoId: schema_js_1.circuitos.altaEncargadoId,
                         bajaCoordId: schema_js_1.circuitos.bajaCoordId,
                     })
                         .from(schema_js_1.circuitos)
@@ -994,6 +995,12 @@ class HotRamBaseService {
                         grupo_render: renderMeta.grupoRender,
                         ingreso_at: circ.ingresoAt.toISOString(),
                         alta_coord_id: circ.altaCoordId,
+                        alta_encargado_id: circ.altaEncargadoId,
+                        alta_actor_nombre: circ.altaCoordId
+                            ? index.usersMap.get(circ.altaCoordId) || null
+                            : circ.altaEncargadoId
+                                ? index.usersMap.get(circ.altaEncargadoId) || null
+                                : null,
                         pasos_count: pasosCountByCircuito.get(circ.id) || 0,
                         paso_activo_id: pasoActivoIdByCircuito.get(circ.id) || null,
                         notes: circuitNotes,
@@ -2013,6 +2020,11 @@ class HotRamBaseService {
                 }
             }
             const validCoordId = input.coordUserId && index.coordUserIds.has(input.coordUserId) ? input.coordUserId : null;
+            const validEncargadoId = !validCoordId &&
+                input.encargadoUserId &&
+                index.tallerUsersMetaMap.get(input.encargadoUserId)?.rol === 'encargado_zona'
+                ? input.encargadoUserId
+                : null;
             const [row] = await tx
                 .insert(schema_js_1.circuitos)
                 .values({
@@ -2021,6 +2033,7 @@ class HotRamBaseService {
                 tractorN: input.tractorN ?? null,
                 semiN: input.semiN ?? null,
                 altaCoordId: validCoordId,
+                altaEncargadoId: validEncargadoId,
             })
                 .returning();
             if (input.notaTexto && input.notaTexto.trim()) {
@@ -2049,7 +2062,7 @@ class HotRamBaseService {
     }
     /**
      * Resolución C1 Hot RAM (0 DB I/O) para ingreso QR de Encargado de Zona.
-     * Compara estrictamente dominioTractor normalizado contra el índice de base.tractores.
+     * Compara estrictamente dominioTractor contra base.tractores y deriva semi_id desde el índice base.unidades.
      */
     async resolveDominioTractorForQr(dominioRaw) {
         const normalized = normalizeDominioKey(dominioRaw);
@@ -2059,7 +2072,11 @@ class HotRamBaseService {
                 dominio_normalizado: '',
                 tractor_id: null,
                 dominio_registrado: null,
+                semi_id: null,
+                semi_dominio: null,
+                n_ute: null,
                 ya_en_circuito: false,
+                semi_ya_en_circuito: false,
                 circuito_abierto_id: null,
                 ingreso_at: null,
             };
@@ -2075,28 +2092,45 @@ class HotRamBaseService {
                 dominio_normalizado: normalized,
                 tractor_id: null,
                 dominio_registrado: null,
+                semi_id: null,
+                semi_dominio: null,
+                n_ute: null,
                 ya_en_circuito: false,
+                semi_ya_en_circuito: false,
                 circuito_abierto_id: null,
                 ingreso_at: null,
             };
         }
         const dominioRegistrado = index.tractoresMap.get(tractorId) || normalized;
-        const openCircuito = snapshot.circuitos_abiertos.find((c) => c.tractor_id === tractorId) || null;
+        const unidad = index.unidadByTractor.get(tractorId) || null;
+        const semiId = unidad?.semi_id ?? null;
+        const semiDominio = semiId ? index.semisMap.get(semiId) || null : null;
+        const nUte = unidad?.n_ute || null;
+        const openByTractor = snapshot.circuitos_abiertos.find((c) => c.tractor_id === tractorId) || null;
+        const openBySemi = semiId
+            ? snapshot.circuitos_abiertos.find((c) => c.semi_id === semiId) || null
+            : null;
+        const openCircuito = openByTractor || openBySemi;
         return {
             found: true,
             dominio_normalizado: normalized,
             tractor_id: tractorId,
             dominio_registrado: dominioRegistrado,
-            ya_en_circuito: Boolean(openCircuito),
+            semi_id: semiId,
+            semi_dominio: semiDominio,
+            n_ute: nUte,
+            ya_en_circuito: Boolean(openByTractor),
+            semi_ya_en_circuito: Boolean(openBySemi && openBySemi.circuito_id !== openByTractor?.circuito_id),
             circuito_abierto_id: openCircuito?.circuito_id ?? null,
             ingreso_at: openCircuito?.ingreso_at ?? null,
         };
     }
     /**
-     * Alta de circuito solo-tractor desde QR (encargado_zona).
-     * Valida existencia en el índice base.tractores y delega en altaCircuito ACID.
+     * Alta de circuito desde QR (encargado_zona).
+     * Valida dominioTractor en base.tractores, resuelve semi_id desde el índice base.unidades,
+     * estampa alta_encargado_id y delega en altaCircuito ACID (bloqueo 409 si tractor o semi ya están abiertos).
      */
-    async altaCircuitoPorDominioTractor(dominioRaw) {
+    async altaCircuitoPorDominioTractor(dominioRaw, encargadoUserId) {
         const normalized = normalizeDominioKey(dominioRaw);
         if (!normalized) {
             throw new NotFoundError('Dominio de tractor vacío o inválido.');
@@ -2106,12 +2140,24 @@ class HotRamBaseService {
         if (!tractorId) {
             throw new NotFoundError(`El dominio "${normalized}" no está registrado en el padrón de tractores (base.tractores).`);
         }
+        let semiId = index.unidadByTractor.get(tractorId)?.semi_id ?? null;
+        if (!semiId) {
+            const unitRow = await index_js_1.db
+                .select({ semiId: schema_js_1.unidades.semiId })
+                .from(schema_js_1.unidades)
+                .where((0, drizzle_orm_1.eq)(schema_js_1.unidades.tractorId, tractorId))
+                .limit(1);
+            if (unitRow.length > 0 && unitRow[0].semiId) {
+                semiId = unitRow[0].semiId;
+            }
+        }
         return this.altaCircuito({
             tractorId,
-            semiId: null,
+            semiId,
             tractorN: null,
             semiN: null,
             coordUserId: null,
+            encargadoUserId: encargadoUserId ?? null,
         });
     }
     /**
