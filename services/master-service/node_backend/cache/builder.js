@@ -14,7 +14,8 @@ const {
     TAB_SHEET_KILOMETROS,
     ID_SHEET_HABILITACIONES,
     ID_SHEET_DOCUMENTOS,
-    ID_SHEET_MOVIMIENTOS
+    ID_SHEET_MOVIMIENTOS,
+    getActiveMovimientosConfig
 } = require('../utils/shared');
 const { cargarNovedades, enriquecerNovedadesConFlota, iniciarPollingNovedades } = require('../novedades');
 const { obtenerViajesMicroservicio, isMicroservicioActivo } = require('../utils/kmClient');
@@ -744,15 +745,17 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
             });
 
             // 1. Cargar marcas de tractores y semis, y vencimientos de patentes (Uni QM + Vencimientos.)
-            let nombrePestañaMov = await getTabName(ID_SHEET_MOVIMIENTOS, "Mov.Unidades", "Mov.Unidades y Choferes");
+            const activeMov = getActiveMovimientosConfig();
+            const activeMovId = activeMov.id || ID_SHEET_MOVIMIENTOS;
+            let nombrePestañaMov = await getTabName(activeMovId, "Mov.Unidades", activeMov.tabName || "Mov.Unidades y Choferes");
             let rowsMov = [];
             try {
                 const [rowsTractores, rowsSemis, rowsUniQM, rowsVenc, fetchedRowsMov] = await Promise.all([
                     fetchRango(ID_SPREADSHEET_MASTER, "'TRACTORES'!C2:D").catch(() => []),
                     fetchRango(ID_SPREADSHEET_MASTER, "'SEMIS'!C2:D").catch(() => []),
-                    fetchRango(ID_SHEET_MOVIMIENTOS, "'base datos Uni QM'!A3:F").catch(() => []),
-                    fetchRango(ID_SHEET_MOVIMIENTOS, "'Vencimientos.'!A2:N").catch(() => []),
-                    fetchRango(ID_SHEET_MOVIMIENTOS, `'${nombrePestañaMov}'!A1:ZZ1000`).catch(() => [])
+                    fetchRango(activeMovId, "'base datos Uni QM'!A3:F").catch(() => []),
+                    fetchRango(activeMovId, "'Vencimientos.'!A2:N").catch(() => []),
+                    fetchRango(activeMovId, `'${nombrePestañaMov}'!A1:ZZ1000`).catch(() => [])
                 ]);
 
                 rowsMov = fetchedRowsMov || [];
@@ -823,7 +826,7 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
 
             // 2. Parseo estructurado de la planilla mensual de Movimientos
             if (rowsMov.length === 0) {
-                rowsMov = await fetchRango(ID_SHEET_MOVIMIENTOS, `'${nombrePestañaMov}'!A1:ZZ1000`);
+                rowsMov = await fetchRango(activeMovId, `'${nombrePestañaMov}'!A1:ZZ1000`);
             }
             
             if (rowsMov.length > 0) {
@@ -833,7 +836,7 @@ async function actualizarCacheDesdeGoogle(cacheDatosGlobales, io, ioDash) {
                 function parseHeaderDate(str) {
                     if (!str) return null;
                     let clean = String(str).toLowerCase().replace(/\s+/g, ' ').trim();
-                    let matchWord = clean.match(/(\d{1,2})[\s/\-de]+([a-z]+)[\s/\-de]+(\d{2,4})/);
+                    let matchWord = clean.match(/\b(\d{1,2})(?:\s+de\s+|[\s/\-]+)([a-z]+)(?:\s+de\s+|[\s/\-]+)(\d{2,4})\b/);
                     if (matchWord) {
                         let day = parseInt(matchWord[1], 10);
                         let mStr = matchWord[2].substring(0, 3);
