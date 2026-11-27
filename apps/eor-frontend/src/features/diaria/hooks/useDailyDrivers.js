@@ -123,12 +123,23 @@ export const useDailyDrivers = (filters = {}, fechaContexto = null, options = {}
   return useInfiniteQuery({
     queryKey: queryKeys.diaria.list(filters, fechaContexto),
     queryFn: async ({ pageParam = 0 }) => {
-      // MODO RETORNO (Carga bajo demanda directa desde RPC/vista)
+      // MODO RETORNO (Carga bajo demanda directa desde RPC/vista, solo a partir del día actual)
       if (filters.retornan) {
         const fechaTarget = fechaContexto || new Date().toISOString().split('T')[0];
-        const retRows = await apiClient.getPersonalRetorno(fechaTarget);
+        const rawRetRows = await apiClient.getPersonalRetorno(fechaTarget);
+        const retRows = (rawRetRows || []).filter((r) => {
+          const cuando = String(r?.retorna_cuando || '').trim().toUpperCase();
+          if (cuando === 'AYER') return false;
+          if (r?.dias_para_retorno !== undefined && r?.dias_para_retorno !== null && Number(r.dias_para_retorno) < 0) {
+            return false;
+          }
+          if (r?.fecha_retorno && String(r.fecha_retorno).substring(0, 10) < fechaTarget) {
+            return false;
+          }
+          return true;
+        });
 
-        if (!retRows || retRows.length === 0) {
+        if (retRows.length === 0) {
           return {
             drivers: [],
             nextPage: undefined,

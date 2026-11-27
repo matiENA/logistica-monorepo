@@ -41,12 +41,12 @@ const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
       ? 'border-2 border-dashed'
       : 'border';
 
-  // FSF / F / FRANCO / RPT -> Azul (token --novedad-f)
+  // FSF / F / FRANCO / RPT -> Verde (token --novedad-f)
   if (base === 'FSF' || base.startsWith('FSF') || ['F', 'FRANCO', 'RPT'].includes(base) || base.startsWith('F')) {
     return (
       <div
-        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#eff6ff] dark:bg-blue-500/20 text-[#1d4ed8] dark:text-blue-300 ${
-          isHighlighted ? '' : 'border-[#bfdbfe] dark:border-blue-400/40'
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#f0fdf4] dark:bg-emerald-600/20 text-[#166534] dark:text-[#86efac] ${
+          isHighlighted ? '' : 'border-[#bbf7d0] dark:border-green-400/35'
         } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
         title={`Franco: ${raw}`}
       >
@@ -139,11 +139,45 @@ const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
     );
   }
 
-  // Operativo / Activo / números de rotación -> Verde (token --novedad-act)
+  // Días acumulados operativos (Fatiga WCAG 2.2 AA — distintos a Normal y a Ausente)
+  const numDias = parseInt(base, 10);
+  if (!isNaN(numDias)) {
+    const fatigaBorder = isHighlighted
+      ? 'border-2 border-dashed border-amber-400 dark:border-amber-400'
+      : 'border-2';
+
+    if (numDias >= 22) {
+      return (
+        <div
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#fef2f2] dark:bg-red-500/15 text-[#b91c1c] dark:text-[#fca5a5] ${
+            isHighlighted ? '' : 'border-[#dc2626] dark:border-[#ef4444]'
+          } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${fatigaBorder} ${trackingClass}`}
+          title={`Días acumulados críticos: ${raw}`}
+        >
+          {raw}
+        </div>
+      );
+    }
+
+    if (numDias >= 18) {
+      return (
+        <div
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#fef9c3] dark:bg-yellow-500/15 text-[#854d0e] dark:text-[#fde047] ${
+            isHighlighted ? '' : 'border-[#ca8a04] dark:border-[#eab308]'
+          } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${fatigaBorder} ${trackingClass}`}
+          title={`Días acumulados en atención: ${raw}`}
+        >
+          {raw}
+        </div>
+      );
+    }
+  }
+
+  // Operativo / Activo / números normales de rotación -> Azul (token --novedad-act)
   return (
     <div
-      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#f0fdf4] dark:bg-emerald-600/20 text-[#166534] dark:text-green-300 ${
-        isHighlighted ? '' : 'border-[#bbf7d0] dark:border-green-400/40'
+      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#eff6ff] dark:bg-blue-500/20 text-[#1d4ed8] dark:text-[#93c5fd] ${
+        isHighlighted ? '' : 'border-[#bfdbfe] dark:border-blue-400/35'
       } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
       title={`Operativo: ${raw}`}
     >

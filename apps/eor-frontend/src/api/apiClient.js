@@ -161,12 +161,25 @@ class ApiClient {
     }
   }
 
-  // 2. Personal que Retorna
+  // 2. Personal que Retorna (solo a partir del día actual: desdeHoy=1)
   async getPersonalRetorno(fechaTarget) {
+    const isFromTodayOnwards = (r) => {
+      if (!r) return false;
+      const cuando = String(r.retorna_cuando || '').trim().toUpperCase();
+      if (cuando === 'AYER') return false;
+      if (r.dias_para_retorno !== undefined && r.dias_para_retorno !== null && Number(r.dias_para_retorno) < 0) {
+        return false;
+      }
+      if (fechaTarget && r.fecha_retorno && String(r.fecha_retorno).substring(0, 10) < fechaTarget) {
+        return false;
+      }
+      return true;
+    };
+
     try {
-      const res = await this.fetchJson(`/api/views/retorno?fecha=${encodeURIComponent(fechaTarget)}`);
+      const res = await this.fetchJson(`/api/views/retorno?fecha=${encodeURIComponent(fechaTarget)}&desdeHoy=1`);
       if (res && res.success) {
-        return res.datos || [];
+        return (res.datos || []).filter(isFromTodayOnwards);
       }
     } catch (err) {
       console.warn('⚠️ [ApiClient] Fallback a RPC Supabase para fn_personal_retorno:', err.message);
@@ -175,7 +188,7 @@ class ApiClient {
     try {
       const { data, error } = await supabase.rpc('fn_personal_retorno', { p_fecha: fechaTarget });
       if (error) throw error;
-      return data || [];
+      return (data || []).filter(isFromTodayOnwards);
     } catch (sbErr) {
       return this._handleSupabaseError(sbErr, 'fn_personal_retorno', []);
     }

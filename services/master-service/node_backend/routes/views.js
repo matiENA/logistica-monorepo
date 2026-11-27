@@ -447,7 +447,11 @@ module.exports = function createViewsRouter() {
                 fechaEvaluada = fecha.trim();
             }
 
-            // 2. Filtro por tipo de retorno (AYER, HOY, MANANA / MAÑANA, 2, 3, 4 o TODOS)
+            // 2. Filtro por tipo de retorno (AYER, HOY, MANANA / MAÑANA, 2, 3, 4 o TODOS) y pushdown desdeHoy
+            if (req.query.desdeHoy === '1' || req.query.desdeHoy === 'true') {
+                conditions.push(`dias_para_retorno >= 0 AND UPPER(COALESCE(retorna_cuando, '')) <> 'AYER'`);
+            }
+
             if (tipo) {
                 const tUpper = tipo.trim().toUpperCase();
                 if (tUpper === 'AYER' || tUpper === '-1') {
