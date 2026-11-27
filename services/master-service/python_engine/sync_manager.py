@@ -146,12 +146,43 @@ class SyncManager:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
+            # 0. Verificar que las pestañas del mes activo existan antes de leer/escribir
+            # (evita errores 400 o crear hojas en blanco sin formato hasta que se creen las pestañas de Diciembre)
+            from config import CONF_SOURCE_SHEET_NAME, CONF_TARGET_SHEET_NAME, TARGET_SHEET_NAME
+            existing_tabs = client.get_sheet_names()
+            missing_tabs = [t for t in (CONF_SOURCE_SHEET_NAME, CONF_TARGET_SHEET_NAME) if t not in existing_tabs]
+            if missing_tabs:
+                elapsed_seconds = round(time.time() - start_time, 2)
+                skip_report = {
+                    "status": "SKIPPED_MISSING_TABS",
+                    "timestamp": now_str,
+                    "elapsed_seconds": elapsed_seconds,
+                    "spreadsheet_id": target_id,
+                    "missing_tabs": missing_tabs,
+                    "message": f"Pestaña(s) aún no creadas en planilla: {', '.join(missing_tabs)}. Se omite sin error hasta su creación.",
+                    "summary": {
+                        "total_rows_scanned": 0,
+                        "total_trips_detected": 0,
+                        "matching_trips_count": 0,
+                        "matching_rows_count": 0,
+                        "non_matching_trips_count": 0,
+                        "matching_tds": []
+                    },
+                    "trips_alerta": [],
+                    "trips_seguimiento": [],
+                    "trips_otros": [],
+                    "rows_written_count": 0,
+                    "headers": self.conf_viaje_service.headers,
+                    "write_result": None
+                }
+                print(f"[SKIP] {skip_report['message']}")
+                return skip_report
+
             # 1. Leer UTE Cordillera
             raw_rows = client.read_ute_cordillera_rows()
             if not raw_rows or len(raw_rows) <= 1:
                 # Fallback de contingencia: si IMPORTRANGE en UTE Cordillera está pendiente de autorización web,
                 # leer directamente de la pestaña SEGURIDA VIAL de la planilla de Ruteos
-                from config import TARGET_SHEET_NAME
                 sv_client = self.get_client(self.seguridad_vial_spreadsheet_id)
                 sv_rows = sv_client.read_ruteos_rows(range_name=f"'{TARGET_SHEET_NAME}'!A1:V")
                 if sv_rows and len(sv_rows) > 1:

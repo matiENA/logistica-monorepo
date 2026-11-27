@@ -26,7 +26,9 @@ const {
     ID_SHEET_OBSERVACIONES,
     ID_SHEET_HABILITACIONES,
     ID_SHEET_DOCUMENTOS,
-    ID_SHEET_MOVIMIENTOS
+    ID_SHEET_MOVIMIENTOS,
+    getTargetMovimientosSheetsForDate,
+    parseHeaderDateToYMD
 } = require('../utils/shared');
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -596,23 +598,25 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
         }
 
         // ======================================================================
-        // D. PROCESAR ASIGNACIONES DE UNIDADES (ID_SHEET_MOVIMIENTOS)
+        // D. PROCESAR ASIGNACIONES DE UNIDADES (MERGE VIRTUAL MOVIMIENTOS)
+        //    - Auto-cutover por fecha (sin reinicio ni ejecución manual)
+        //    - Días 1 y 2 de Diciembre se imprimen en AMBAS planillas (Dic + cola Nov)
         // ======================================================================
         if (groups.movimientos.length > 0) {
             try {
-                const tabMov = await resolveTabNameMovimientos(ID_SHEET_MOVIMIENTOS);
+                if (!rowIndexCache.movimientosBySheet) rowIndexCache.movimientosBySheet = {};
+                if (!rowIndexCache.movHeadersBySheet) rowIndexCache.movHeadersBySheet = {};
 
-                let mapTractorToRow, mapUteToRow;
-                if (rowIndexCache.movimientos.data && rowIndexCache.movimientos.expiresAt > Date.now()) {
-                    mapTractorToRow = rowIndexCache.movimientos.data.mapTractorToRow;
-                    mapUteToRow = rowIndexCache.movimientos.data.mapUteToRow;
-                } else {
+                async function getMovSheetIndex(sheetId, fallbackTab) {
+                    const cached = rowIndexCache.movimientosBySheet[sheetId];
+                    if (cached && cached.expiresAt > Date.now()) {
+                        return cached.data;
+                    }
+                    const tabMov = await resolveTabNameMovimientos(sheetId, fallbackTab);
                     stats.googleApiRequests++;
-                    // Leer primeras columnas para ubicar tractor y N_UTE (hasta fila 350)
-                    const rowsUnits = await fetchRangeValues(ID_SHEET_MOVIMIENTOS, `'${tabMov}'!A1:F350`);
-                    mapTractorToRow = new Map();
-                    mapUteToRow = new Map();
-
+                    const rowsUnits = await fetchRangeValues(sheetId, `'${tabMov}'!A1:F350`);
+                    const mapTractorToRow = new Map();
+                    const mapUteToRow = new Map();
                     rowsUnits.forEach((r, idx) => {
                         const rowNum = 1 + idx;
                         const ute = cleanUte(r[2]);
@@ -622,39 +626,101 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                         if (semi) mapTractorToRow.set(semi, rowNum);
                         if (ute) mapUteToRow.set(ute, rowNum);
                     });
-
-                    rowIndexCache.movimientos = {
-                        data: { mapTractorToRow, mapUteToRow },
-                        expiresAt: Date.now() + CACHE_TTL_MS
-                    };
+                    const data = { tabMov, mapTractorToRow, mapUteToRow };
+                    rowIndexCache.movimientosBySheet[sheetId] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+                    return data;
                 }
 
-                const cellMap = new Map();
+                async function getMovDateColChofer(sheetId, tabMov, year, month, day, isBridgeTail) {
+                    if (!isBridgeTail) {
+                        return 27 + 13 * (day - 1);
+                    }
+                    const hKey = `${sheetId}:::${tabMov}`;
+                    let headerMap = rowIndexCache.movHeadersBySheet[hKey];
+                    if (!headerMap || headerMap.expiresAt <= Date.now()) {
+                        stats.googleApiRequests++;
+                        const rowsH = await fetchRangeValues(sheetId, `'${tabMov}'!A1:RT1`);
+                        const r0 = rowsH[0] || [];
+                        const map = new Map();
+                        r0.forEach((cell, idx) => {
+                            const ymd = parseHeaderDateToYMD(cell);
+                            if (ymd) {
+                                const k = `${ymd.year}-${ymd.month}-${ymd.day}`;
+                                if (!map.has(k)) map.set(k, Math.max(0, idx - 3));
+                            }
+                        });
+                        headerMap = { map, expiresAt: Date.now() + CACHE_TTL_MS };
+                        rowIndexCache.movHeadersBySheet[hKey] = headerMap;
+                    }
+                    const colIdx = headerMap.map.get(`${year}-${month}-${day}`);
+                    return colIdx !== undefined ? colIdx : null;
+                }
+
+                const cellMapsBySheet = new Map();
                 const successIds = [];
                 const failedUnmatched = [];
 
                 for (const item of groups.movimientos) {
-                    const tractorNorm = cleanPatente(item.unidad_tractor || item.datos_nuevos?.tractor);
-                    const semiNorm = cleanPatente(item.datos_nuevos?.semi);
-                    const nUteNorm = cleanUte(item.datos_nuevos?.n_ute);
-                    let rowNum = (tractorNorm && mapTractorToRow.get(tractorNorm)) 
-                              || (semiNorm && mapTractorToRow.get(semiNorm)) 
-                              || (nUteNorm && mapUteToRow.get(nUteNorm));
+                    const hoyAr = getFechaArgentina();
+                    let diaNum = hoyAr.getDate();
+                    let targetYM = { year: hoyAr.getFullYear(), month: hoyAr.getMonth() + 1 };
+                    if (item.datos_nuevos?.fecha) {
+                        const dateStr = String(item.datos_nuevos.fecha).split('T')[0];
+                        const parts = dateStr.split('-');
+                        if (parts.length === 3) {
+                            targetYM = { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) };
+                            diaNum = parseInt(parts[2], 10);
+                        } else {
+                            const dObj = new Date(item.datos_nuevos.fecha);
+                            if (!isNaN(dObj.getTime())) {
+                                targetYM = { year: dObj.getUTCFullYear(), month: dObj.getUTCMonth() + 1 };
+                                diaNum = dObj.getUTCDate();
+                            }
+                        }
+                    }
 
-                    // Fallback para desasignaciones si no vinieron tractor/semi en datos_nuevos
-                    if (!rowNum && (item.datos_nuevos?.esDesasignar || item.datos_previos?.unidad_anterior)) {
-                        const prevId = item.datos_previos?.unidad_anterior || item.datos_nuevos?.unidad_id;
-                        if (prevId) {
-                            try {
-                                const uRes = await client.query(`
-                                    SELECT u.n_ute, t.patente as tractor, s.patente as semi
-                                    FROM public.unidades u
-                                    LEFT JOIN public.tractores t ON t.id = u.tractor_id
-                                    LEFT JOIN public.semis s ON s.id = u.semi_id
-                                    WHERE u.id = $1
-                                `, [prevId]);
-                                if (uRes.rows.length > 0) {
-                                    const prevU = uRes.rows[0];
+                    const targetDate = new Date(targetYM.year, targetYM.month - 1, diaNum);
+                    const targetSheets = getTargetMovimientosSheetsForDate(targetDate);
+
+                    let prevU = null;
+                    let matchedAny = false;
+                    let primaryTabLabel = targetSheets[0]?.tabName || 'Movimientos';
+
+                    for (const tSheet of targetSheets) {
+                        const { tabMov, mapTractorToRow, mapUteToRow } = await getMovSheetIndex(tSheet.id, tSheet.tabName);
+                        if (tSheet.role === 'primary') primaryTabLabel = tabMov;
+
+                        const isBridgeTail = tSheet.role === 'bridge_tail';
+                        const colChoferIdx = await getMovDateColChofer(tSheet.id, tabMov, targetYM.year, targetYM.month, diaNum, isBridgeTail);
+                        if (colChoferIdx === null) {
+                            continue;
+                        }
+
+                        const tractorNorm = cleanPatente(item.unidad_tractor || item.datos_nuevos?.tractor);
+                        const semiNorm = cleanPatente(item.datos_nuevos?.semi);
+                        const nUteNorm = cleanUte(item.datos_nuevos?.n_ute);
+                        let rowNum = (tractorNorm && mapTractorToRow.get(tractorNorm))
+                                  || (semiNorm && mapTractorToRow.get(semiNorm))
+                                  || (nUteNorm && mapUteToRow.get(nUteNorm));
+
+                        if (!rowNum && (item.datos_nuevos?.esDesasignar || item.datos_previos?.unidad_anterior)) {
+                            const prevId = item.datos_previos?.unidad_anterior || item.datos_nuevos?.unidad_id;
+                            if (prevId) {
+                                if (!prevU) {
+                                    try {
+                                        const uRes = await client.query(`
+                                            SELECT u.n_ute, t.patente as tractor, s.patente as semi
+                                            FROM public.unidades u
+                                            LEFT JOIN public.tractores t ON t.id = u.tractor_id
+                                            LEFT JOIN public.semis s ON s.id = u.semi_id
+                                            WHERE u.id = $1
+                                        `, [prevId]);
+                                        if (uRes.rows.length > 0) prevU = uRes.rows[0];
+                                    } catch (eDb) {
+                                        console.warn('   ⚠️ Error consultando unidad previa en DB:', eDb.message);
+                                    }
+                                }
+                                if (prevU) {
                                     const prevTrac = cleanPatente(prevU.tractor);
                                     const prevSemi = cleanPatente(prevU.semi);
                                     const prevUte = cleanUte(prevU.n_ute);
@@ -662,67 +728,35 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                                           || (prevSemi && mapTractorToRow.get(prevSemi))
                                           || (prevUte && mapUteToRow.get(prevUte));
                                 }
-                            } catch (eDb) {
-                                console.warn('   ⚠️ Error consultando unidad previa en DB:', eDb.message);
                             }
+                        }
+
+                        if (rowNum) {
+                            const colLetter = colToLetter(colChoferIdx);
+                            const valChofer = item.datos_nuevos?.esDesasignar ? (item.datos_nuevos?.caracter || '1') : (item.chofer_nombre || '');
+                            const cellRange = `'${tabMov}'!${colLetter}${rowNum}`;
+                            if (!cellMapsBySheet.has(tSheet.id)) cellMapsBySheet.set(tSheet.id, new Map());
+                            cellMapsBySheet.get(tSheet.id).set(cellRange, valChofer);
+                            matchedAny = true;
                         }
                     }
 
-                    if (rowNum) {
-                        const hoyAr = getFechaArgentina();
-                        let diaNum = hoyAr.getDate();
-                        let targetYM = { year: hoyAr.getFullYear(), month: hoyAr.getMonth() + 1 };
-                        if (item.datos_nuevos?.fecha) {
-                            const dateStr = String(item.datos_nuevos.fecha).split('T')[0];
-                            const parts = dateStr.split('-');
-                            if (parts.length === 3) {
-                                targetYM = { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) };
-                                diaNum = parseInt(parts[2], 10);
-                            } else {
-                                const dObj = new Date(item.datos_nuevos.fecha);
-                                if (!isNaN(dObj.getTime())) {
-                                    targetYM = { year: dObj.getUTCFullYear(), month: dObj.getUTCMonth() + 1 };
-                                    diaNum = dObj.getUTCDate();
-                                }
-                            }
-                        }
-
-                        // Guardia de cruce mensual: no escribir una asignación de otro mes sobre la planilla actual
-                        const tabMovYM = parseMonthYearFromTab(tabMov);
-                        if (tabMovYM && (tabMovYM.year !== targetYM.year || tabMovYM.month !== targetYM.month)) {
-                            console.warn(`   ⏭️ [MOVIMIENTOS] Omitiendo asignación fuera de mes (${targetYM.year}-${targetYM.month}) para pestaña [${tabMov}]`);
-                            successIds.push(item.id);
-                            continue;
-                        }
-
-                        // Col Chofer en Movimientos: 27 + 13*(dia - 1)
-                        const colChoferIdx = 27 + 13 * (diaNum - 1);
-                        const colLetter = colToLetter(colChoferIdx);
-                        const valChofer = item.datos_nuevos?.esDesasignar ? (item.datos_nuevos?.caracter || '1') : (item.chofer_nombre || '');
-
-                        const cellRange = `'${tabMov}'!${colLetter}${rowNum}`;
-                        // Deduplicar: si hay más de una operación para la misma celda en el lote, queda la más reciente
-                        cellMap.set(cellRange, valChofer);
+                    if (matchedAny) {
                         successIds.push(item.id);
                     } else {
-                        console.warn(`   ⚠️ Unidad no hallada en Movimientos: Tractor=${tractorNorm || '-'}, Semi=${semiNorm || '-'}, UTE=${nUteNorm || '-'}`);
-                        failedUnmatched.push(item);
-                        rowIndexCache.movimientos.data = null;
+                        const tractorNorm = cleanPatente(item.unidad_tractor || item.datos_nuevos?.tractor);
+                        const semiNorm = cleanPatente(item.datos_nuevos?.semi);
+                        const nUteNorm = cleanUte(item.datos_nuevos?.n_ute);
+                        console.warn(`   ⚠️ Unidad no hallada en Movimientos (${primaryTabLabel}): Tractor=${tractorNorm || '-'}, Semi=${semiNorm || '-'}, UTE=${nUteNorm || '-'}`);
+                        failedUnmatched.push({ item, tabMov: primaryTabLabel });
+                        rowIndexCache.movimientosBySheet = {};
                     }
-                }
-
-                const batchData = [];
-                for (const [range, val] of cellMap.entries()) {
-                    batchData.push({
-                        range,
-                        values: [[val]]
-                    });
                 }
 
                 if (failedUnmatched.length > 0 && !dryRun) {
                     stats.failed += failedUnmatched.length;
-                    for (const fItem of failedUnmatched) {
-                        const desc = `Unidad no hallada en Movimientos [${tabMov}] (Tractor: ${fItem.unidad_tractor || fItem.datos_nuevos?.tractor || 'N/A'}, Semi: ${fItem.datos_nuevos?.semi || 'N/A'}, UTE: ${fItem.datos_nuevos?.n_ute || 'N/A'})`;
+                    for (const { item: fItem, tabMov: fTab } of failedUnmatched) {
+                        const desc = `Unidad no hallada en Movimientos [${fTab}] (Tractor: ${fItem.unidad_tractor || fItem.datos_nuevos?.tractor || 'N/A'}, Semi: ${fItem.datos_nuevos?.semi || 'N/A'}, UTE: ${fItem.datos_nuevos?.n_ute || 'N/A'})`;
                         await client.query(`
                             UPDATE public.eor_sync_queue 
                             SET estado_sync = 'ERROR', error_detalle = $1, reintentos = COALESCE(reintentos, 0) + 1 
@@ -731,12 +765,25 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                     }
                 }
 
-                if (batchData.length > 0) {
-                    stats.googleApiRequests++;
-                    stats.batchRequestsSent++;
-                    stats.egressBytes += Buffer.byteLength(JSON.stringify(batchData));
-                    if (!dryRun) {
-                        await executeBatchUpdate(ID_SHEET_MOVIMIENTOS, batchData);
+                let totalBatchItems = 0;
+                for (const [sheetId, cellMap] of cellMapsBySheet.entries()) {
+                    const batchData = [];
+                    for (const [range, val] of cellMap.entries()) {
+                        batchData.push({ range, values: [[val]] });
+                    }
+                    if (batchData.length > 0) {
+                        totalBatchItems += batchData.length;
+                        stats.googleApiRequests++;
+                        stats.batchRequestsSent++;
+                        stats.egressBytes += Buffer.byteLength(JSON.stringify(batchData));
+                        if (!dryRun) {
+                            await executeBatchUpdate(sheetId, batchData);
+                        }
+                    }
+                }
+
+                if (totalBatchItems > 0) {
+                    if (!dryRun && successIds.length > 0) {
                         await client.query(`
                             UPDATE public.eor_sync_queue 
                             SET estado_sync = 'COMPLETADO', sincronizado_el = NOW() 
@@ -744,7 +791,7 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                         `, [successIds]);
                     }
                     stats.completed += successIds.length;
-                    stats.details.push(`MOVIMIENTOS: ${successIds.length} asignaciones actualizadas en 1 batchUpdate.`);
+                    stats.details.push(`MOVIMIENTOS (Merge Virtual): ${successIds.length} asignaciones actualizadas en ${cellMapsBySheet.size} planilla(s).`);
                 }
             } catch (errMov) {
                 console.error('❌ Error sincronizando MOVIMIENTOS:', errMov.message);

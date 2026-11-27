@@ -14,7 +14,7 @@ const { supabase } = require('../utils/shared');
 const {
     fetchRango,
     getTabName,
-    ID_SHEET_MOVIMIENTOS,
+    getActiveMovimientosConfig,
     getFechaArgentina,
     mesesLargo
 } = require('../utils/shared');
@@ -35,10 +35,11 @@ async function extraerPareosYDesunionesDesdeSheets(diaParam = null) {
         return cacheRecorte;
     }
 
-    const tab = await getTabName(ID_SHEET_MOVIMIENTOS, 'Mov.Unidades', 'NOVIEMBRE 2026- Mov.Unidades y Choferes');
-    const rows = await fetchRango(ID_SHEET_MOVIMIENTOS, `'${tab}'!A1:ZZ350`);
-
     const hoyAr = getFechaArgentina();
+    const activeMov = getActiveMovimientosConfig(hoyAr);
+    const tab = await getTabName(activeMov.id, 'Mov.Unidades', activeMov.tabName);
+    const rows = await fetchRango(activeMov.id, `'${tab}'!A1:ZZ350`);
+
     const diaHoy = diaParam ? parseInt(diaParam, 10) : hoyAr.getDate();
     // Stride canónico: Día 1 = Col 27, Día 2 = Col 40 ... Día d = 27 + 13 * (d - 1)
     const colChoferHoy = 27 + 13 * (diaHoy - 1);

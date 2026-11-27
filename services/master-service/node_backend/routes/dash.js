@@ -437,126 +437,139 @@ module.exports = function createDashRouter(cacheDatosGlobales, io, ioDash = null
 
     async function sincronizarCambioUnidadEnSheets({ choferNombre, tractor, semi, n_ute, esDesasignar = false }) {
         try {
-            const { getTabName, fetchRango, serviceAccountAuth, ID_SHEET_MOVIMIENTOS, mesesAbrev, mesesLargo, getFechaArgentina, normalizar } = require('../utils/shared');
-            if (!serviceAccountAuth || !ID_SHEET_MOVIMIENTOS) {
+            const {
+                getTabName,
+                fetchRango,
+                serviceAccountAuth,
+                getTargetMovimientosSheetsForDate,
+                parseHeaderDateToYMD,
+                getFechaArgentina,
+                normalizar
+            } = require('../utils/shared');
+            if (!serviceAccountAuth) {
                 console.warn("⚠️ [Sheets Double-Write] Google Sheets no configurado.");
                 return { success: false, reason: "Sheets no configurado" };
             }
 
-            const tabName = await getTabName(ID_SHEET_MOVIMIENTOS, "Mov.Unidades", "SEPTIEMBRE 2026- Mov.Unidades y Choferes");
-            const rows = await fetchRango(ID_SHEET_MOVIMIENTOS, `'${tabName}'!A1:ZZ350`);
-            if (!rows || rows.length === 0) return { success: false, reason: "Planilla vacía" };
-
-            const row0 = rows[0] || [];
             const hoyAr = getFechaArgentina();
-
-            function parseHeaderDate(str) {
-                if (!str) return null;
-                let clean = String(str).toLowerCase().replace(/\s+/g, ' ').trim();
-                let matchWord = clean.match(/(\d{1,2})[\s/\-de]+([a-z]+)[\s/\-de]+(\d{2,4})/);
-                if (matchWord) {
-                    let day = parseInt(matchWord[1], 10);
-                    let mStr = matchWord[2].substring(0, 3);
-                    let monthIdx = mesesAbrev.map(m => m.toLowerCase()).indexOf(mStr);
-                    if (monthIdx === -1) monthIdx = mesesLargo.map(m => m.toLowerCase()).indexOf(matchWord[2]);
-                    let year = parseInt(matchWord[3], 10);
-                    if (year < 100) year += 2000;
-                    if (monthIdx !== -1 && day >= 1 && day <= 31) return new Date(year, monthIdx, day);
-                }
-                let matchSlash = clean.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-                if (matchSlash) {
-                    let day = parseInt(matchSlash[1], 10);
-                    let monthIdx = parseInt(matchSlash[2], 10) - 1;
-                    let year = parseInt(matchSlash[3], 10);
-                    if (year < 100) year += 2000;
-                    return new Date(year, monthIdx, day);
-                }
-                return null;
+            const todayYMD = { year: hoyAr.getFullYear(), month: hoyAr.getMonth() + 1, day: hoyAr.getDate() };
+            const targetSheets = getTargetMovimientosSheetsForDate(hoyAr);
+            if (!targetSheets || targetSheets.length === 0) {
+                return { success: false, reason: "Sin planillas Movimientos configuradas" };
             }
 
-            let dateMap = [];
-            row0.forEach((cell, idx) => {
-                const d = parseHeaderDate(cell);
-                if (d) dateMap.push({ colFecha: idx, colNom: Math.max(0, idx - 3), dateObj: d });
-            });
-
-            const todayStr = hoyAr.toISOString().split('T')[0];
-            let targetCol = dateMap.find(d => d.dateObj.toISOString().split('T')[0] === todayStr);
-            if (!targetCol) {
-                const validPast = dateMap.filter(d => d.dateObj <= hoyAr).sort((a, b) => b.dateObj - a.dateObj);
-                if (validPast.length > 0) targetCol = validPast[0];
-                else if (dateMap.length > 0) targetCol = dateMap[0];
-            }
-
-            if (!targetCol) {
-                console.warn("⚠️ [Sheets Double-Write] Columna de fecha operativa no encontrada.");
-                return { success: false, reason: "Columna de fecha no encontrada" };
-            }
-
-            const colChoferIndex = targetCol.colNom;
-            const colLetter = colIndexToA1(colChoferIndex);
             const normChoferBuscado = normalizar(choferNombre);
-
             const cleanTractor = (tractor || '').toUpperCase().replace(/\s+/g, '');
             const cleanSemi = (semi || '').toUpperCase().replace(/\s+/g, '');
             const cleanUte = String(n_ute || '').trim();
 
-            let rowTargetIdx = -1;
-            let rowOldIdx = -1;
+            let totalBatchUpdates = 0;
+            const syncedSheets = [];
 
-            for (let i = 1; i < rows.length; i++) {
-                const r = rows[i];
-                if (!r || r.length === 0) continue;
+            for (const target of targetSheets) {
+                try {
+                const tabName = await getTabName(target.id, "Mov.Unidades", target.tabName);
+                const rows = await fetchRango(target.id, `'${tabName}'!A1:ZZ350`);
+                if (!rows || rows.length === 0) continue;
 
-                const rUte = String(r[2] || '').trim();
-                const rTrac = String(r[4] || '').toUpperCase().replace(/\s+/g, '');
-                const rSemi = String(r[5] || '').toUpperCase().replace(/\s+/g, '');
-                const rChofer = String(r[colChoferIndex] || '').trim();
-                const normRChofer = normalizar(rChofer);
-
-                if (rChofer && (normRChofer === normChoferBuscado || normRChofer.replace(/ñ/g, 'n') === normChoferBuscado.replace(/ñ/g, 'n'))) {
-                    rowOldIdx = i + 1;
-                }
-
-                if (!esDesasignar && rowTargetIdx === -1) {
-                    if ((cleanTractor && rTrac === cleanTractor) ||
-                        (cleanSemi && rSemi === cleanSemi) ||
-                        (cleanUte && cleanUte !== '-' && rUte === cleanUte)) {
-                        rowTargetIdx = i + 1;
-                    }
-                }
-            }
-
-            const batchUpdates = [];
-            // Borrar de fila anterior si cambió de unidad
-            if (rowOldIdx !== -1 && rowOldIdx !== rowTargetIdx) {
-                batchUpdates.push({
-                    range: `'${tabName}'!${colLetter}${rowOldIdx}`,
-                    values: [['']]
-                });
-            }
-
-            // Escribir en la nueva fila
-            if (!esDesasignar && rowTargetIdx !== -1) {
-                batchUpdates.push({
-                    range: `'${tabName}'!${colLetter}${rowTargetIdx}`,
-                    values: [[choferNombre.trim().toUpperCase()]]
-                });
-            }
-
-            if (batchUpdates.length > 0) {
-                await serviceAccountAuth.request({
-                    url: `https://sheets.googleapis.com/v4/spreadsheets/${ID_SHEET_MOVIMIENTOS}/values:batchUpdate`,
-                    method: 'POST',
-                    data: {
-                        valueInputOption: 'USER_ENTERED',
-                        data: batchUpdates
+                const row0 = rows[0] || [];
+                const dateMap = [];
+                row0.forEach((cell, idx) => {
+                    const ymd = parseHeaderDateToYMD(cell);
+                    if (ymd) {
+                        dateMap.push({
+                            colFecha: idx,
+                            colNom: Math.max(0, idx - 3),
+                            ymd,
+                            dateObj: new Date(ymd.year, ymd.month - 1, ymd.day)
+                        });
                     }
                 });
-                console.log(`✅ [Sheets Double-Write] Asignación reflejada en Google Sheets ('${tabName}'): '${choferNombre}' -> Fila ${rowTargetIdx || 'desasignado'}`);
+
+                let targetCol = dateMap.find(d =>
+                    d.ymd.year === todayYMD.year && d.ymd.month === todayYMD.month && d.ymd.day === todayYMD.day
+                );
+
+                // Para planilla de cruce (ej. días 1 y 2 en la cola de Noviembre), exigir match exacto de fecha en Fila 1
+                if (!targetCol && target.role === 'bridge_tail') {
+                    console.log(`ℹ️ [Sheets Double-Write Bridge] Fecha ${todayYMD.year}-${todayYMD.month}-${todayYMD.day} no presente en Fila 1 de '${tabName}'. Se omite.`);
+                    continue;
+                }
+
+                if (!targetCol) {
+                    const validPast = dateMap.filter(d => d.dateObj <= hoyAr).sort((a, b) => b.dateObj - a.dateObj);
+                    if (validPast.length > 0) targetCol = validPast[0];
+                    else if (dateMap.length > 0) targetCol = dateMap[0];
+                }
+
+                if (!targetCol) {
+                    console.warn(`⚠️ [Sheets Double-Write] Columna de fecha operativa no encontrada en '${tabName}'.`);
+                    continue;
+                }
+
+                const colChoferIndex = targetCol.colNom;
+                const colLetter = colIndexToA1(colChoferIndex);
+
+                let rowTargetIdx = -1;
+                let rowOldIdx = -1;
+
+                for (let i = 1; i < rows.length; i++) {
+                    const r = rows[i];
+                    if (!r || r.length === 0) continue;
+
+                    const rUte = String(r[2] || '').trim();
+                    const rTrac = String(r[4] || '').toUpperCase().replace(/\s+/g, '');
+                    const rSemi = String(r[5] || '').toUpperCase().replace(/\s+/g, '');
+                    const rChofer = String(r[colChoferIndex] || '').trim();
+                    const normRChofer = normalizar(rChofer);
+
+                    if (rChofer && (normRChofer === normChoferBuscado || normRChofer.replace(/ñ/g, 'n') === normChoferBuscado.replace(/ñ/g, 'n'))) {
+                        rowOldIdx = i + 1;
+                    }
+
+                    if (!esDesasignar && rowTargetIdx === -1) {
+                        if ((cleanTractor && rTrac === cleanTractor) ||
+                            (cleanSemi && rSemi === cleanSemi) ||
+                            (cleanUte && cleanUte !== '-' && rUte === cleanUte)) {
+                            rowTargetIdx = i + 1;
+                        }
+                    }
+                }
+
+                const batchUpdates = [];
+                if (rowOldIdx !== -1 && rowOldIdx !== rowTargetIdx) {
+                    batchUpdates.push({
+                        range: `'${tabName}'!${colLetter}${rowOldIdx}`,
+                        values: [['']]
+                    });
+                }
+
+                if (!esDesasignar && rowTargetIdx !== -1) {
+                    batchUpdates.push({
+                        range: `'${tabName}'!${colLetter}${rowTargetIdx}`,
+                        values: [[choferNombre.trim().toUpperCase()]]
+                    });
+                }
+
+                if (batchUpdates.length > 0) {
+                    await serviceAccountAuth.request({
+                        url: `https://sheets.googleapis.com/v4/spreadsheets/${target.id}/values:batchUpdate`,
+                        method: 'POST',
+                        data: {
+                            valueInputOption: 'USER_ENTERED',
+                            data: batchUpdates
+                        }
+                    });
+                    totalBatchUpdates += batchUpdates.length;
+                    syncedSheets.push(tabName);
+                    console.log(`✅ [Sheets Double-Write] Asignación reflejada en '${tabName}' (${target.role}): '${choferNombre}' -> Fila ${rowTargetIdx || 'desasignado'} (${colLetter})`);
+                }
+                } catch (errSheet) {
+                    console.warn(`⚠️ [Sheets Double-Write] Error aislado en '${target.tabName}' (${target.role}): ${errSheet.message}`);
+                }
             }
 
-            return { success: true, count: batchUpdates.length };
+            return { success: true, count: totalBatchUpdates, sheets: syncedSheets };
         } catch (err) {
             console.error("❌ [Sheets Double-Write] Error en sincronización con Sheets:", err.message);
             return { success: false, error: err.message };

@@ -7,7 +7,8 @@
     "tab_movimientos": "NOVIEMBRE 2026- Mov.Unidades y Choferes",
     "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
     "tab_conf_source": "UTE Cordillera Noviembre 26",
-    "tab_conf_target": "CONF. DE VIAJE NOVIEMBRE 26"
+    "tab_conf_target": "CONF. DE VIAJE NOVIEMBRE 26",
+    "diagrama_tab": "Nov-26"
   },
   "mes_anterior": {
     "nombre": "Octubre 2026",
@@ -17,7 +18,55 @@
     "tab_movimientos": "OCTUBRE 2026- Mov.Unidades y Choferes",
     "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
     "tab_conf_source": "UTE Cordillera Octubre 26",
-    "tab_conf_target": "CONF. DE VIAJE OCTUBRE 26"
+    "tab_conf_target": "CONF. DE VIAJE OCTUBRE 26",
+    "diagrama_tab": "Oct-26"
   },
-  "dias_transicion_lectura_dual": 7
+  "mes_siguiente": {
+    "nombre": "Diciembre 2026",
+    "ruteos_id": "1h-x0rFJLrZxyhzFhRi03BDPN3APSx0EwpkbJo7F15Ms",
+    "tab_ruteos": "Ruteos",
+    "movimientos_id": "14QpWY9KvOVj2Yinn5F1hOiSkTxASYwLc-Cd7F2rFO_k",
+    "tab_movimientos": "DICIEMBRE 2026- Mov.Unidades y Choferes",
+    "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
+    "tab_conf_source": "UTE Cordillera Diciembre 26",
+    "tab_conf_target": "CONF. DE VIAJE DICIEMBRE 26",
+    "diagrama_tab": "Dic-26"
+  },
+  "meses": {
+    "2026-10": {
+      "nombre": "Octubre 2026",
+      "ruteos_id": "1-wNLgr2b1TibP_MPwA9ToF9jlH_jiPxjN0iirWbFb3o",
+      "tab_ruteos": "Ruteos",
+      "movimientos_id": "14Mb5rD853zxDkaLDS-IrW-OBDTDBjuJxn_3olXeWlkc",
+      "tab_movimientos": "OCTUBRE 2026- Mov.Unidades y Choferes",
+      "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
+      "tab_conf_source": "UTE Cordillera Octubre 26",
+      "tab_conf_target": "CONF. DE VIAJE OCTUBRE 26",
+      "diagrama_tab": "Oct-26"
+    },
+    "2026-11": {
+      "nombre": "Noviembre 2026",
+      "ruteos_id": "1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE",
+      "tab_ruteos": "Ruteos",
+      "movimientos_id": "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc",
+      "tab_movimientos": "NOVIEMBRE 2026- Mov.Unidades y Choferes",
+      "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
+      "tab_conf_source": "UTE Cordillera Noviembre 26",
+      "tab_conf_target": "CONF. DE VIAJE NOVIEMBRE 26",
+      "diagrama_tab": "Nov-26"
+    },
+    "2026-12": {
+      "nombre": "Diciembre 2026",
+      "ruteos_id": "1h-x0rFJLrZxyhzFhRi03BDPN3APSx0EwpkbJo7F15Ms",
+      "tab_ruteos": "Ruteos",
+      "movimientos_id": "14QpWY9KvOVj2Yinn5F1hOiSkTxASYwLc-Cd7F2rFO_k",
+      "tab_movimientos": "DICIEMBRE 2026- Mov.Unidades y Choferes",
+      "conf_viaje_id": "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU",
+      "tab_conf_source": "UTE Cordillera Diciembre 26",
+      "tab_conf_target": "CONF. DE VIAJE DICIEMBRE 26",
+      "diagrama_tab": "Dic-26"
+    }
+  },
+  "dias_transicion_lectura_dual": 7,
+  "dias_dual_print_cruce": [1, 2]
 }

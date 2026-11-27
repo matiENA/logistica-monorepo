@@ -55,6 +55,8 @@ from googleapiclient.discovery import build
 from credentials_helper import get_google_credentials, resolve_credentials_file
 from sync_operativas_unificadas import (
     UnifiedOperativasSync,
+    build_virtual_date_window,
+    run_virtual_merge_sync,
     get_day_column_indices,
     index_to_col_letter,
     api_call_with_retry,
@@ -72,6 +74,9 @@ from config_operativas import (
     SOURCE_TAB_RUTEOS,
     TARGET_TAB_MOV,
     DIAS_TRANSICION_DUAL,
+    load_config,
+    get_argentina_now,
+    get_month_config,
 )
 
 SCOPES = [
@@ -83,19 +88,40 @@ SCOPES = [
 class VacioPoller:
     def __init__(
         self,
-        ruteos_id: str = DEFAULT_RUTEOS_ID,
-        mov_id: str = DEFAULT_MOV_ID,
+        ruteos_id: Optional[str] = None,
+        mov_id: Optional[str] = None,
         day: Optional[int] = None,
         window: Optional[int] = None
     ):
-        self.ruteos_id = ruteos_id
-        self.mov_id = mov_id
+        now_ar = get_argentina_now()
+        self.today_ar = now_ar.date()
+        self.cfg = load_config(self.today_ar)
+        mes_act = self.cfg.get("mes_actual", {})
+        self.ruteos_id = ruteos_id or mes_act.get("ruteos_id", DEFAULT_RUTEOS_ID)
+        self.tab_ruteos = mes_act.get("tab_ruteos", SOURCE_TAB_RUTEOS)
+        self.mov_id = mov_id or mes_act.get("movimientos_id", DEFAULT_MOV_ID)
+        self.tab_mov = mes_act.get("tab_movimientos", TARGET_TAB_MOV)
         self.day_explicit = (day is not None)
-        self.day = day or datetime.now().day
+        self.day = day or now_ar.day
         self.window_explicit = (window is not None)
         self.window = window or 7
         self._creds = get_google_credentials(scopes=SCOPES)
         self._service = build("sheets", "v4", credentials=self._creds)
+
+    def _get_active_ruteos_sources(self) -> List[Tuple[str, str]]:
+        """Retorna las fuentes de Ruteos activas para la ventana virtual actual (ej. UTE Nov + UTE Dic en cruce)."""
+        dates = build_virtual_date_window(self.today_ar, window=self.window, cfg=self.cfg)
+        months = sorted({(d.year, d.month) for d in dates})
+        sources: List[Tuple[str, str]] = []
+        seen = set()
+        for y, m in months:
+            mc = get_month_config(y, m, self.cfg)
+            if mc and mc.get("ruteos_id") and mc["ruteos_id"] not in seen:
+                sources.append((mc["ruteos_id"], mc.get("tab_ruteos", "Ruteos")))
+                seen.add(mc["ruteos_id"])
+        if not sources:
+            sources.append((self.ruteos_id, self.tab_ruteos))
+        return sources
 
     def load_previous_state(self) -> Dict[str, Any]:
         """Carga el último estado registrado desde el archivo JSON local."""
@@ -117,26 +143,49 @@ class VacioPoller:
 
     def fetch_fingerprint(self, check_movimientos: bool = False) -> Tuple[str, Dict[str, Any]]:
         """
-        Fase 1: Lee únicamente las columnas indispensables para detectar cambios.
-        Por defecto consulta únicamente Ruteos (Cols L, X y H) en ~2s, evitando
-        el overhead de recalcular dependencias pesadas en Movimientos.
+        Fase 1: Lee únicamente las columnas indispensables (Cols L, X y H) de todas las
+        planillas Ruteos involucradas en el Merge Virtual (~2s por planilla).
         Retorna (hash_sha256, metadata_resumen).
         """
         t0 = time.time()
+        sources = self._get_active_ruteos_sources()
 
-        # 1. Rangos de Ruteos: TDs (Col L), Vacíos (Col X) y Tracking Destinos (Col H)
-        ruteos_ranges = [
-            f"'{SOURCE_TAB_RUTEOS}'!L4:L",
-            f"'{SOURCE_TAB_RUTEOS}'!X4:X",
-            f"'{SOURCE_TAB_RUTEOS}'!H4:H"
-        ]
+        vacio_items = []
+        td_tail = []
+        tracking_tail = []
+        total_td_rows = 0
 
-        # Consulta combinada a Ruteos (1 sola petición HTTP con reintento)
-        res_ruteos = api_call_with_retry(self._service.spreadsheets().values().batchGet(
-            spreadsheetId=self.ruteos_id,
-            ranges=ruteos_ranges,
-            valueRenderOption="FORMATTED_VALUE"
-        ))
+        for src_ruteos_id, src_tab in sources:
+            ruteos_ranges = [
+                f"'{src_tab}'!L4:L",
+                f"'{src_tab}'!X4:X",
+                f"'{src_tab}'!H4:H"
+            ]
+            res_ruteos = api_call_with_retry(self._service.spreadsheets().values().batchGet(
+                spreadsheetId=src_ruteos_id,
+                ranges=ruteos_ranges,
+                valueRenderOption="FORMATTED_VALUE"
+            ))
+            val_ranges = res_ruteos.get("valueRanges", [])
+            raw_tds = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
+            raw_x = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
+            raw_h = val_ranges[2].get("values", []) if len(val_ranges) > 2 else []
+            total_td_rows += len(raw_tds)
+
+            for idx, row in enumerate(raw_x):
+                val = row[0].strip() if row and row[0] else ""
+                if val and val != "#N/A":
+                    vacio_items.append({"src": src_ruteos_id[:8], "row": idx + 4, "val": val})
+
+            for idx, row in enumerate(raw_tds[-150:], start=max(4, len(raw_tds) - 146)):
+                val = row[0].strip() if row and row[0] else ""
+                if val and is_valid_td(val):
+                    td_tail.append({"src": src_ruteos_id[:8], "row": idx, "td": val})
+
+            for idx, row in enumerate(raw_h[-150:], start=max(4, len(raw_h) - 146)):
+                val = row[0].strip() if row and row[0] else ""
+                if val:
+                    tracking_tail.append({"src": src_ruteos_id[:8], "row": idx, "text": val})
 
         # 2. Rangos de Movimientos (opcional)
         mov_items = []
@@ -144,7 +193,7 @@ class VacioPoller:
             col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(self.day)
             let_ch = index_to_col_letter(col_ch)
             let_s2 = index_to_col_letter(col_s2)
-            mov_range = f"'{TARGET_TAB_MOV}'!{let_ch}3:{let_s2}350"
+            mov_range = f"'{self.tab_mov}'!{let_ch}3:{let_s2}350"
             res_mov = api_call_with_retry(self._service.spreadsheets().values().get(
                 spreadsheetId=self.mov_id,
                 range=mov_range,
@@ -159,37 +208,14 @@ class VacioPoller:
 
         elapsed_read = round(time.time() - t0, 2)
 
-        val_ranges = res_ruteos.get("valueRanges", [])
-        raw_tds = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
-        raw_x = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
-        raw_h = val_ranges[2].get("values", []) if len(val_ranges) > 2 else []
-
-        # Filtrar valores significativos de Columna X (Vacío)
-        vacio_items = []
-        for idx, row in enumerate(raw_x):
-            val = row[0].strip() if row and row[0] else ""
-            if val and val != "#N/A":
-                vacio_items.append({"row": idx + 4, "val": val})
-
-        # Muestra de los últimos 150 TDs en Ruteos para detectar nuevas filas operativas
-        td_tail = []
-        for idx, row in enumerate(raw_tds[-150:], start=max(4, len(raw_tds) - 146)):
-            val = row[0].strip() if row and row[0] else ""
-            if val and is_valid_td(val):
-                td_tail.append({"row": idx, "td": val})
-
-        # Muestra de tracking en Col H para detectar ediciones de notas/destinos
-        tracking_tail = []
-        for idx, row in enumerate(raw_h[-150:], start=max(4, len(raw_h) - 146)):
-            val = row[0].strip() if row and row[0] else ""
-            if val:
-                tracking_tail.append({"row": idx, "text": val})
-
         payload = {
+            "today_ar": self.today_ar.isoformat(),
+            "ruteos_sources": [s[0] for s in sources],
+            "mov_id": self.mov_id,
             "day": self.day,
             "vacio_count": len(vacio_items),
             "vacio_items": vacio_items,
-            "total_td_rows": len(raw_tds),
+            "total_td_rows": total_td_rows,
             "td_tail": td_tail,
             "tracking_tail": tracking_tail,
             "mov_items": mov_items
@@ -199,12 +225,14 @@ class VacioPoller:
         current_hash = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
 
         metadata = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": get_argentina_now().isoformat(),
             "elapsed_check_sec": elapsed_read,
             "hash": current_hash,
+            "today_ar": self.today_ar.isoformat(),
+            "ruteos_sources": [s[0] for s in sources],
             "day": self.day,
             "vacio_count": len(vacio_items),
-            "total_td_rows": len(raw_tds),
+            "total_td_rows": total_td_rows,
             "total_tracking_rows": len(tracking_tail),
             "mov_active_rows": len(mov_items),
             "sample_last_vacio": vacio_items[-3:] if vacio_items else []
@@ -220,39 +248,42 @@ class VacioPoller:
         days: Optional[List[int]] = None
     ) -> Dict[str, Any]:
         """
-        Fase 2: Ejecuta la sincronización completa en capas (Tracking, VACÍO con bordes y Seguimiento #9fc5e8)
-        abarcando el día activo o la ventana solicitada.
+        Fase 2: Ejecuta la sincronización completa en capas con Merge Virtual de
+        Ruteos (Nov + Dic) y Movimientos (dual-print en días 1 y 2).
         """
         results = {}
         t_start = time.time()
 
-        today = datetime.now().day
-        if days:
-            target_days = days
-        elif self.day_explicit:
-            target_days = [self.day]
-        else:
-            # Ventana deslizante (default 7 días / 1 semana) para cubrir viajes iniciados en días previos que vacían hoy
-            target_days = list(range(max(1, today - (self.window - 1)), today + 1))
+        today_ar = get_argentina_now().date()
+        today = today_ar.day
 
         print("\n" + "="*80)
-        print(f"  FASE 2: EJECUTANDO SINCRONIZACIÓN EN CAPAS (MOTOR UNIFICADO)")
+        print("  FASE 2: EJECUTANDO SINCRONIZACIÓN EN CAPAS (MERGE VIRTUAL DUAL-MONTH)")
         print(f"  Modo: {'APLICAR CAMBIOS (--apply)' if apply else 'SIMULACIÓN (dry-run)'}")
-        print(f"  Días objetivo: {target_days} (Día activo/hoy: {today}) | Bordes: {borders}")
+        print(f"  Fecha AR: {today_ar.isoformat()} | Ventana: {self.window}d | Bordes: {borders}")
         print("="*80)
 
         try:
-            sync_runner = UnifiedOperativasSync(day=today)
-            multi_res = sync_runner.sync_multi_days(
-                days=target_days,
-                current_day=today,
-                apply=apply,
-                apply_borders=borders
-            )
+            if days or self.day_explicit:
+                target_days = days if days else [self.day]
+                sync_runner = UnifiedOperativasSync(day=today)
+                multi_res = sync_runner.sync_multi_days(
+                    days=target_days,
+                    current_day=today,
+                    apply=apply,
+                    apply_borders=borders
+                )
+            else:
+                multi_res = run_virtual_merge_sync(
+                    today_ar=today_ar,
+                    window=self.window,
+                    apply=apply,
+                    apply_borders=borders
+                )
 
-            print(f"[FASE 2.1] ✅ Análisis multi-día completado:")
+            print("[FASE 2.1] ✅ Análisis multi-día / Merge Virtual completado:")
             for d, s in multi_res["day_summaries"].items():
-                print(f"           - Día {d:>2}: {s['notes']:>3} notas | {s['borders']:>3} bordes | {s['colors']:>3} colores")
+                print(f"           - {str(d):<38}: {s['notes']:>3} notas | {s['borders']:>3} bordes | {s['colors']:>3} colores")
             print(f"           Totales: {multi_res['total_notes']} notas, {multi_res['total_borders']} bordes, {multi_res['total_colors']} colores")
 
             results["success"] = True

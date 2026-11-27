@@ -287,18 +287,24 @@ class DriveStateManager:
         self.save_json_to_drive(filename, state, caller="init")
         return state
 
-    def get_octubre_frozen_state(self) -> Dict[str, Any]:
-        """Obtiene el estado congelado de Octubre 2026 de forma ultrarrápida (< 1 ms)."""
-        filename = self.get_monthly_filename("Octubre", 2026)
+    def get_frozen_month_state(self, month_name: str, year: int = 2026) -> Dict[str, Any]:
+        """Obtiene el estado congelado de un mes anterior dado de forma ultrarrápida (< 1 ms)."""
+        filename = self.get_monthly_filename(month_name, year)
         state = self.read_json_from_drive(filename, max_cache_age_seconds=86400 * 30)
         if state and "ultimo_estado_tractores" in state:
             return state
-        # Fallback a local
         local_path = LOCAL_CACHE_DIR / filename
         if local_path.exists():
-            with open(local_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {"metadata": {"mes_nombre": "Octubre 2026"}, "ultimo_estado_tractores": {}, "celdas_merge": {}}
+            try:
+                with open(local_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {"metadata": {"mes_nombre": f"{month_name.capitalize()} {year}"}, "ultimo_estado_tractores": {}, "celdas_merge": {}}
+
+    def get_octubre_frozen_state(self) -> Dict[str, Any]:
+        """Compatibilidad retroactiva: obtiene el estado congelado de Octubre 2026."""
+        return self.get_frozen_month_state("Octubre", 2026)
 
     @staticmethod
     def compute_cell_hash(vacio_header: str, tracking_text: str, borde_doble: bool, color_celeste: bool) -> str:

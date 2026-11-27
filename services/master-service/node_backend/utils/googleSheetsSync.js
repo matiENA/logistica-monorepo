@@ -38,7 +38,7 @@ const fs = require('fs');
 const path = require('path');
 const { JWT } = require('google-auth-library');
 const db = require('./db');
-const { getFechaArgentina, supabase: sharedSupabase } = require('./shared');
+const { getFechaArgentina, supabase: sharedSupabase, getTargetMovimientosSheetsForDate, parseHeaderDateToYMD } = require('./shared');
 
 // IDs oficiales de respaldo histórico (#idmensual)
 const SPREADSHEETS = {
@@ -336,6 +336,63 @@ function resolveSheetForDate(d, customConfig = null) {
     }
 
     return SPREADSHEETS.NOVIEMBRE_2026;
+}
+
+/**
+ * Resuelve la lista de planillas destino para una fecha (Merge Virtual):
+ * - Días normales: [planilla del mes]
+ * - Días de cruce (ej. 1 y 2 de Diciembre): [planilla entrante (primary), cola de planilla saliente (bridge_tail)]
+ */
+function resolveSheetsForDate(d) {
+    try {
+        const targets = getTargetMovimientosSheetsForDate(d);
+        if (Array.isArray(targets) && targets.length > 0) {
+            return targets.map(t => ({
+                role: t.role || 'primary',
+                id: t.id,
+                tabName: t.tabName,
+                sheetIdNum: 0
+            }));
+        }
+    } catch (_) {}
+    const single = resolveSheetForDate(d);
+    return [{ role: 'primary', ...single }];
+}
+
+/**
+ * Busca en Fila 1 de una hoja de cruce (`bridge_tail`) la columna exacta de Chofer
+ * correspondiente a `targetDate` (ej. 01/12 o 02/12 en la cola de Noviembre).
+ * Retorna el índice 0-based de la columna Chofer (colFecha - 3), o null si no existe.
+ */
+async function resolveBridgeDateColChofer(spreadsheetId, tabName, targetDate, accessToken) {
+    const cacheKey = `${spreadsheetId}:::${tabName}`;
+    const cached = dayHeaderMapCache.get(cacheKey);
+    const now = Date.now();
+    let dateMap = null;
+    if (cached && (now - cached.ts) < 10 * 60 * 1000) {
+        dateMap = cached.map;
+    } else {
+        const range = `'${tabName}'!A1:RT1`;
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=FORMATTED_VALUE`;
+        const res = await fetchWithRetry(url, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+        dateMap = new Map();
+        if (res && res.ok) {
+            const json = await res.json();
+            const r0 = (json.values && json.values[0]) || [];
+            r0.forEach((cell, idx) => {
+                const ymd = parseHeaderDateToYMD(cell);
+                if (ymd) {
+                    const k = `${ymd.year}-${ymd.month}-${ymd.day}`;
+                    if (!dateMap.has(k)) dateMap.set(k, Math.max(0, idx - 3));
+                }
+            });
+            dayHeaderMapCache.set(cacheKey, { ts: now, map: dateMap });
+        }
+    }
+    const key = `${targetDate.getFullYear()}-${targetDate.getMonth() + 1}-${targetDate.getDate()}`;
+    return dateMap.has(key) ? dateMap.get(key) : null;
 }
 
 /**
@@ -1271,59 +1328,71 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
             const daysForNov = [];
             let cur = new Date(hoy.getTime());
             while (cur <= fObj) {
-                const dateStr = toIsoDateLocal(cur);
+                const baseDateStr = toIsoDateLocal(cur);
                 const diaNum = cur.getDate();
-                const baseSheet = resolveSheetForDate(cur);
-                const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, cur, accessToken);
+                const targetSheets = resolveSheetsForDate(cur);
 
-                // Guardia de cruce mensual: nunca escribir un día de un mes futuro aún no rotado sobre la planilla del mes actual
-                const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
-                if (tabYM && (tabYM.year !== cur.getFullYear() || tabYM.month !== (cur.getMonth() + 1))) {
-                    cur.setDate(cur.getDate() + 1);
-                    continue;
-                }
+                for (const baseSheet of targetSheets) {
+                    const isBridgeTail = baseSheet.role === 'bridge_tail';
+                    const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, cur, accessToken);
 
-                const colIdx = getColChofer(diaNum);
-                const colLetter = indexToColLetter(colIdx);
-
-                const prevDay = prevTrackDias?.get(dateStr) || null;
-                const alreadySynced = Boolean(
-                    !isReconciler &&
-                    !forceRefresh &&
-                    !noteChanged &&
-                    prevDay &&
-                    prevDay.status === 'SINCRONIZADO' &&
-                    prevDay.coord
-                );
-
-                if (!alreadySynced) {
-                    const cacheKey = `${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`;
-                    if (forceRefresh || isReconciler || !prevDay || prevDay.status === 'PENDIENTE_TIPEO' || needsRetry) {
-                        columnCache.delete(cacheKey);
+                    let colIdx = null;
+                    if (isBridgeTail) {
+                        colIdx = await resolveBridgeDateColChofer(baseSheet.id, resolvedMeta.tabName, cur, accessToken);
+                        if (colIdx === null) {
+                            continue;
+                        }
+                    } else {
+                        // Guardia de cruce mensual para hoja primaria
+                        const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
+                        if (tabYM && (tabYM.year !== cur.getFullYear() || tabYM.month !== (cur.getMonth() + 1))) {
+                            continue;
+                        }
+                        colIdx = getColChofer(diaNum);
                     }
 
-                    const groupKey = `${baseSheet.id}:::${resolvedMeta.tabName}`;
-                    if (!neededColsBySheet.has(groupKey)) {
-                        neededColsBySheet.set(groupKey, {
-                            sheetId: baseSheet.id,
-                            tabName: resolvedMeta.tabName,
-                            cols: new Set()
-                        });
-                    }
-                    neededColsBySheet.get(groupKey).cols.add(colLetter);
-                }
+                    const dateStr = isBridgeTail ? `${baseDateStr}#bridge` : baseDateStr;
+                    const colLetter = indexToColLetter(colIdx);
 
-                daysForNov.push({
-                    dateStr,
-                    diaNum,
-                    sheetId: baseSheet.id,
-                    tabName: resolvedMeta.tabName,
-                    sheetIdNum: resolvedMeta.sheetIdNum,
-                    colIdx,
-                    colLetter,
-                    alreadySynced,
-                    prevDay
-                });
+                    const prevDay = prevTrackDias?.get(dateStr) || null;
+                    const alreadySynced = Boolean(
+                        !isReconciler &&
+                        !forceRefresh &&
+                        !noteChanged &&
+                        prevDay &&
+                        prevDay.status === 'SINCRONIZADO' &&
+                        prevDay.coord
+                    );
+
+                    if (!alreadySynced) {
+                        const cacheKey = `${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`;
+                        if (forceRefresh || isReconciler || !prevDay || prevDay.status === 'PENDIENTE_TIPEO' || needsRetry) {
+                            columnCache.delete(cacheKey);
+                        }
+
+                        const groupKey = `${baseSheet.id}:::${resolvedMeta.tabName}`;
+                        if (!neededColsBySheet.has(groupKey)) {
+                            neededColsBySheet.set(groupKey, {
+                                sheetId: baseSheet.id,
+                                tabName: resolvedMeta.tabName,
+                                cols: new Set()
+                            });
+                        }
+                        neededColsBySheet.get(groupKey).cols.add(colLetter);
+                    }
+
+                    daysForNov.push({
+                        dateStr,
+                        diaNum,
+                        sheetId: baseSheet.id,
+                        tabName: resolvedMeta.tabName,
+                        sheetIdNum: resolvedMeta.sheetIdNum,
+                        colIdx,
+                        colLetter,
+                        alreadySynced,
+                        prevDay
+                    });
+                }
 
                 cur.setDate(cur.getDate() + 1);
             }
@@ -1797,41 +1866,50 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
 
         const neededCols = new Map();
         const scanDays = [];
-        for (const dateStr of sortedDates) {
-            const [cy, cm, cd] = dateStr.split('-').map(Number);
+        for (const rawDateStr of sortedDates) {
+            const cleanDateStr = String(rawDateStr).split('#')[0];
+            const [cy, cm, cd] = cleanDateStr.split('-').map(Number);
             if (!cy || !cm || !cd) continue;
             const curCheck = new Date(cy, cm - 1, cd);
             curCheck.setHours(0, 0, 0, 0);
 
             const diaNum = curCheck.getDate();
-            const baseSheet = resolveSheetForDate(curCheck);
-            const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, curCheck, accessToken);
+            const targetSheets = resolveSheetsForDate(curCheck);
 
-            // Guardia de cruce mensual: no limpiar días de un mes futuro sobre la planilla del mes actual
-            const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
-            if (tabYM && (tabYM.year !== curCheck.getFullYear() || tabYM.month !== (curCheck.getMonth() + 1))) {
-                continue;
+            for (const baseSheet of targetSheets) {
+                const isBridgeTail = baseSheet.role === 'bridge_tail';
+                const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, curCheck, accessToken);
+
+                let colIdx = null;
+                if (isBridgeTail) {
+                    colIdx = await resolveBridgeDateColChofer(baseSheet.id, resolvedMeta.tabName, curCheck, accessToken);
+                    if (colIdx === null) continue;
+                } else {
+                    const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
+                    if (tabYM && (tabYM.year !== curCheck.getFullYear() || tabYM.month !== (curCheck.getMonth() + 1))) {
+                        continue;
+                    }
+                    colIdx = getColChofer(diaNum);
+                }
+
+                const colLetter = indexToColLetter(colIdx);
+                columnCache.delete(`${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`);
+
+                const key = `${baseSheet.id}:::${resolvedMeta.tabName}`;
+                if (!neededCols.has(key)) {
+                    neededCols.set(key, { sheetId: baseSheet.id, tabName: resolvedMeta.tabName, cols: new Set() });
+                }
+                neededCols.get(key).cols.add(colLetter);
+
+                scanDays.push({
+                    dateStr: isBridgeTail ? `${cleanDateStr}#bridge` : cleanDateStr,
+                    sheetId: baseSheet.id,
+                    tabName: resolvedMeta.tabName,
+                    sheetIdNum: resolvedMeta.sheetIdNum,
+                    colIdx,
+                    colLetter
+                });
             }
-
-            const colIdx = getColChofer(diaNum);
-            const colLetter = indexToColLetter(colIdx);
-
-            columnCache.delete(`${baseSheet.id}_${resolvedMeta.tabName}_${colLetter}`);
-
-            const key = `${baseSheet.id}:::${resolvedMeta.tabName}`;
-            if (!neededCols.has(key)) {
-                neededCols.set(key, { sheetId: baseSheet.id, tabName: resolvedMeta.tabName, cols: new Set() });
-            }
-            neededCols.get(key).cols.add(colLetter);
-
-            scanDays.push({
-                dateStr,
-                sheetId: baseSheet.id,
-                tabName: resolvedMeta.tabName,
-                sheetIdNum: resolvedMeta.sheetIdNum,
-                colIdx,
-                colLetter
-            });
         }
 
         const readErrors = [];

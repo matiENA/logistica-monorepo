@@ -12,8 +12,11 @@ try:
     from config_operativas import load_config
     _operativas_cfg = load_config()
     _mes_act = _operativas_cfg.get("mes_actual", {})
+    _mes_sig = _operativas_cfg.get("mes_siguiente") or {}
 except Exception:
+    _operativas_cfg = {}
     _mes_act = {}
+    _mes_sig = {}
 
 # Búsqueda inteligente del archivo de credenciales de Google Service Account
 def resolve_credentials_file() -> str:
@@ -45,15 +48,16 @@ def resolve_credentials_file() -> str:
 
 SERVICE_ACCOUNT_FILE = resolve_credentials_file()
 
-# IDs de Google Spreadsheet según el módulo correspondiente
-SEGURIDAD_VIAL_SPREADSHEET_ID = os.getenv(
-    "SEGURIDAD_VIAL_SPREADSHEET_ID",
-    _mes_act.get("ruteos_id", "1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE")
+# IDs de Google Spreadsheet según el módulo correspondiente (auto-cutover calendario via load_config)
+SEGURIDAD_VIAL_SPREADSHEET_ID = _mes_act.get(
+    "ruteos_id",
+    os.getenv("SEGURIDAD_VIAL_SPREADSHEET_ID", "1oIadEZE1vXCOaTjj8USAOAYVwibY5XMfmCaJbp0bqZE")
 )
+SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID = _mes_sig.get("ruteos_id")
 
-CONF_SPREADSHEET_ID = os.getenv(
-    "CONF_SPREADSHEET_ID",
-    os.getenv("SPREADSHEET_ID", _mes_act.get("conf_viaje_id", "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU"))
+CONF_SPREADSHEET_ID = _mes_act.get(
+    "conf_viaje_id",
+    os.getenv("CONF_SPREADSHEET_ID", "1bK99AJp7O1jluupQeM5lsH8Gu5QfT--HXWTNzMft9tU")
 )
 
 # ID del Google Spreadsheet principal por compatibilidad histórica
@@ -167,13 +171,13 @@ DEFAULT_SYNC_INTERVAL_SECONDS = 300  # 5 minutos
 # ==============================================================================
 # CONFIGURACIÓN ESPECÍFICA: UTE Cordillera ➡️ CONF. DE VIAJE (Alerta ⚠️)
 # ==============================================================================
-CONF_SOURCE_SHEET_NAME = os.getenv(
-    "CONF_SOURCE_SHEET_NAME",
-    os.getenv("CONF_SOURCE_TAB", _mes_act.get("tab_conf_source", "UTE Cordillera Noviembre 26"))
+CONF_SOURCE_SHEET_NAME = _mes_act.get(
+    "tab_conf_source",
+    os.getenv("CONF_SOURCE_SHEET_NAME", os.getenv("CONF_SOURCE_TAB", "UTE Cordillera Noviembre 26"))
 )
-CONF_TARGET_SHEET_NAME = os.getenv(
-    "CONF_TARGET_SHEET_NAME",
-    os.getenv("CONF_TARGET_TAB", _mes_act.get("tab_conf_target", "CONF. DE VIAJE NOVIEMBRE 26"))
+CONF_TARGET_SHEET_NAME = _mes_act.get(
+    "tab_conf_target",
+    os.getenv("CONF_TARGET_SHEET_NAME", os.getenv("CONF_TARGET_TAB", "CONF. DE VIAJE NOVIEMBRE 26"))
 )
 CONF_START_ROW = 5  # Los datos se escriben a partir de la fila 5
 

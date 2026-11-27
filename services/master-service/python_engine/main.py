@@ -21,6 +21,7 @@ if hasattr(sys.stderr, "reconfigure"):
 from config import (
     DEFAULT_SPREADSHEET_ID,
     SEGURIDAD_VIAL_SPREADSHEET_ID,
+    SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID,
     CONF_SPREADSHEET_ID,
     CONF_SOURCE_SHEET_NAME,
     CONF_TARGET_SHEET_NAME,
@@ -74,6 +75,9 @@ def run_once_conf_viaje(manager: SyncManager, write_to_sheet: bool = True):
 
     try:
         report = manager.run_sync_conf_viaje(write_to_sheet=write_to_sheet)
+        if report.get("status") == "SKIPPED_MISSING_TABS":
+            print(f"\n[SKIP] {report.get('message')}")
+            return report
         summary = report["summary"]
 
         print(f"\n[OK] Sincronización de {CONF_TARGET_SHEET_NAME} completada con éxito.")
@@ -181,6 +185,15 @@ def main():
         target_id = args.spreadsheet or SEGURIDAD_VIAL_SPREADSHEET_ID
         manager = SyncManager(spreadsheet_id=target_id)
         run_once(manager, write_to_sheet=write_to_sheet)
+        # Puente dual de fin de mes: si existe planilla UTE del mes siguiente (ej. UTE Diciembre ya activa),
+        # sincronizar también su pestaña SEGURIDA VIAL sin esperar intervención manual.
+        if not args.spreadsheet and SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID and SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID != target_id:
+            print("\n[BRIDGE] Sincronizando también Viajes Cordillera del mes entrante...")
+            next_manager = SyncManager(
+                spreadsheet_id=SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID,
+                seguridad_vial_spreadsheet_id=SEGURIDAD_VIAL_NEXT_SPREADSHEET_ID
+            )
+            run_once(next_manager, write_to_sheet=write_to_sheet)
     else:
         # Por defecto cuando se invoca con --once o sin flags específicos: SEGURIDA VIAL
         target_id = args.spreadsheet or SEGURIDAD_VIAL_SPREADSHEET_ID

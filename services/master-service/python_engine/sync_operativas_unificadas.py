@@ -28,7 +28,7 @@ import time
 import socket
 import argparse
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 
 # Configurar salida UTF-8 con flush en tiempo real (unbuffered/line_buffering) para n8n y consola Windows
@@ -101,6 +101,12 @@ from config_operativas import (
     TARGET_TAB_MOV_ANTERIOR,
     DIAS_TRANSICION_DUAL,
     CACHE_FILE_PREV_MONTH,
+    MESES_ES,
+    load_config,
+    get_argentina_now,
+    get_month_config,
+    get_target_movimientos_for_date,
+    parse_month_year_name,
 )
 
 TARGET_COLOR_HEX = "#9fc5e8"
@@ -158,26 +164,71 @@ def get_day_column_indices(day: int) -> Tuple[int, int, int, int]:
     return col_chofer_idx, col_dispo_idx, col_slot1_idx, col_slot2_idx
 
 
-def parse_day_from_cell(fecha_val: str, expected_month: Optional[int] = None) -> Optional[int]:
-    """Extrae el día (1 a 31) de números de serie Excel o strings de fecha."""
+def parse_header_date_ymd(header_val: str) -> Optional[Tuple[int, int, int]]:
+    """
+    Parsea encabezados de Fila 1 de Movimientos hacia (year, month, day):
+    Ej: '01 noviembre 2026', '01  diciembre  2026', '02/12/2026', '02-12-26'.
+    """
+    if not header_val:
+        return None
+    s = re.sub(r"\s+", " ", str(header_val).strip().lower())
+    m_word = re.search(r"\b(\d{1,2})\s+(?:de\s+)?([a-záéíóú]+)\s+(?:de\s+)?(\d{2,4})\b", s)
+    if m_word:
+        day = int(m_word.group(1))
+        m_txt = m_word.group(2)
+        year = int(m_word.group(3))
+        if year < 100:
+            year += 2000
+        month = None
+        for idx, m_name in enumerate(MESES_ES, start=1):
+            if m_txt.startswith(m_name.lower()[:3]):
+                month = idx
+                break
+        if month and 1 <= day <= 31:
+            return (year, month, day)
+
+    m_slash = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", s)
+    if m_slash:
+        day = int(m_slash.group(1))
+        month = int(m_slash.group(2))
+        year = int(m_slash.group(3))
+        if year < 100:
+            year += 2000
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return (year, month, day)
+    return None
+
+
+def parse_date_from_cell(fecha_val: str) -> Optional[Tuple[int, int, int]]:
+    """Extrae (year, month, day) desde serie Excel o string dd/mm/yyyy en Ruteos."""
     if not fecha_val:
         return None
     s = str(fecha_val).strip()
     if s.isdigit():
         serial = int(s)
         dt = datetime(1899, 12, 30) + timedelta(days=serial)
-        if expected_month is None or dt.month == expected_month:
-            return dt.day
-        return None
-    if "/" in s:
-        parts = s.split("/")
-        if len(parts) >= 2 and parts[0].isdigit():
+        return (dt.year, dt.month, dt.day)
+    if "/" in s or "-" in s:
+        parts = re.split(r"[/-]", s.split()[0])
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
             d = int(parts[0])
-            if expected_month is not None and len(parts) >= 2 and parts[1].isdigit():
-                m = int(parts[1])
-                if m != expected_month:
-                    return None
-            return d
+            m = int(parts[1])
+            y = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else get_argentina_now().year
+            if y < 100:
+                y += 2000
+            if 1 <= m <= 12 and 1 <= d <= 31:
+                return (y, m, d)
+    return None
+
+
+def parse_day_from_cell(fecha_val: str, expected_month: Optional[int] = None) -> Optional[int]:
+    """Extrae el día (1 a 31) de números de serie Excel o strings de fecha."""
+    parsed = parse_date_from_cell(fecha_val)
+    if not parsed:
+        return None
+    _, m, d = parsed
+    if expected_month is None or m == expected_month:
+        return d
     return None
 
 
@@ -436,42 +487,70 @@ class UnifiedOperativasSync:
     def __init__(
         self,
         credentials_path: Optional[str] = None,
-        ruteos_id: str = DEFAULT_RUTEOS_ID,
-        tab_ruteos: str = SOURCE_TAB_RUTEOS,
-        mov_id: str = DEFAULT_MOV_ID,
-        ruteos_anterior_id: str = RUTEOS_ANTERIOR_ID,
-        tab_ruteos_anterior: str = SOURCE_TAB_RUTEOS_ANTERIOR,
-        dias_transicion_dual: int = DIAS_TRANSICION_DUAL,
+        ruteos_id: Optional[str] = None,
+        tab_ruteos: Optional[str] = None,
+        mov_id: Optional[str] = None,
+        tab_mov: Optional[str] = None,
+        ruteos_anterior_id: Optional[str] = None,
+        tab_ruteos_anterior: Optional[str] = None,
+        dias_transicion_dual: Optional[int] = None,
         day: Optional[int] = None,
-        target_month: Optional[int] = None
+        target_month: Optional[int] = None,
+        target_year: Optional[int] = None,
+        month_name: Optional[str] = None,
+        prev_month_name: Optional[str] = None,
+        prev_year: Optional[int] = None,
+        preloaded_ruteos_rows: Optional[List[List[str]]] = None,
+        shared_service: Any = None,
+        shared_state_mgr: Any = None,
     ):
-        self.ruteos_id = ruteos_id
-        self.tab_ruteos = tab_ruteos
-        self.mov_id = mov_id
-        self.ruteos_anterior_id = ruteos_anterior_id
-        self.tab_ruteos_anterior = tab_ruteos_anterior
-        self.dias_transicion_dual = dias_transicion_dual
-        self.day = day or datetime.now().day
-        self.target_month = target_month or datetime.now().month
+        now_ar = get_argentina_now()
+        cfg = load_config(now_ar.date())
+        mes_act = cfg.get("mes_actual", {})
+        mes_ant = cfg.get("mes_anterior", {})
+
+        act_m_name, act_year, act_m_num = parse_month_year_name(mes_act.get("nombre", ""), now_ar.year)
+        ant_m_name, ant_year, _ = parse_month_year_name(mes_ant.get("nombre", ""), now_ar.year)
+
+        self.ruteos_id = ruteos_id or mes_act.get("ruteos_id", DEFAULT_RUTEOS_ID)
+        self.tab_ruteos = tab_ruteos or mes_act.get("tab_ruteos", SOURCE_TAB_RUTEOS)
+        self.mov_id = mov_id or mes_act.get("movimientos_id", DEFAULT_MOV_ID)
+        self.tab_mov = tab_mov or mes_act.get("tab_movimientos", TARGET_TAB_MOV)
+        self.ruteos_anterior_id = ruteos_anterior_id or mes_ant.get("ruteos_id", RUTEOS_ANTERIOR_ID)
+        self.tab_ruteos_anterior = tab_ruteos_anterior or mes_ant.get("tab_ruteos", SOURCE_TAB_RUTEOS_ANTERIOR)
+        self.dias_transicion_dual = dias_transicion_dual if dias_transicion_dual is not None else cfg.get("dias_transicion_lectura_dual", DIAS_TRANSICION_DUAL)
+        self.day = day or now_ar.day
+        self.target_month = target_month or act_m_num
+        self.target_year = target_year or act_year
+        self.current_month_name = month_name or act_m_name
+        self.current_year = target_year or act_year
+        self.prev_month_name = prev_month_name or ant_m_name
+        self.prev_year = prev_year or ant_year
+
         self._cached_sheet_id: Optional[int] = None
         self._cached_prev_rows: Optional[List[List[str]]] = None
-        self._cached_curr_rows: Optional[List[List[str]]] = None
+        self._cached_curr_rows: Optional[List[List[str]]] = preloaded_ruteos_rows
         self._cached_tractor_to_row: Optional[Dict[str, int]] = None
         self._cached_ut_to_row: Optional[Dict[str, int]] = None
-        self._cached_day_rows: Dict[int, List[Dict[str, Any]]] = {}
-        self.state_mgr = DriveStateManager()
-        self.current_month_name = "Noviembre"
+        self._cached_day_rows: Dict[Any, List[Dict[str, Any]]] = {}
+        self._cached_header_date_map: Optional[Dict[Tuple[int, int, int], Tuple[int, int, int, int]]] = None
+        self.state_mgr = shared_state_mgr or DriveStateManager()
 
-        if credentials_path and Path(credentials_path).exists():
+        if shared_service is not None:
+            self._service = shared_service
             self.creds_path = credentials_path
-            self._creds = Credentials.from_service_account_file(self.creds_path, scopes=SCOPES)
+            self._creds = None
         else:
-            self._creds = get_google_credentials(scopes=SCOPES)
-            try:
-                self.creds_path = resolve_credentials_file()
-            except Exception:
-                self.creds_path = None
-        self._service = build("sheets", "v4", credentials=self._creds)
+            if credentials_path and Path(credentials_path).exists():
+                self.creds_path = credentials_path
+                self._creds = Credentials.from_service_account_file(self.creds_path, scopes=SCOPES)
+            else:
+                self._creds = get_google_credentials(scopes=SCOPES)
+                try:
+                    self.creds_path = resolve_credentials_file()
+                except Exception:
+                    self.creds_path = None
+            self._service = build("sheets", "v4", credentials=self._creds)
 
     def get_mov_sheet_id(self) -> int:
         """Obtiene el sheetId numérico de la pestaña objetivo en Movimientos."""
@@ -482,10 +561,57 @@ class UnifiedOperativasSync:
             fields="sheets.properties"
         ))
         for sheet in meta.get("sheets", []):
-            if sheet["properties"]["title"] == TARGET_TAB_MOV:
+            if sheet["properties"]["title"] == self.tab_mov:
                 self._cached_sheet_id = sheet["properties"]["sheetId"]
                 return self._cached_sheet_id
-        raise ValueError(f"No se encontró la pestaña '{TARGET_TAB_MOV}' en {self.mov_id}")
+        raise ValueError(f"No se encontró la pestaña '{self.tab_mov}' en {self.mov_id}")
+
+    def get_header_date_map(self) -> Dict[Tuple[int, int, int], Tuple[int, int, int, int]]:
+        """
+        Lee Fila 1 de la hoja de Movimientos y mapea cada fecha presente
+        (year, month, day) -> (col_ch, col_disp, col_s1, col_s2).
+        Permite localizar automáticamente columnas de cruce (ej. 01/12 y 02/12 en Noviembre).
+        """
+        if self._cached_header_date_map is not None:
+            return self._cached_header_date_map
+        res = api_call_with_retry(self._service.spreadsheets().values().get(
+            spreadsheetId=self.mov_id,
+            range=f"'{self.tab_mov}'!A1:RT1",
+            valueRenderOption="FORMATTED_VALUE"
+        ))
+        row1 = (res.get("values") or [[]])[0]
+        header_map: Dict[Tuple[int, int, int], Tuple[int, int, int, int]] = {}
+        for idx, cell in enumerate(row1):
+            parsed = parse_header_date_ymd(cell)
+            if parsed and parsed not in header_map:
+                col_s1 = idx
+                header_map[parsed] = (max(0, col_s1 - 3), max(0, col_s1 - 2), col_s1, col_s1 + 2)
+        self._cached_header_date_map = header_map
+        return header_map
+
+    def resolve_columns_for_slot(self, day_slot: Any) -> Optional[Tuple[int, int, int, int]]:
+        """
+        Resuelve (col_ch, col_disp, col_s1, col_s2) para un `int` (día del mes propio)
+        o un `datetime.date` (soporta columnas de cruce en Fila 1 de otra hoja).
+        Retorna None si la fecha de cruce no existe en la Fila 1 de esta planilla.
+        """
+        if isinstance(day_slot, date):
+            key = (day_slot.year, day_slot.month, day_slot.day)
+            # Si es fecha fuera del mes primario de esta hoja (ej. 01/12 o 02/12 en Noviembre),
+            # exigimos coincidencia exacta en Fila 1 para jamás pisar una columna incorrecta.
+            if (day_slot.year, day_slot.month) != (self.current_year, self.target_month):
+                return self.get_header_date_map().get(key)
+            # Para fechas del mes primario, preferimos Fila 1 si ya está cacheada; si no, stride canónico.
+            if self._cached_header_date_map is not None and key in self._cached_header_date_map:
+                return self._cached_header_date_map[key]
+            return get_day_column_indices(day_slot.day)
+        return get_day_column_indices(int(day_slot))
+
+    @staticmethod
+    def slot_cache_key(day_slot: Any) -> str:
+        if isinstance(day_slot, date):
+            return day_slot.isoformat()
+        return f"dia_{int(day_slot)}"
 
     def fetch_ruteos_actual(self) -> List[List[str]]:
         """Lectura ultraliviana a las columnas esenciales de Ruteos (1 sola batchGet de ~1s)."""
@@ -586,32 +712,40 @@ class UnifiedOperativasSync:
         """Lectura única a Ruteos del mes actual (compatibilidad retroactiva)."""
         return self.fetch_ruteos_actual()
 
-    def prefetch_movimientos_batch(self, days: List[int], chunk_size: int = 5) -> None:
+    def prefetch_movimientos_batch(self, days: List[Any], chunk_size: int = 5) -> None:
         """
-        Precarga en memoria las columnas de múltiples días en bloques (chunk_size).
-        Reduce drásticamente el tiempo de consulta multi-día en Google Sheets API.
+        Precarga en memoria las columnas de múltiples días/fechas en bloques (chunk_size).
+        Soporta `int` (día del mes propio) o `datetime.date` (incluye columnas de cruce en Fila 1).
         """
-        needed_days = [d for d in days if d not in self._cached_day_rows]
-        if not needed_days:
+        needed_slots = []
+        for d in days:
+            if d in self._cached_day_rows:
+                continue
+            cols = self.resolve_columns_for_slot(d)
+            if cols is None:
+                print(f"      [BRIDGE] Fecha {d} no presente en Fila 1 de '{self.tab_mov}' ({self.mov_id[:10]}...). Se omite.")
+                continue
+            needed_slots.append((d, cols))
+
+        if not needed_slots:
             return
 
         sheet_id = self.get_mov_sheet_id()
 
-        for i in range(0, len(needed_days), chunk_size):
-            chunk = needed_days[i:i + chunk_size]
+        for i in range(0, len(needed_slots), chunk_size):
+            chunk = needed_slots[i:i + chunk_size]
             include_index = (self._cached_tractor_to_row is None or self._cached_ut_to_row is None)
             ranges = []
             if include_index:
-                ranges.append(f"'{TARGET_TAB_MOV}'!E1:E350")
-                ranges.append(f"'{TARGET_TAB_MOV}'!C1:C350")
+                ranges.append(f"'{self.tab_mov}'!E1:E350")
+                ranges.append(f"'{self.tab_mov}'!C1:C350")
 
-            for d in chunk:
-                col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(d)
+            for d, (col_ch, col_disp, col_s1, col_s2) in chunk:
                 let_ch = index_to_col_letter(col_ch)
                 let_s2 = index_to_col_letter(col_s2)
-                ranges.append(f"'{TARGET_TAB_MOV}'!{let_ch}1:{let_s2}350")
+                ranges.append(f"'{self.tab_mov}'!{let_ch}1:{let_s2}350")
 
-            print(f"      [BATCH] Solicitando bloque de {len(chunk)} días a Movimientos ({chunk[0]}..{chunk[-1]})...")
+            print(f"      [BATCH] Solicitando bloque de {len(chunk)} día(s) a '{self.tab_mov}' ({chunk[0][0]}..{chunk[-1][0]})...")
             t_chunk = time.time()
             res = api_call_with_retry(self._service.spreadsheets().get(
                 spreadsheetId=self.mov_id,
@@ -647,9 +781,8 @@ class UnifiedOperativasSync:
                 self._cached_tractor_to_row = tractor_to_row
                 self._cached_ut_to_row = ut_to_row
 
-            for chunk_idx, d in enumerate(chunk):
+            for chunk_idx, (d, (col_ch, col_disp, col_s1, col_s2)) in enumerate(chunk):
                 raw_day = sheet_data[data_offset + chunk_idx].get("rowData", []) if len(sheet_data) > (data_offset + chunk_idx) else []
-                col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(d)
                 off_ch = 0
                 off_disp = col_disp - col_ch
                 off_s1 = col_s1 - col_ch
@@ -687,22 +820,25 @@ class UnifiedOperativasSync:
 
             print(f"      [BATCH] Bloque completado en {round(time.time() - t_chunk, 2)}s.")
 
-    def fetch_movimientos_targeted(self, day: int) -> Tuple[int, Dict[str, int], Dict[str, int], List[Dict[str, Any]]]:
+    def fetch_movimientos_targeted(self, day: Any) -> Tuple[int, Dict[str, int], Dict[str, int], List[Dict[str, Any]]]:
         """
         Lectura dirigida a Movimientos (1 sola petición HTTP con múltiples rangos específicos).
-        Solicita: Tractores (E1:E350), UTs (C1:C350), y columnas del día seleccionado.
+        Solicita: Tractores (E1:E350), UTs (C1:C350), y columnas del día/fecha seleccionado.
         """
         sheet_id = self.get_mov_sheet_id()
         if day in self._cached_day_rows and self._cached_tractor_to_row is not None and self._cached_ut_to_row is not None:
             return sheet_id, self._cached_tractor_to_row, self._cached_ut_to_row, self._cached_day_rows[day]
-        col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(day)
+        cols = self.resolve_columns_for_slot(day)
+        if cols is None:
+            return sheet_id, self._cached_tractor_to_row or {}, self._cached_ut_to_row or {}, []
+        col_ch, col_disp, col_s1, col_s2 = cols
 
         let_ch = index_to_col_letter(col_ch)
         let_s2 = index_to_col_letter(col_s2)
 
         if self._cached_tractor_to_row is not None and self._cached_ut_to_row is not None:
             ranges = [
-                f"'{TARGET_TAB_MOV}'!{let_ch}1:{let_s2}350"
+                f"'{self.tab_mov}'!{let_ch}1:{let_s2}350"
             ]
             res = api_call_with_retry(self._service.spreadsheets().get(
                 spreadsheetId=self.mov_id,
@@ -715,9 +851,9 @@ class UnifiedOperativasSync:
             ut_to_row = self._cached_ut_to_row
         else:
             ranges = [
-                f"'{TARGET_TAB_MOV}'!E1:E350",
-                f"'{TARGET_TAB_MOV}'!C1:C350",
-                f"'{TARGET_TAB_MOV}'!{let_ch}1:{let_s2}350"
+                f"'{self.tab_mov}'!E1:E350",
+                f"'{self.tab_mov}'!C1:C350",
+                f"'{self.tab_mov}'!{let_ch}1:{let_s2}350"
             ]
             res = api_call_with_retry(self._service.spreadsheets().get(
                 spreadsheetId=self.mov_id,
@@ -792,27 +928,40 @@ class UnifiedOperativasSync:
 
     def analyze_trips_and_layers(
         self,
-        day: int,
+        day: Any,
         force_refresh_prev: bool = False,
         eval_colors: bool = True
     ) -> Dict[str, Any]:
         """
-        Ejecuta el análisis en capas en memoria para el día especificado:
+        Ejecuta el análisis en capas en memoria para el día/fecha especificado:
         - Capa 1: Tracking de Col H
         - Capa 2: Vacío y Bordes de Col X
         - Capa 3: Seguimiento y Pintado #9fc5e8 (con soporte dual/cache y unidades standby)
         """
+        cols = self.resolve_columns_for_slot(day)
+        if cols is None:
+            return {
+                "day": day,
+                "sheet_id": self.get_mov_sheet_id(),
+                "notes": [],
+                "borders": [],
+                "colors": [],
+                "merged_cells_state": {},
+                "tractors_latest_state": {},
+                "skipped_missing_header": True,
+            }
+
         ruteos_rows = self.fetch_ruteos_actual()
         sheet_id, tractor_to_row, ut_to_row, day_rows = self.fetch_movimientos_targeted(day)
 
-        col_ch, col_disp, col_s1, col_s2 = get_day_column_indices(day)
+        col_ch, col_disp, col_s1, col_s2 = cols
         let_s1 = index_to_col_letter(col_s1)
         let_s2 = index_to_col_letter(col_s2)
 
-        # 1. Sembrar estado final de tractores del mes anterior (Octubre 2026) desde el JSON congelado (< 1ms)
+        # 1. Sembrar estado final de tractores del mes anterior (dinámico) desde el JSON congelado (< 1ms)
         tractor_all_trips: Dict[str, List[Dict[str, Any]]] = {}
-        octubre_state = self.state_mgr.get_octubre_frozen_state()
-        for trk, t_data in octubre_state.get("ultimo_estado_tractores", {}).items():
+        prev_state = self.state_mgr.get_frozen_month_state(self.prev_month_name, self.prev_year)
+        for trk, t_data in prev_state.get("ultimo_estado_tractores", {}).items():
             tractor_all_trips[trk] = [{
                 "td": t_data.get("ultimo_td", ""),
                 "has_vacio": t_data.get("has_vacio", False),
@@ -820,7 +969,7 @@ class UnifiedOperativasSync:
                 "last_row": t_data.get("last_row", 0)
             }]
 
-        # Procesar filas cronológicas del mes actual (Noviembre 2026)
+        # Procesar filas cronológicas del flujo unificado de Ruteos
         for idx, r in enumerate(ruteos_rows):
             row_num = idx + 4
             raw_trk = str(r[0] if len(r) > 0 else "").upper().strip()
@@ -880,9 +1029,14 @@ class UnifiedOperativasSync:
             if not (tracking_val or raw_vacio):
                 continue
 
-            trip_day = parse_day_from_cell(fecha_val, expected_month=self.target_month)
-            if trip_day != day:
-                continue
+            if isinstance(day, date):
+                parsed_ymd = parse_date_from_cell(fecha_val)
+                if parsed_ymd != (day.year, day.month, day.day):
+                    continue
+            else:
+                trip_day = parse_day_from_cell(fecha_val, expected_month=self.target_month)
+                if trip_day != day:
+                    continue
 
             unit_key = trk if trk in tractor_to_row else ut
             if not unit_key:
@@ -919,9 +1073,9 @@ class UnifiedOperativasSync:
         planned_color_updates = []
         merged_cells_state: Dict[str, Dict[str, Any]] = {}
 
-        # Cargar estado previo de Noviembre para diffing O(1)
-        nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
-        existing_day_cells = nov_state.get("celdas_merge", {}).get(f"dia_{day}", {})
+        # Cargar estado previo del mes actual para diffing O(1)
+        nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, self.current_year)
+        existing_day_cells = nov_state.get("celdas_merge", {}).get(self.slot_cache_key(day), {})
 
         day_rows_by_num = {r["row_num"]: r for r in day_rows}
 
@@ -1277,8 +1431,8 @@ class UnifiedOperativasSync:
 
         # Persistir estado actualizado en JSON Drive
         try:
-            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
-            day_key = f"dia_{analysis['day']}"
+            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, self.current_year)
+            day_key = self.slot_cache_key(analysis["day"])
             if "celdas_merge" not in nov_state:
                 nov_state["celdas_merge"] = {}
             if day_key not in nov_state["celdas_merge"]:
@@ -1293,7 +1447,7 @@ class UnifiedOperativasSync:
                 nov_state["ultimo_estado_tractores"][trk] = t_info
 
             self.state_mgr.save_json_to_drive(
-                self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                self.state_mgr.get_monthly_filename(self.current_month_name, self.current_year),
                 nov_state,
                 caller="local_n8n"
             )
@@ -1398,14 +1552,14 @@ class UnifiedOperativasSync:
 
         # Persistir estados consolidados en JSON Drive
         try:
-            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+            nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, self.current_year)
             if "celdas_merge" not in nov_state:
                 nov_state["celdas_merge"] = {}
             if "ultimo_estado_tractores" not in nov_state:
                 nov_state["ultimo_estado_tractores"] = {}
 
             for a in analyses:
-                day_key = f"dia_{a['day']}"
+                day_key = self.slot_cache_key(a["day"])
                 if day_key not in nov_state["celdas_merge"]:
                     nov_state["celdas_merge"][day_key] = {}
                 for coord, c_info in a.get("merged_cells_state", {}).items():
@@ -1414,7 +1568,7 @@ class UnifiedOperativasSync:
                     nov_state["ultimo_estado_tractores"][trk] = t_info
 
             self.state_mgr.save_json_to_drive(
-                self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                self.state_mgr.get_monthly_filename(self.current_month_name, self.current_year),
                 nov_state,
                 caller="local_n8n"
             )
@@ -1477,13 +1631,13 @@ class UnifiedOperativasSync:
         elif apply:
             # Persistir mapa de celdas_merge aunque no haya habido cambios de escritura
             try:
-                nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, 2026)
+                nov_state = self.state_mgr.get_or_create_monthly_state(self.current_month_name, self.current_year)
                 if "celdas_merge" not in nov_state:
                     nov_state["celdas_merge"] = {}
                 if "ultimo_estado_tractores" not in nov_state:
                     nov_state["ultimo_estado_tractores"] = {}
                 for a in all_analyses:
-                    day_key = f"dia_{a['day']}"
+                    day_key = self.slot_cache_key(a["day"])
                     if day_key not in nov_state["celdas_merge"]:
                         nov_state["celdas_merge"][day_key] = {}
                     for coord, c_info in a.get("merged_cells_state", {}).items():
@@ -1491,7 +1645,7 @@ class UnifiedOperativasSync:
                     for trk, t_info in a.get("tractors_latest_state", {}).items():
                         nov_state["ultimo_estado_tractores"][trk] = t_info
                 self.state_mgr.save_json_to_drive(
-                    self.state_mgr.get_monthly_filename(self.current_month_name, 2026),
+                    self.state_mgr.get_monthly_filename(self.current_month_name, self.current_year),
                     nov_state,
                     caller="local_n8n"
                 )
@@ -1499,6 +1653,203 @@ class UnifiedOperativasSync:
                 print(f"[WARN] Error persistiendo estado base en Drive: {e}")
 
         return results
+
+
+def build_virtual_date_window(today_ar: date, window: int = 7, cfg: Optional[Dict[str, Any]] = None) -> List[date]:
+    """
+    Construye la ventana de fechas reales (YYYY-MM-DD) para el Merge Virtual:
+    - Ventana retroactiva de `window` días hasta `today_ar` (puede cruzar del mes anterior al actual).
+    - Lookahead de fin de mes: si estamos en los últimos 4 días del mes actual y existe `mes_siguiente`,
+      incorpora los días de cruce (`dias_dual_print_cruce`, default [1, 2]) del mes entrante para
+      empezar a imprimir viajes ya ruteados en ambas planillas.
+    """
+    c = cfg or load_config(today_ar)
+    dates: List[date] = [today_ar - timedelta(days=i) for i in range(max(1, window) - 1, -1, -1)]
+
+    mes_sig = c.get("mes_siguiente")
+    if isinstance(mes_sig, dict) and mes_sig.get("movimientos_id"):
+        # Último día del mes actual
+        if today_ar.month == 12:
+            first_next = date(today_ar.year + 1, 1, 1)
+        else:
+            first_next = date(today_ar.year, today_ar.month + 1, 1)
+        days_left = (first_next - today_ar).days
+        if days_left <= 5:
+            dual_days = c.get("dias_dual_print_cruce", [1, 2])
+            for d_num in dual_days:
+                try:
+                    future_dt = date(first_next.year, first_next.month, int(d_num))
+                    if future_dt not in dates:
+                        dates.append(future_dt)
+                except ValueError:
+                    pass
+    return sorted(dates)
+
+
+def fetch_ruteos_rows_from_sheet(service: Any, ruteos_id: str, tab_ruteos: str = "Ruteos") -> List[List[str]]:
+    """Lee las 5 columnas esenciales de una planilla de Ruteos (1 sola batchGet)."""
+    ranges = [
+        f"'{tab_ruteos}'!A4:B",
+        f"'{tab_ruteos}'!H4:H",
+        f"'{tab_ruteos}'!L4:L",
+        f"'{tab_ruteos}'!X4:X",
+        f"'{tab_ruteos}'!AK4:AK"
+    ]
+    res = api_call_with_retry(service.spreadsheets().values().batchGet(
+        spreadsheetId=ruteos_id,
+        ranges=ranges,
+        valueRenderOption="FORMATTED_VALUE"
+    ))
+    vrs = res.get("valueRanges", [])
+    raw_ab = vrs[0].get("values", []) if len(vrs) > 0 else []
+    raw_h = vrs[1].get("values", []) if len(vrs) > 1 else []
+    raw_l = vrs[2].get("values", []) if len(vrs) > 2 else []
+    raw_x = vrs[3].get("values", []) if len(vrs) > 3 else []
+    raw_ak = vrs[4].get("values", []) if len(vrs) > 4 else []
+
+    max_len = max(len(raw_ab), len(raw_h), len(raw_l), len(raw_x), len(raw_ak), 0)
+    structured_rows: List[List[str]] = []
+    for i in range(max_len):
+        row = [""] * 37
+        if i < len(raw_ab) and raw_ab[i]:
+            row[0] = raw_ab[i][0].strip() if len(raw_ab[i]) > 0 else ""
+            row[1] = raw_ab[i][1].strip() if len(raw_ab[i]) > 1 else ""
+        if i < len(raw_h) and raw_h[i]:
+            row[7] = raw_h[i][0].strip()
+        if i < len(raw_l) and raw_l[i]:
+            row[11] = raw_l[i][0].strip()
+        if i < len(raw_x) and raw_x[i]:
+            row[23] = raw_x[i][0].strip()
+        if i < len(raw_ak) and raw_ak[i]:
+            row[36] = raw_ak[i][0].strip()
+        structured_rows.append(row)
+    return structured_rows
+
+
+def run_virtual_merge_sync(
+    today_ar: Optional[date] = None,
+    window: int = 7,
+    apply: bool = False,
+    apply_borders: bool = True,
+    explicit_dates: Optional[List[date]] = None,
+) -> Dict[str, Any]:
+    """
+    Orquestador de Merge Virtual de Movimientos + UTE/Ruteos (cero intervención en cruce de mes):
+      1. Resuelve la ventana de fechas reales (retroactiva + lookahead días 1 y 2 al cierre de mes).
+      2. Fusiona cronológicamente los Ruteos de todos los meses involucrados (ej. UTE Nov + UTE Dic).
+      3. Agrupa cada fecha en sus planillas de Movimientos destino (`get_target_movimientos_for_date`),
+         imprimiendo los días 1 y 2 del mes entrante en AMBAS planillas (entrante + cola de saliente).
+    """
+    ref_today = today_ar or get_argentina_now().date()
+    cfg = load_config(ref_today)
+    dates = explicit_dates or build_virtual_date_window(ref_today, window=window, cfg=cfg)
+
+    creds = get_google_credentials(scopes=SCOPES)
+    service = build("sheets", "v4", credentials=creds)
+    state_mgr = DriveStateManager()
+
+    # 1. Recolectar fuentes de Ruteos únicas ordenadas cronológicamente por (year, month)
+    months_involved = sorted({(dt.year, dt.month) for dt in dates})
+    ruteos_sources: List[Tuple[str, str, str]] = []
+    seen_ruteos = set()
+    for y, m in months_involved:
+        m_cfg = get_month_config(y, m, cfg)
+        if m_cfg and m_cfg.get("ruteos_id") and m_cfg["ruteos_id"] not in seen_ruteos:
+            ruteos_sources.append((m_cfg["ruteos_id"], m_cfg.get("tab_ruteos", "Ruteos"), m_cfg.get("nombre", f"{y}-{m}")))
+            seen_ruteos.add(m_cfg["ruteos_id"])
+
+    merged_ruteos_rows: List[List[str]] = []
+    for r_id, r_tab, r_nom in ruteos_sources:
+        print(f"   [*] Merge Virtual Ruteos: leyendo '{r_nom}' ({r_id[:12]}... / {r_tab})...")
+        rows_part = fetch_ruteos_rows_from_sheet(service, r_id, r_tab)
+        print(f"       -> {len(rows_part)} filas cargadas.")
+        merged_ruteos_rows.extend(rows_part)
+
+    # 2. Mapear cada fecha a sus planillas Movimientos destino (incluyendo dual-print en días 1 y 2)
+    by_sheet: Dict[str, Dict[str, Any]] = {}
+    for dt in dates:
+        targets = get_target_movimientos_for_date(dt, cfg)
+        for t in targets:
+            sid = t["movimientos_id"]
+            if sid not in by_sheet:
+                by_sheet[sid] = {
+                    "meta": t,
+                    "dates": []
+                }
+            if dt not in by_sheet[sid]["dates"]:
+                by_sheet[sid]["dates"].append(dt)
+
+    # 3. Ejecutar sincronización por planilla destino (mes más reciente primero + aislamiento de errores por planilla)
+    # Garantiza que si la hoja anterior (ej. Noviembre) no tiene fecha 2/12 o falla en API,
+    # la impresión en la hoja nueva (Diciembre) continúe normalmente sin interrupción.
+    combined = {
+        "today_ar": ref_today.isoformat(),
+        "dates_analyzed": [d.isoformat() for d in dates],
+        "ruteos_sources": [s[0] for s in ruteos_sources],
+        "total_notes": 0,
+        "total_borders": 0,
+        "total_colors": 0,
+        "day_summaries": {},
+        "batch_results": [],
+        "per_sheet": {},
+        "sheet_errors": {}
+    }
+
+    ordered_sheets = sorted(
+        by_sheet.items(),
+        key=lambda kv: (kv[1]["meta"]["year"], kv[1]["meta"]["month"]),
+        reverse=True,
+    )
+
+    for sid, bundle in ordered_sheets:
+        meta = bundle["meta"]
+        sheet_dates = sorted(bundle["dates"])
+        m_name, m_year, m_num = parse_month_year_name(meta["nombre"], meta["year"])
+        py, pm = (m_year - 1, 12) if m_num == 1 else (m_year, m_num - 1)
+        prev_cfg = get_month_config(py, pm, cfg)
+        prev_m_name = parse_month_year_name(prev_cfg["nombre"], py)[0] if prev_cfg else MESES_ES[pm - 1]
+
+        print(f"\n   [MERGE VIRTUAL -> {meta['nombre']} ({sid[:12]}...)] Fechas: {[d.isoformat() for d in sheet_dates]}")
+        try:
+            runner = UnifiedOperativasSync(
+                mov_id=sid,
+                tab_mov=meta["tab_movimientos"],
+                day=ref_today.day,
+                target_month=m_num,
+                target_year=m_year,
+                month_name=m_name,
+                prev_month_name=prev_m_name,
+                prev_year=py,
+                preloaded_ruteos_rows=merged_ruteos_rows,
+                shared_service=service,
+                shared_state_mgr=state_mgr,
+            )
+            res = runner.sync_multi_days(
+                days=sheet_dates,
+                current_day=ref_today,
+                apply=apply,
+                apply_borders=apply_borders
+            )
+
+            combined["total_notes"] += res["total_notes"]
+            combined["total_borders"] += res["total_borders"]
+            combined["total_colors"] += res["total_colors"]
+            combined["batch_results"].extend(res["batch_results"])
+            combined["per_sheet"][meta["nombre"]] = {
+                "movimientos_id": sid,
+                "dates": [d.isoformat() for d in sheet_dates],
+                "notes": res["total_notes"],
+                "borders": res["total_borders"],
+                "colors": res["total_colors"],
+            }
+            for d_key, s_val in res["day_summaries"].items():
+                label = f"{meta['nombre']} | {d_key.isoformat() if isinstance(d_key, date) else d_key}"
+                combined["day_summaries"][label] = s_val
+        except Exception as e_sheet:
+            print(f"   [WARN MERGE VIRTUAL] Error procesando '{meta['nombre']}' ({sid[:12]}...): {e_sheet}. Continúa con las demás planillas.")
+            combined["sheet_errors"][meta["nombre"]] = str(e_sheet)
+
+    return combined
 
 
 def main():
