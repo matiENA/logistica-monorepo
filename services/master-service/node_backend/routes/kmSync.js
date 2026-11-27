@@ -112,16 +112,19 @@ function parseFecha(val) {
 }
 
 function parseNum(val) {
-    if (!val) return 0;
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
     let s = String(val).trim();
+    if (!s || s.startsWith('#') || /[a-zA-Z]/.test(s)) return 0;
     if (s.includes(',') && s.includes('.')) {
         s = s.replace(/,/g, '');
     } else {
         s = s.replace(/,/g, '.');
     }
     const clean = s.replace(/[^0-9.-]/g, '');
+    if (!/^-?\d+(\.\d+)?$/.test(clean)) return 0;
     const n = parseFloat(clean);
-    return isNaN(n) ? 0 : n;
+    return Number.isFinite(n) ? n : 0;
 }
 
 const mesesMap = {

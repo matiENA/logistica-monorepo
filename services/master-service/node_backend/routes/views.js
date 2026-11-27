@@ -16,6 +16,7 @@
 
 const express = require('express');
 const db = require('../utils/db');
+const { getFechaArgentina, mesesAbrev } = require('../utils/shared');
 const { clasificarIcm, clasificarIsp } = require('../utils/seguridadVialClassifier');
 
 module.exports = function createViewsRouter() {
@@ -304,7 +305,9 @@ module.exports = function createViewsRouter() {
     router.get('/diagrama', async (req, res) => {
         const t0 = Date.now();
         try {
-            const { mesTab = 'Sep-26', servicio, search, limit = 500 } = req.query;
+            const hoyAr = getFechaArgentina();
+            const defaultMesTab = `${mesesAbrev[hoyAr.getMonth()]}-${String(hoyAr.getFullYear()).slice(-2)}`;
+            const { mesTab = defaultMesTab, servicio, search, limit = 500 } = req.query;
             if (!db.isConfigured()) {
                 return res.status(503).json({ success: false, error: "PostgreSQL no configurado" });
             }
@@ -444,10 +447,12 @@ module.exports = function createViewsRouter() {
                 fechaEvaluada = fecha.trim();
             }
 
-            // 2. Filtro por tipo de retorno (HOY, MANANA / MAÑANA, 2, 3, 4 o TODOS)
+            // 2. Filtro por tipo de retorno (AYER, HOY, MANANA / MAÑANA, 2, 3, 4 o TODOS)
             if (tipo) {
                 const tUpper = tipo.trim().toUpperCase();
-                if (tUpper === 'HOY') {
+                if (tUpper === 'AYER' || tUpper === '-1') {
+                    conditions.push(`(retorna_cuando = 'AYER' OR dias_para_retorno = -1)`);
+                } else if (tUpper === 'HOY') {
                     conditions.push(`retorna_cuando = 'HOY'`);
                 } else if (tUpper === 'MANANA' || tUpper === 'MAÑANA') {
                     conditions.push(`retorna_cuando IN ('MANANA', 'MAÑANA')`);
@@ -494,19 +499,24 @@ module.exports = function createViewsRouter() {
             const dataRes = await db.query(dataQuery, params);
             const rows = dataRes.rows || [];
 
+            const volvieronAyer = rows.filter(r => r.retorna_cuando === 'AYER' || r.dias_para_retorno === -1).length;
             const vuelvenHoy = rows.filter(r => r.retorna_cuando === 'HOY' || r.dias_para_retorno === 0).length;
             const vuelvenManana = rows.filter(r => r.retorna_cuando === 'MANANA' || r.retorna_cuando === 'MAÑANA' || r.dias_para_retorno === 1).length;
             const vuelven2Dias = rows.filter(r => r.dias_para_retorno === 2).length;
             const vuelven3Dias = rows.filter(r => r.dias_para_retorno === 3).length;
             const vuelven4Dias = rows.filter(r => r.dias_para_retorno === 4).length;
 
+            const hoyAr = getFechaArgentina();
+            const hoyArIso = `${hoyAr.getFullYear()}-${String(hoyAr.getMonth() + 1).padStart(2, '0')}-${String(hoyAr.getDate()).padStart(2, '0')}`;
+
             res.json({
                 success: true,
                 vista: "public.view_personal_retorno",
-                fecha_evaluada: fechaEvaluada || new Date().toISOString().split('T')[0],
+                fecha_evaluada: fechaEvaluada || hoyArIso,
                 latenciaMs: Date.now() - t0,
                 total: rows.length,
                 resumen: {
+                    volvieron_ayer: volvieronAyer,
                     vuelven_hoy: vuelvenHoy,
                     vuelven_manana: vuelvenManana,
                     vuelven_2dias: vuelven2Dias,
@@ -668,16 +678,16 @@ module.exports = function createViewsRouter() {
                 params = [choferId, tabList];
                 vistaNombre = "public.fn_calendario_diagrama_km";
             } else if (anio || zoom === '12') {
+                const targetAnio = parseInt(anio, 10) || getFechaArgentina().getFullYear();
                 sql = `
                     SELECT diagrama_id, chofer_id, mes_tab, anio, mes_numero, tira_dias, contabilizador,
                            km_mes_total, cant_viajes_mes, dias_km,
                            icm, isp, cant_infracciones, tiempo_conduccion_horas
-                    FROM public.view_calendario_diagrama_km_12m
-                    WHERE chofer_id::text = $1
+                    FROM public.fn_calendario_diagrama_km($1::uuid, NULL, $2::integer)
                     ORDER BY anio ASC, mes_numero ASC
                 `;
-                params = [choferId];
-                vistaNombre = "public.view_calendario_diagrama_km_12m";
+                params = [choferId, targetAnio];
+                vistaNombre = "public.fn_calendario_diagrama_km";
             } else {
                 // Default: 2 Meses Operativos Activos (Sep-26 + Oct-26)
                 sql = `

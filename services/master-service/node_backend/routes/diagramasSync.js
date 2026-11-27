@@ -13,7 +13,8 @@ const {
     getTabName, 
     ID_SPREADSHEET_DIAGRAMAS, 
     getFechaArgentina,
-    mesesAbrev 
+    mesesAbrev,
+    serviceAccountAuth
 } = require('../utils/shared');
 
 function normText(str) {
@@ -111,14 +112,14 @@ async function sincronizarDiagramasDesdeSheets(cacheDatosGlobales = null, io = n
               'contabilizador', contabilizador
             )), '[]'::json)
            FROM public.diagramas
-           WHERE anio = $1) AS preexistentes,
+           WHERE anio = $1 AND (mes_tab = $2 OR mes_numero = $3)) AS preexistentes,
           (SELECT COALESCE(json_agg(json_build_object(
               'id', id,
               'nombre', UPPER(TRIM(nombre)),
               'legajo', legajo
             )), '[]'::json)
            FROM public.choferes WHERE nombre IS NOT NULL) AS choferes;
-    `, [anio]);
+    `, [anio, mesTab, mesNumero]);
 
     const dbPreexistentes = pgDataRes.rows[0]?.preexistentes || [];
     const dbChoferes = pgDataRes.rows[0]?.choferes || [];
@@ -277,7 +278,8 @@ async function sincronizarDiagramasDesdeSheets(cacheDatosGlobales = null, io = n
               dias = EXCLUDED.dias,
               tira_dias = EXCLUDED.tira_dias,
               contabilizador = EXCLUDED.contabilizador,
-              actualizado_el = NOW();
+              actualizado_el = NOW(),
+              actualizado_por = NULL;
           END $$;
         `;
         await db.query(sqlQuery);
@@ -298,6 +300,50 @@ async function sincronizarDiagramasDesdeSheets(cacheDatosGlobales = null, io = n
     };
 }
 
+/**
+ * Sincroniza la ventana operativa activa (mes vigente + próximo mes si su pestaña ya existe en Sheets).
+ * Evita que meses próximos (ej. Dic-26 al cierre de noviembre) queden sin datos o sin soporte de UPSERT.
+ */
+async function sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales = null, io = null, ioDash = null, forceOverwrite = false) {
+    const hoyAr = getFechaArgentina();
+    const spreadsheetId = process.env.ID_SPREADSHEET_DIAGRAMAS || ID_SPREADSHEET_DIAGRAMAS || '14jgQZF0gkbT7k3mps1k3dM3qtoaseoCOUfK4PFRozKU';
+
+    const curAnio = hoyAr.getFullYear();
+    const curTabTarget = `${mesesAbrev[hoyAr.getMonth()]}-${String(curAnio).slice(-2)}`;
+
+    const nextDate = new Date(curAnio, hoyAr.getMonth() + 1, 1);
+    const nextAnio = nextDate.getFullYear();
+    const nextTabTarget = `${mesesAbrev[nextDate.getMonth()]}-${String(nextAnio).slice(-2)}`;
+
+    let sheetTitles = [];
+    if (serviceAccountAuth) {
+        try {
+            const resMeta = await serviceAccountAuth.request({
+                url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`
+            });
+            sheetTitles = (resMeta.data?.sheets || []).map(s => s.properties?.title).filter(Boolean);
+        } catch (errMeta) {
+            console.warn('⚠️ [Partición 5] No se pudo consultar metadata de pestañas:', errMeta.message);
+        }
+    }
+
+    const findExactTab = (target) => sheetTitles.find(t => t.toLowerCase().trim() === target.toLowerCase());
+    const curTab = findExactTab(curTabTarget) || curTabTarget;
+    const resActual = await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, curTab, curAnio, forceOverwrite);
+
+    const nextTab = findExactTab(nextTabTarget);
+    let resSiguiente = null;
+    if (nextTab) {
+        resSiguiente = await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, nextTab, nextAnio, forceOverwrite);
+    }
+
+    return {
+        success: true,
+        mes_actual: resActual,
+        mes_siguiente: resSiguiente
+    };
+}
+
 module.exports = function(cacheDatosGlobales, io, ioDash) {
     const router = express.Router();
 
@@ -306,7 +352,9 @@ module.exports = function(cacheDatosGlobales, io, ioDash) {
         try {
             const { mesTab, anio, forceOverwrite, overwrite } = req.body || {};
             const isOverwrite = Boolean(forceOverwrite || overwrite);
-            const resultado = await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, mesTab, anio, isOverwrite);
+            const resultado = mesTab
+                ? await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, mesTab, anio, isOverwrite)
+                : await sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, isOverwrite);
             res.json(resultado);
         } catch (err) {
             console.error('❌ Error en sincronización de diagramas:', err.message);
@@ -327,3 +375,4 @@ module.exports = function(cacheDatosGlobales, io, ioDash) {
 };
 
 module.exports.sincronizarDiagramasDesdeSheets = sincronizarDiagramasDesdeSheets;
+module.exports.sincronizarVentanaDiagramasDesdeSheets = sincronizarVentanaDiagramasDesdeSheets;

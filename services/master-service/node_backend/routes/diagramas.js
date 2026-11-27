@@ -1,6 +1,18 @@
 const express = require('express');
 const db = require('../utils/db');
-const { supabase, normalizar } = require('../utils/shared');
+const { supabase, normalizar, mesesAbrev } = require('../utils/shared');
+
+function parseMesTab(mesTab) {
+    const parts = String(mesTab || '').trim().split('-');
+    if (parts.length !== 2) return null;
+    const mIdx = mesesAbrev.findIndex(m => m.toLowerCase() === parts[0].trim().toLowerCase());
+    const yyDigits = parts[1].replace(/\D/g, '');
+    if (mIdx === -1 || !yyDigits) return null;
+    const anio = yyDigits.length <= 2 ? parseInt('20' + yyDigits.padStart(2, '0'), 10) : parseInt(yyDigits, 10);
+    const mesNumero = mIdx + 1;
+    const canonicalTab = `${mesesAbrev[mIdx]}-${String(anio).slice(-2)}`;
+    return { mesTab: canonicalTab, anio, mesNumero };
+}
 
 /**
  * Motor Contabilizador Canónico de Días
@@ -150,24 +162,79 @@ module.exports = function createDiagramasRouter() {
             }
 
             const t0 = Date.now();
-            let rowsChoferes = [];
+            const ymPairs = [];
+            const seenYm = new Set();
+            for (const iso of diasRango) {
+                const [yy, mm] = iso.split('-').map(Number);
+                const key = `${yy}-${mm}`;
+                if (!seenYm.has(key)) {
+                    seenYm.add(key);
+                    ymPairs.push({ anio: yy, mes: mm });
+                }
+            }
 
+            let rowsDiag = [];
             if (db.isConfigured()) {
+                const ymClauses = ymPairs.map((_, idx) => `(d.anio = $${idx * 2 + 1} AND d.mes_numero = $${idx * 2 + 2})`).join(' OR ');
+                const ymParams = ymPairs.flatMap(p => [p.anio, p.mes]);
                 const resC = await db.query(`
-                    SELECT id, nombre, legajo, c_servicio, diagrama_tipo, diagrama_json 
-                    FROM choferes 
-                    WHERE diagrama_json IS NOT NULL
-                    ORDER BY nombre ASC
-                `);
-                rowsChoferes = resC.rows || [];
+                    SELECT
+                        c.id AS chofer_id,
+                        c.nombre,
+                        c.legajo,
+                        COALESCE(s.denominacion, '') AS c_servicio,
+                        d.diagrama_tipo,
+                        d.anio,
+                        d.mes_numero,
+                        d.dias
+                    FROM public.choferes c
+                    INNER JOIN public.diagramas d ON d.chofer_id = c.id
+                    LEFT JOIN public.servicios_choferes s ON s.id = c.servicio_id
+                    WHERE (${ymClauses})
+                    ORDER BY c.nombre ASC, d.anio ASC, d.mes_numero ASC
+                `, ymParams);
+                rowsDiag = resC.rows || [];
             } else {
-                const { data, error } = await supabase.from('choferes').select('id, nombre, legajo, c_servicio, diagrama_tipo, diagrama_json').not('diagrama_json', 'is', null).order('nombre');
+                const { data, error } = await supabase
+                    .from('diagramas')
+                    .select('chofer_id, diagrama_tipo, anio, mes_numero, dias, choferes!inner(id, nombre, legajo, servicio_id, servicios_choferes(denominacion))')
+                    .in('anio', [...new Set(ymPairs.map(p => p.anio))])
+                    .in('mes_numero', [...new Set(ymPairs.map(p => p.mes))]);
                 if (error) throw error;
-                rowsChoferes = data || [];
+                rowsDiag = (data || []).map(r => ({
+                    chofer_id: r.chofer_id,
+                    nombre: r.choferes?.nombre || '',
+                    legajo: r.choferes?.legajo || null,
+                    c_servicio: r.choferes?.servicios_choferes?.denominacion || '',
+                    diagrama_tipo: r.diagrama_tipo,
+                    anio: r.anio,
+                    mes_numero: r.mes_numero,
+                    dias: r.dias
+                }));
+            }
+
+            // Agrupar por chofer consolidando los días de los meses consultados
+            const porChofer = new Map();
+            for (const row of rowsDiag) {
+                if (!porChofer.has(row.chofer_id)) {
+                    porChofer.set(row.chofer_id, {
+                        id: row.chofer_id,
+                        nombre: row.nombre,
+                        legajo: row.legajo,
+                        c_servicio: row.c_servicio,
+                        diagrama_tipo: row.diagrama_tipo,
+                        diasMerged: {}
+                    });
+                }
+                const entry = porChofer.get(row.chofer_id);
+                if (!entry.diagrama_tipo && row.diagrama_tipo) entry.diagrama_tipo = row.diagrama_tipo;
+                if (row.dias && typeof row.dias === 'object') {
+                    Object.assign(entry.diasMerged, row.dias);
+                }
             }
 
             // Aplicar filtros
-            let targetChoferes = rowsChoferes;
+            let targetChoferes = Array.from(porChofer.values()).sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es'));
             if (choferFiltro) {
                 const normFiltro = normalizar(choferFiltro);
                 targetChoferes = targetChoferes.filter(c => normalizar(c.nombre).includes(normFiltro) || String(c.legajo) === choferFiltro);
@@ -192,22 +259,9 @@ module.exports = function createDiagramasRouter() {
 
             const resultados = [];
             for (const c of choferesPaginados) {
-                const diagJson = c.diagrama_json;
                 const caracteresRango = {};
-
                 diasRango.forEach(iso => {
-                    let car = '-';
-                    if (diagJson && diagJson.caracteres_60_dias && diagJson.caracteres_60_dias[iso]) {
-                        car = diagJson.caracteres_60_dias[iso];
-                    } else if (diagJson && diagJson.meses) {
-                        for (const mesKey in diagJson.meses) {
-                            if (diagJson.meses[mesKey].dias && diagJson.meses[mesKey].dias[iso]) {
-                                car = diagJson.meses[mesKey].dias[iso];
-                                break;
-                            }
-                        }
-                    }
-                    caracteresRango[iso] = car;
+                    caracteresRango[iso] = c.diasMerged[iso] || '-';
                 });
 
                 const contabilizadorRango = contabilizarDias(caracteresRango);
@@ -268,25 +322,45 @@ module.exports = function createDiagramasRouter() {
 
             let rows = [];
             if (db.isConfigured()) {
-                let sql = 'SELECT * FROM diagramas WHERE mes_tab = $1';
+                let sql = `
+                    SELECT
+                        d.*,
+                        c.nombre AS chofer_nombre,
+                        c.legajo,
+                        COALESCE(s.denominacion, 'SIN SERVICIO') AS servicio
+                    FROM public.diagramas d
+                    INNER JOIN public.choferes c ON c.id = d.chofer_id
+                    LEFT JOIN public.servicios_choferes s ON s.id = c.servicio_id
+                    WHERE d.mes_tab = $1
+                `;
                 const params = [mesTab];
                 if (servicio) {
-                    sql += ' AND UPPER(servicio) = $2';
+                    sql += ' AND UPPER(COALESCE(s.denominacion, \'\')) = $2';
                     params.push(servicio.trim().toUpperCase());
                 }
-                sql += ' ORDER BY chofer_nombre ASC LIMIT $' + (params.length + 1);
+                sql += ' ORDER BY c.nombre ASC LIMIT $' + (params.length + 1);
                 params.push(limitParam);
 
                 const resSql = await db.query(sql, params);
                 rows = resSql.rows || [];
             } else {
-                let query = supabase.from('diagramas').select('*').eq('mes_tab', mesTab);
-                if (servicio) query = query.eq('servicio', servicio.trim().toUpperCase());
-                query = query.order('chofer_nombre').limit(limitParam);
-
-                const { data, error } = await query;
+                const { data, error } = await supabase
+                    .from('diagramas')
+                    .select('*, choferes!inner(nombre, legajo, servicios_choferes(denominacion))')
+                    .eq('mes_tab', mesTab)
+                    .limit(limitParam);
                 if (error) throw error;
-                rows = data || [];
+                rows = (data || []).map(r => ({
+                    ...r,
+                    chofer_nombre: r.choferes?.nombre || '',
+                    legajo: r.choferes?.legajo || null,
+                    servicio: r.choferes?.servicios_choferes?.denominacion || 'SIN SERVICIO'
+                }));
+                if (servicio) {
+                    const srvUpper = servicio.trim().toUpperCase();
+                    rows = rows.filter(r => (r.servicio || '').toUpperCase() === srvUpper);
+                }
+                rows.sort((a, b) => (a.chofer_nombre || '').localeCompare(b.chofer_nombre || '', 'es'));
             }
 
             res.json({
@@ -310,17 +384,43 @@ module.exports = function createDiagramasRouter() {
             const norm = normalizar(idOrNombre);
 
             let chofer = null;
+            let diagramasMeses = [];
             if (db.isConfigured()) {
                 const resC = await db.query(`
-                    SELECT * FROM choferes 
-                    WHERE id::text = $1 OR legajo = $1 OR UPPER(nombre) ILIKE $2 
+                    SELECT c.*, COALESCE(s.denominacion, 'SIN SERVICIO') AS servicio
+                    FROM public.choferes c
+                    LEFT JOIN public.servicios_choferes s ON s.id = c.servicio_id
+                    WHERE c.id::text = $1 OR c.legajo = $1 OR UPPER(c.nombre) ILIKE $2
                     LIMIT 1
                 `, [idOrNombre, `%${idOrNombre}%`]);
                 chofer = resC.rows[0] || null;
+                if (chofer) {
+                    const resD = await db.query(`
+                        SELECT mes_tab, anio, mes_numero, diagrama_tipo, dias, tira_dias, contabilizador
+                        FROM public.diagramas
+                        WHERE chofer_id = $1
+                        ORDER BY anio DESC, mes_numero DESC
+                    `, [chofer.id]);
+                    diagramasMeses = resD.rows || [];
+                }
             } else {
-                const { data, error } = await supabase.from('choferes').select('*').or(`id.eq.${idOrNombre},legajo.eq.${idOrNombre},nombre.ilike.%${idOrNombre}%`).limit(1);
+                const { data, error } = await supabase
+                    .from('choferes')
+                    .select('*, servicios_choferes(denominacion)')
+                    .or(`id.eq.${idOrNombre},legajo.eq.${idOrNombre},nombre.ilike.%${idOrNombre}%`)
+                    .limit(1);
                 if (error) throw error;
                 chofer = data?.[0] || null;
+                if (chofer) {
+                    chofer.servicio = chofer.servicios_choferes?.denominacion || 'SIN SERVICIO';
+                    const { data: dData } = await supabase
+                        .from('diagramas')
+                        .select('mes_tab, anio, mes_numero, diagrama_tipo, dias, tira_dias, contabilizador')
+                        .eq('chofer_id', chofer.id)
+                        .order('anio', { ascending: false })
+                        .order('mes_numero', { ascending: false });
+                    diagramasMeses = dData || [];
+                }
             }
 
             if (!chofer) {
@@ -334,14 +434,160 @@ module.exports = function createDiagramasRouter() {
                     id: chofer.id,
                     nombre: chofer.nombre,
                     legajo: chofer.legajo,
-                    servicio: chofer.c_servicio,
-                    diagrama_tipo: chofer.diagrama_tipo,
+                    servicio: chofer.servicio,
+                    diagrama_tipo: diagramasMeses[0]?.diagrama_tipo || null,
                     estado: chofer.estado,
-                    contabilizador: chofer.contabilizador,
-                    diagrama_json: chofer.diagrama_json
+                    contabilizador: diagramasMeses[0]?.contabilizador || null,
+                    diagramas: diagramasMeses
                 }
             });
         } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 5. POST /api/diagramas/upsert — Upsert atómico de días por mes (C2 BFF -> C3 PostgreSQL -> eor_sync_queue)
+    router.post('/upsert', async (req, res) => {
+        try {
+            const body = req.body || {};
+            const choferId = body.choferId || body.chofer_id;
+            const updatesPorMes = body.updatesPorMes || body.updates_por_mes;
+            const mesTab = body.mesTab || body.mes_tab;
+            const updates = body.updates;
+            const usuario = body.usuario || body.actualizado_por;
+            if (!choferId) {
+                return res.status(400).json({ success: false, error: 'choferId es obligatorio.' });
+            }
+
+            const payloadMap = (updatesPorMes && typeof updatesPorMes === 'object')
+                ? updatesPorMes
+                : (mesTab && Array.isArray(updates) ? { [mesTab]: updates } : null);
+
+            if (!payloadMap || Object.keys(payloadMap).length === 0) {
+                return res.status(400).json({ success: false, error: 'Debe enviar updatesPorMes o mesTab + updates.' });
+            }
+
+            const usuarioActivo = String(usuario || 'OPERADOR').trim() || 'OPERADOR';
+            const parsedEntries = [];
+            for (const [rawTab, dayUpdates] of Object.entries(payloadMap)) {
+                const parsed = parseMesTab(rawTab);
+                if (!parsed) {
+                    return res.status(400).json({ success: false, error: `mesTab inválido: '${rawTab}'. Formato esperado: 'Dic-26'.` });
+                }
+                if (!Array.isArray(dayUpdates) || dayUpdates.length === 0) continue;
+                parsedEntries.push({ ...parsed, dayUpdates });
+            }
+
+            if (parsedEntries.length === 0) {
+                return res.status(400).json({ success: false, error: 'No hay cambios de días para aplicar.' });
+            }
+
+            // Cargar registros preexistentes del chofer para los meses involucrados
+            const existingMap = new Map();
+            if (db.isConfigured()) {
+                const ymClauses = parsedEntries.map((_, i) => `(anio = $${i * 2 + 2} AND mes_numero = $${i * 2 + 3})`).join(' OR ');
+                const ymParams = [choferId, ...parsedEntries.flatMap(e => [e.anio, e.mesNumero])];
+                const exRes = await db.query(
+                    `SELECT id, mes_tab, anio, mes_numero, tira_dias, dias
+                     FROM public.diagramas
+                     WHERE chofer_id = $1::uuid AND (${ymClauses})`,
+                    ymParams
+                );
+                for (const row of exRes.rows || []) {
+                    existingMap.set(`${row.anio}-${row.mes_numero}`, row);
+                }
+            } else {
+                const { data: exData, error: exErr } = await supabase
+                    .from('diagramas')
+                    .select('id, mes_tab, anio, mes_numero, tira_dias, dias')
+                    .eq('chofer_id', choferId)
+                    .in('anio', [...new Set(parsedEntries.map(e => e.anio))])
+                    .in('mes_numero', [...new Set(parsedEntries.map(e => e.mesNumero))]);
+                if (exErr) throw exErr;
+                for (const row of exData || []) {
+                    existingMap.set(`${row.anio}-${row.mes_numero}`, row);
+                }
+            }
+
+            const actualizados = [];
+            for (const entry of parsedEntries) {
+                const { mesTab: canonicalTab, anio, mesNumero, dayUpdates } = entry;
+                const daysInMonth = new Date(anio, mesNumero, 0).getDate();
+                const mesStr = String(mesNumero).padStart(2, '0');
+                const ex = existingMap.get(`${anio}-${mesNumero}`);
+
+                let arr = [];
+                if (ex?.tira_dias) {
+                    arr = String(ex.tira_dias).split(',').map(v => v.trim() || '-');
+                } else if (ex?.dias && typeof ex.dias === 'object') {
+                    for (let d = 1; d <= daysInMonth; d++) {
+                        const iso = `${anio}-${mesStr}-${String(d).padStart(2, '0')}`;
+                        arr.push(String(ex.dias[iso] || '-').trim() || '-');
+                    }
+                }
+                while (arr.length < daysInMonth) arr.push('-');
+                if (arr.length > daysInMonth) arr = arr.slice(0, daysInMonth);
+
+                for (const u of dayUpdates) {
+                    const dNum = parseInt(u?.dia, 10);
+                    if (dNum >= 1 && dNum <= daysInMonth) {
+                        const valNorm = String(u?.valor ?? '-').trim().toUpperCase();
+                        arr[dNum - 1] = valNorm || '-';
+                    }
+                }
+
+                const diasMap = {};
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const iso = `${anio}-${mesStr}-${String(d).padStart(2, '0')}`;
+                    diasMap[iso] = arr[d - 1];
+                }
+                const nuevaTira = arr.join(',');
+                const nuevoContabilizador = contabilizarDias(diasMap);
+
+                if (db.isConfigured()) {
+                    const upRes = await db.query(
+                        `INSERT INTO public.diagramas (
+                            chofer_id, mes_tab, anio, mes_numero, dias, tira_dias, contabilizador, actualizado_el, actualizado_por
+                        ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7::jsonb, NOW(), $8)
+                        ON CONFLICT (chofer_id, anio, mes_numero)
+                        DO UPDATE SET
+                            mes_tab = EXCLUDED.mes_tab,
+                            dias = EXCLUDED.dias,
+                            tira_dias = EXCLUDED.tira_dias,
+                            contabilizador = EXCLUDED.contabilizador,
+                            actualizado_el = NOW(),
+                            actualizado_por = EXCLUDED.actualizado_por
+                        RETURNING id AS diagrama_id, chofer_id, mes_tab, anio, mes_numero, tira_dias, contabilizador, actualizado_el`,
+                        [choferId, canonicalTab, anio, mesNumero, JSON.stringify(diasMap), nuevaTira, JSON.stringify(nuevoContabilizador), usuarioActivo]
+                    );
+                    if (upRes.rows[0]) actualizados.push(upRes.rows[0]);
+                } else {
+                    const { data: upData, error: upErr } = await supabase
+                        .from('diagramas')
+                        .upsert({
+                            chofer_id: choferId,
+                            mes_tab: canonicalTab,
+                            anio,
+                            mes_numero: mesNumero,
+                            dias: diasMap,
+                            tira_dias: nuevaTira,
+                            contabilizador: nuevoContabilizador,
+                            actualizado_el: new Date().toISOString(),
+                            actualizado_por: usuarioActivo
+                        }, { onConflict: 'chofer_id,anio,mes_numero' })
+                        .select('id, chofer_id, mes_tab, anio, mes_numero, tira_dias, contabilizador, actualizado_el');
+                    if (upErr) throw upErr;
+                    if (upData?.[0]) actualizados.push({ diagrama_id: upData[0].id, ...upData[0] });
+                }
+            }
+
+            res.json({
+                success: true,
+                fuente: 'POSTGRES_UPSERT',
+                actualizados
+            });
+        } catch (err) {
+            console.error('❌ Error en POST /api/diagramas/upsert:', err.message);
             res.status(500).json({ success: false, error: err.message });
         }
     });

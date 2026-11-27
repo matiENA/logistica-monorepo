@@ -14,10 +14,6 @@ interface ReturnColumnProps {
 const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
   const raw = String(code || '-').trim().toUpperCase();
 
-  const borderClass = isHighlighted
-    ? 'border-2 border-dashed border-amber-400 dark:border-amber-400'
-    : 'border-2 border-transparent';
-
   if (!raw || raw === '-' || raw === '0') {
     return (
       <div
@@ -37,11 +33,21 @@ const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
   if (raw.length >= 3) trackingClass = 'tracking-tighter';
   else if (raw.length === 2) trackingClass = 'tracking-tight';
 
-  // Verde: Franco (F / FSF)
-  if (raw === 'F' || raw === 'FSF' || raw.includes('FRANCO')) {
+  const base = raw.includes('+') ? raw.split('+')[0].trim() : raw;
+  const isDashedCode = base === 'FSF' || base.startsWith('FSF') || base === 'VSF' || base.startsWith('VSF');
+  const styleBorder = isHighlighted
+    ? 'border-2 border-dashed border-amber-400 dark:border-amber-400'
+    : isDashedCode
+      ? 'border-2 border-dashed'
+      : 'border';
+
+  // FSF / F / FRANCO / RPT -> Azul (token --novedad-f)
+  if (base === 'FSF' || base.startsWith('FSF') || ['F', 'FRANCO', 'RPT'].includes(base) || base.startsWith('F')) {
     return (
       <div
-        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#22C55E] text-white flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${borderClass} ${trackingClass}`}
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#eff6ff] dark:bg-blue-500/20 text-[#1d4ed8] dark:text-blue-300 ${
+          isHighlighted ? '' : 'border-[#bfdbfe] dark:border-blue-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
         title={`Franco: ${raw}`}
       >
         {raw}
@@ -49,35 +55,97 @@ const renderInsigniaEstado = (code?: string, isHighlighted = false) => {
     );
   }
 
-  // Amarillo: Viaje (VSF / V)
-  if (raw === 'VSF' || raw === 'V' || raw.includes('VIAJE')) {
+  // VSF / V / VACACIONES -> Esmeralda (token --novedad-v)
+  if (base === 'VSF' || base.startsWith('VSF') || ['V', 'VACACIONES'].includes(base) || base.startsWith('V')) {
     return (
       <div
-        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#EAB308] text-slate-950 flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${borderClass} ${trackingClass}`}
-        title={`Viaje: ${raw}`}
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#ecfdf5] dark:bg-emerald-500/20 text-[#065f46] dark:text-emerald-300 ${
+          isHighlighted ? '' : 'border-[#a7f3d0] dark:border-emerald-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`Vacaciones: ${raw}`}
       >
         {raw}
       </div>
     );
   }
 
-  // Rojo: Servicio / Ausente (S / A)
-  if (raw === 'S' || raw === 'A' || raw.includes('SERVICIO') || raw.includes('AUSENTE')) {
+  // ART -> Violeta (token --novedad-art)
+  if (base === 'ART') {
     return (
       <div
-        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#EF4444] text-white flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${borderClass} ${trackingClass}`}
-        title={`Servicio: ${raw}`}
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#f5f3ff] dark:bg-violet-500/20 text-[#5b21b6] dark:text-violet-300 ${
+          isHighlighted ? '' : 'border-[#ddd6fe] dark:border-violet-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`ART: ${raw}`}
       >
         {raw}
       </div>
     );
   }
 
-  // Índigo: otros (ej. números de rotación 1, 2, códigos especiales)
+  // IND / IIND -> Slate (token --novedad-ind)
+  if (base === 'IND' || base === 'IIND' || base.startsWith('IND')) {
+    return (
+      <div
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#f1f5f9] dark:bg-slate-500/20 text-[#334155] dark:text-slate-200 ${
+          isHighlighted ? '' : 'border-[#cbd5e1] dark:border-slate-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`Indisposición: ${raw}`}
+      >
+        {raw}
+      </div>
+    );
+  }
+
+  // S / SUSP -> Naranja (token --novedad-s)
+  if (base === 'S' || base.startsWith('SUSP')) {
+    return (
+      <div
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#fff7ed] dark:bg-orange-500/20 text-[#9a3412] dark:text-orange-200 ${
+          isHighlighted ? '' : 'border-[#fed7aa] dark:border-orange-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`Suspensión / Servicio: ${raw}`}
+      >
+        {raw}
+      </div>
+    );
+  }
+
+  // A -> Rojo sólido (token --novedad-a)
+  if (base === 'A' || base.includes('AUSENTE')) {
+    return (
+      <div
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#ef4444] dark:bg-[#dc2626] text-[#0f172a] dark:text-white ${
+          isHighlighted ? '' : 'border-[#dc2626] dark:border-[#ef4444]'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`Ausente: ${raw}`}
+      >
+        {raw}
+      </div>
+    );
+  }
+
+  // E / MED / LIC -> Rosa (token --novedad-e)
+  if (base === 'E' || base.startsWith('MED') || base === 'LIC') {
+    return (
+      <div
+        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#ffe4e6] dark:bg-rose-500/20 text-[#9f1239] dark:text-rose-200 ${
+          isHighlighted ? '' : 'border-[#fecdd3] dark:border-rose-400/40'
+        } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+        title={`Enfermedad / Licencia: ${raw}`}
+      >
+        {raw}
+      </div>
+    );
+  }
+
+  // Operativo / Activo / números de rotación -> Verde (token --novedad-act)
   return (
     <div
-      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${borderClass} ${trackingClass}`}
-      title={`Estado: ${raw}`}
+      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-[#f0fdf4] dark:bg-emerald-600/20 text-[#166534] dark:text-green-300 ${
+        isHighlighted ? '' : 'border-[#bbf7d0] dark:border-green-400/40'
+      } flex items-center justify-center font-black text-xs shadow-xs select-none transition-colors duration-150 ${styleBorder} ${trackingClass}`}
+      title={`Operativo: ${raw}`}
     >
       {raw}
     </div>

@@ -59,8 +59,8 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
     }
   };
 
-  // 4. Semáforo cromático del Badge de Estado (gobernado por clases CSS en cards.css para soporte Light y html.dark)
-  const badgeTypeClass = `day-badge-${dayStatus.type ? dayStatus.type.toLowerCase() : 'default'}`;
+  // 4. Semáforo cromático del Badge de Estado (gobernado por tokens --novedad-* en theme.css / cards.css)
+  const badgeTypeClass = `novedad-${dayStatus.novedadCode || 'default'}`;
   const badgeFatigaClass = dayStatus.cons >= 22 ? 'fatiga-crit' : dayStatus.cons >= 18 ? 'fatiga-warn' : '';
 
   // Helper para fechas legibles
@@ -408,21 +408,21 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
                   {/* Columna 3: Viaje y Acceso a Ficha Individual */}
                   <div className="expanded-section-box expanded-action-box">
                     {kmInfo && (kmInfo.km_totales > 0 || kmInfo.hoja_ruta) && (
-                      <div className="expanded-km-summary" style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'rgba(234, 179, 8, 0.08)', borderRadius: '6px', border: '1px solid rgba(234, 179, 8, 0.2)' }}>
-                        <div style={{ fontSize: '0.75rem', color: '#eab308', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div className="expanded-km-summary" style={{ marginBottom: '0.75rem', padding: '0.5rem', background: 'var(--novedad-s-bg)', borderRadius: '6px', border: '1px solid var(--novedad-s-border)' }}>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--novedad-s-text)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <span>⚡</span>
                           <span>Viaje registrado hoy</span>
                         </div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main, #fff)', marginTop: '2px' }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)', marginTop: '2px' }}>
                           {kmInfo.km_totales > 0 ? `${kmInfo.km_totales.toLocaleString('es-AR')} km` : 'Sin KMs declarados'}
                         </div>
                         {kmInfo.hoja_ruta && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted, #94a3b8)' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                             HR: {kmInfo.hoja_ruta}
                           </div>
                         )}
                         {kmInfo.dominio && (
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)' }}>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                             Tractor: {kmInfo.dominio}
                           </div>
                         )}

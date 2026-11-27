@@ -51,6 +51,11 @@ const SPREADSHEETS = {
         id: '1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc',
         tabName: 'NOVIEMBRE 2026- Mov.Unidades y Choferes',
         sheetIdNum: 0
+    },
+    DICIEMBRE_2026: {
+        id: '14QpWY9KvOVj2Yinn5F1hOiSkTxASYwLc-Cd7F2rFO_k',
+        tabName: 'DICIEMBRE 2026- Mov.Unidades y Choferes',
+        sheetIdNum: 0
     }
 };
 
@@ -291,7 +296,18 @@ function resolveSheetForDate(d, customConfig = null) {
         }
     }
 
-    // 2. Variables de entorno activas (#idmensual)
+    // 2. Fallbacks históricos / puente conocidos por mes exacto
+    if (year === 2026 && month === 10) {
+        return SPREADSHEETS.OCTUBRE_2026;
+    }
+    if (year === 2026 && month === 11) {
+        return SPREADSHEETS.NOVIEMBRE_2026;
+    }
+    if (year === 2026 && month === 12) {
+        return SPREADSHEETS.DICIEMBRE_2026;
+    }
+
+    // 3. Variables de entorno activas (#idmensual)
     if (envMovId) {
         const parsedEnvTab = parseMonthYearFromText(envTabName);
         if (!parsedEnvTab || (parsedEnvTab.year === year && parsedEnvTab.month === month)) {
@@ -309,14 +325,6 @@ function resolveSheetForDate(d, customConfig = null) {
                 sheetIdNum: 0
             };
         }
-    }
-
-    // 3. Fallbacks históricos conocidos
-    if (year === 2026 && month === 10) {
-        return SPREADSHEETS.OCTUBRE_2026;
-    }
-    if (year === 2026 && month === 11) {
-        return SPREADSHEETS.NOVIEMBRE_2026;
     }
 
     if (extCfg?.mes_actual?.movimientos_id) {
@@ -565,12 +573,15 @@ function composeCellHoverNotes(entries) {
 }
 
 /**
- * Descarga en lotes de hasta 5 columnas (values:batchGet) aquellas columnas no presentes en columnCache
+ * Descarga en lotes de hasta 5 columnas (values:batchGet) aquellas columnas no presentes en columnCache.
+ * Retorna { ok, failedCols, error } para evitar falsos positivos de limpieza ante timeouts/errores de red.
  */
 async function prefetchColumnsBatch(sheetId, tabName, colLetters, accessToken) {
     const missing = Array.from(new Set(colLetters)).filter(c => !columnCache.has(`${sheetId}_${tabName}_${c}`));
-    if (missing.length === 0) return;
+    if (missing.length === 0) return { ok: true, failedCols: [], error: null };
 
+    const failedCols = [];
+    let lastError = null;
     const chunkSize = 5;
     for (let i = 0; i < missing.length; i += chunkSize) {
         const chunk = missing.slice(i, i + chunkSize);
@@ -592,12 +603,20 @@ async function prefetchColumnsBatch(sheetId, tabName, colLetters, accessToken) {
                     columnCache.set(`${sheetId}_${tabName}_${colLetter}`, parsed);
                 });
             } else if (res) {
-                console.warn(`⚠️ [Hover Bajas Sync] batchGet HTTP ${res.status} en [${tabName}] (${chunk.join(', ')})`);
+                lastError = `batchGet HTTP ${res.status} en [${tabName}] (${chunk.join(', ')})`;
+                console.warn(`⚠️ [Hover Sync] ${lastError}`);
+                failedCols.push(...chunk);
+            } else {
+                lastError = `Sin respuesta batchGet en [${tabName}] (${chunk.join(', ')})`;
+                failedCols.push(...chunk);
             }
         } catch (e) {
-            console.warn(`⚠️ [Hover Bajas Sync] Error en prefetchColumnsBatch (${chunk.join(', ')}):`, e.message);
+            lastError = `Error en prefetchColumnsBatch (${chunk.join(', ')}): ${e.message}`;
+            console.warn(`⚠️ [Hover Sync] ${lastError}`);
+            failedCols.push(...chunk);
         }
     }
+    return { ok: failedCols.length === 0, failedCols, error: lastError };
 }
 
 const unitsRowMapCache = new Map();
@@ -605,6 +624,7 @@ const unitsRowMapCache = new Map();
 /**
  * Escanea el catálogo de unidades de las columnas A..F (filas 1..350)
  * para mapear UTE y Tractor a su fila física 1-based en la planilla Movimientos.
+ * Nunca cachea un resultado vacío tras un timeout o error HTTP.
  */
 async function getUnitsRowMap(sheetId, tabName, accessToken) {
     const cacheKey = `${sheetId}:::${tabName}`;
@@ -615,22 +635,24 @@ async function getUnitsRowMap(sheetId, tabName, accessToken) {
 
     const mapUteToRow = new Map();
     const mapTractorToRow = new Map();
-    const rangeEnc = encodeURIComponent(`'${tabName}'!A1:F350`);
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${rangeEnc}`;
+    const rangeEnc = encodeURIComponent(`'${tabName}'!C1:F250`);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${rangeEnc}?valueRenderOption=UNFORMATTED_VALUE`;
+    let fetchOk = false;
 
     try {
         const res = await fetchWithRetry(url, {
             headers: { Authorization: `Bearer ${accessToken}` }
-        }, 25000, 2);
+        }, 210000, 2);
 
         if (res && res.ok) {
+            fetchOk = true;
             const data = await res.json();
             const rows = data.values || [];
             rows.forEach((r, idx) => {
                 const rowNum = 1 + idx;
-                const uteRaw = r && r[2] ? String(r[2]).trim() : '';
-                const tracRaw = r && r[4] ? String(r[4]).trim() : '';
-                const semiRaw = r && r[5] ? String(r[5]).trim() : '';
+                const uteRaw = r && r[0] ? String(r[0]).trim() : '';
+                const tracRaw = r && r[2] ? String(r[2]).trim() : '';
+                const semiRaw = r && r[3] ? String(r[3]).trim() : '';
 
                 if (uteRaw) {
                     const cleanU = uteRaw.toUpperCase().replace(/\s+/g, '');
@@ -649,14 +671,16 @@ async function getUnitsRowMap(sheetId, tabName, accessToken) {
             });
         }
     } catch (e) {
-        console.warn(`⚠️ [Hover Bajas Sync] Error obteniendo mapeo de unidades en [${tabName}]:`, e.message);
+        console.warn(`⚠️ [Hover Sync] Error obteniendo mapeo de unidades en [${tabName}]:`, e.message);
     }
 
-    const result = { mapUteToRow, mapTractorToRow };
-    unitsRowMapCache.set(cacheKey, {
-        data: result,
-        expiresAt: Date.now() + 10 * 60 * 1000 // 10 min TTL
-    });
+    const result = { mapUteToRow, mapTractorToRow, ok: fetchOk };
+    if (fetchOk && (mapUteToRow.size > 0 || mapTractorToRow.size > 0)) {
+        unitsRowMapCache.set(cacheKey, {
+            data: result,
+            expiresAt: Date.now() + 60 * 60 * 1000 // 60 min TTL
+        });
+    }
     return result;
 }
 
@@ -1251,6 +1275,14 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
                 const diaNum = cur.getDate();
                 const baseSheet = resolveSheetForDate(cur);
                 const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, cur, accessToken);
+
+                // Guardia de cruce mensual: nunca escribir un día de un mes futuro aún no rotado sobre la planilla del mes actual
+                const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
+                if (tabYM && (tabYM.year !== cur.getFullYear() || tabYM.month !== (cur.getMonth() + 1))) {
+                    cur.setDate(cur.getDate() + 1);
+                    continue;
+                }
+
                 const colIdx = getColChofer(diaNum);
                 const colLetter = indexToColLetter(colIdx);
 
@@ -1316,8 +1348,12 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
         }
 
         // Paso B: Descargar columnas pendientes en lote
+        const prefetchErrorsBySheet = new Map();
         for (const [, group] of neededColsBySheet.entries()) {
-            await prefetchColumnsBatch(group.sheetId, group.tabName, Array.from(group.cols), accessToken);
+            const pfRes = await prefetchColumnsBatch(group.sheetId, group.tabName, Array.from(group.cols), accessToken);
+            if (!pfRes.ok) {
+                prefetchErrorsBySheet.set(group.sheetId, pfRes.error || `Error leyendo columnas ${pfRes.failedCols.join(', ')}`);
+            }
         }
 
         // Paso C: Detectar presencia del chofer, componer notas por celda (jerarquía BAJA_DIAGRAMA primero)
@@ -1558,7 +1594,7 @@ async function syncBajasGoogleSheets(contextoNovedad = null, options = {}) {
 
         // Paso D: Aplicar lotes en Google Sheets API con fields: 'note'
         let totalApplied = 0;
-        const failedSheets = new Map();
+        const failedSheets = new Map(prefetchErrorsBySheet);
 
         for (const [sheetId, group] of requestsBySpreadsheet.entries()) {
             const finalRequests = group.requests;
@@ -1770,6 +1806,13 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             const diaNum = curCheck.getDate();
             const baseSheet = resolveSheetForDate(curCheck);
             const resolvedMeta = await resolveDynamicSheetMeta(baseSheet.id, baseSheet.tabName, curCheck, accessToken);
+
+            // Guardia de cruce mensual: no limpiar días de un mes futuro sobre la planilla del mes actual
+            const tabYM = parseMonthYearFromText(resolvedMeta.tabName);
+            if (tabYM && (tabYM.year !== curCheck.getFullYear() || tabYM.month !== (curCheck.getMonth() + 1))) {
+                continue;
+            }
+
             const colIdx = getColChofer(diaNum);
             const colLetter = indexToColLetter(colIdx);
 
@@ -1791,17 +1834,25 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
             });
         }
 
+        const readErrors = [];
         for (const [, group] of neededCols.entries()) {
-            await prefetchColumnsBatch(group.sheetId, group.tabName, Array.from(group.cols), accessToken);
+            const pfRes = await prefetchColumnsBatch(group.sheetId, group.tabName, Array.from(group.cols), accessToken);
+            if (!pfRes.ok) {
+                readErrors.push(pfRes.error || `Error leyendo columnas ${pfRes.failedCols.join(', ')}`);
+            }
         }
 
         const clearRequestsBySheet = new Map();
         for (const dInfo of scanDays) {
-            const { mapUteToRow, mapTractorToRow } = await getUnitsRowMap(dInfo.sheetId, dInfo.tabName, accessToken);
+            const { mapUteToRow, mapTractorToRow, ok: unitsOk } = await getUnitsRowMap(dInfo.sheetId, dInfo.tabName, accessToken);
 
             let rowUnit = null;
             const cleanUteCtx = contexto.n_ute ? String(contexto.n_ute).trim().toUpperCase().replace(/\s+/g, '') : '';
             const cleanTracCtx = contexto.tractor ? String(contexto.tractor).trim().toUpperCase().replace(/[\s\-_.]/g, '') : '';
+
+            if (!unitsOk && (cleanUteCtx || cleanTracCtx)) {
+                readErrors.push(`No se pudo obtener mapeo de unidades en [${dInfo.tabName}]`);
+            }
 
             if (cleanUteCtx) {
                 rowUnit = mapUteToRow.get(cleanUteCtx) || mapUteToRow.get(cleanUteCtx.replace(/^0+/, '')) || null;
@@ -1864,8 +1915,8 @@ async function ejecutarLimpiezaNotas(contexto, accessToken, supabaseClient, hoy,
         }
 
         let totalCleared = 0;
-        let hadError = false;
-        let lastErrMsg = null;
+        let hadError = readErrors.length > 0;
+        let lastErrMsg = readErrors.length > 0 ? readErrors.join(' | ') : null;
 
         for (const [sheetId, group] of clearRequestsBySheet.entries()) {
             if (group.requests.length === 0) continue;

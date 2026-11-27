@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { apiClient } from '@/api/apiClient';
 import { queryKeys } from '@/api/queryKeys';
+import { getNovedadCode } from '@/utils/diagramaUtils';
 
 const PAGE_SIZE = 16;
 
@@ -8,7 +9,7 @@ const PAGE_SIZE = 16;
  * Normaliza y extrae el estado del chofer para una fecha contexto dada (YYYY-MM-DD)
  */
 export function getDriverDayStatus(chofer, fechaIso) {
-  if (!chofer) return { raw: '-', base: '-', cons: 0, type: 'INACTIVO' };
+  if (!chofer) return { raw: '-', base: '-', cons: 0, type: 'INACTIVO', novedadCode: 'default' };
 
   let raw = '';
 
@@ -32,36 +33,37 @@ export function getDriverDayStatus(chofer, fechaIso) {
 
   // 4. Fallback al estado del chofer
   if (!raw || raw === '-' || raw === '0') {
-    if (chofer.estado_chofer === 'circulando') return { raw: raw === '0' ? '0' : 'O', base: raw === '0' ? '0' : 'O', cons: 1, type: 'OPERATIVO' };
-    if (chofer.estado_chofer === 'franco') return { raw: raw === '0' ? '0' : 'F', base: raw === '0' ? '0' : 'F', cons: 0, type: 'FRANCO' };
-    if (chofer.estado_chofer === 'licencia') return { raw: raw === '0' ? '0' : 'IND', base: raw === '0' ? '0' : 'IND', cons: 0, type: 'LICENCIA' };
-    return { raw: raw || '-', base: raw || '-', cons: 0, type: 'INACTIVO' };
+    if (chofer.estado_chofer === 'circulando') return { raw: raw === '0' ? '0' : 'O', base: raw === '0' ? '0' : 'O', cons: 1, type: 'OPERATIVO', novedadCode: 'act' };
+    if (chofer.estado_chofer === 'franco') return { raw: raw === '0' ? '0' : 'F', base: raw === '0' ? '0' : 'F', cons: 0, type: 'FRANCO', novedadCode: 'f' };
+    if (chofer.estado_chofer === 'licencia') return { raw: raw === '0' ? '0' : 'IND', base: raw === '0' ? '0' : 'IND', cons: 0, type: 'LICENCIA', novedadCode: 'ind' };
+    return { raw: raw || '-', base: raw || '-', cons: 0, type: 'INACTIVO', novedadCode: 'default' };
   }
 
   let base = raw;
   if (base.includes('+')) base = base.split('+')[0].trim();
+  const novedadCode = getNovedadCode(raw);
 
   // Evaluación de tipos
   if (['F', 'FSF', 'FRANCO', 'RPT'].includes(base.toUpperCase())) {
-    return { raw, base, cons: 0, type: 'FRANCO' };
+    return { raw, base, cons: 0, type: 'FRANCO', novedadCode };
   }
   if (['V', 'VSF', 'VACACIONES'].includes(base.toUpperCase())) {
-    return { raw, base, cons: 0, type: 'VACACIONES' };
+    return { raw, base, cons: 0, type: 'VACACIONES', novedadCode };
   }
   if (['E', 'ART', 'IND', 'IIND', 'A', 'S', 'P', 'MED', 'SUSP', 'LIC'].some((k) => base.toUpperCase().includes(k))) {
-    return { raw, base, cons: 0, type: 'LICENCIA' };
+    return { raw, base, cons: 0, type: 'LICENCIA', novedadCode };
   }
 
   const cons = parseInt(base, 10);
   if (!isNaN(cons)) {
-    return { raw, base, cons, type: 'OPERATIVO' };
+    return { raw, base, cons, type: 'OPERATIVO', novedadCode };
   }
 
   if (base.toUpperCase() === 'O' || base.toUpperCase() === 'OPERATIVO') {
-    return { raw, base, cons: 1, type: 'OPERATIVO' };
+    return { raw, base, cons: 1, type: 'OPERATIVO', novedadCode };
   }
 
-  return { raw, base, cons: 0, type: 'OTRO' };
+  return { raw, base, cons: 0, type: 'OTRO', novedadCode };
 }
 
 /**

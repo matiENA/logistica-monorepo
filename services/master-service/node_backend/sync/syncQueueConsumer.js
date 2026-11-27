@@ -88,13 +88,39 @@ function colToLetter(colIndex) {
 }
 
 /**
+ * Determina la cantidad exacta de días del mes a partir de un nombre de pestaña (ej. 'Nov-26' -> 30, 'Dic-26' -> 31).
+ */
+function getDaysInMonthForTab(tab) {
+    const parts = String(tab || '').trim().split('-');
+    if (parts.length !== 2) return 31;
+    const mIdx = mesesAbrev.findIndex(m => m.toLowerCase() === parts[0].trim().toLowerCase());
+    const yyDigits = parts[1].replace(/\D/g, '');
+    if (mIdx === -1 || !yyDigits) return 31;
+    const anio = yyDigits.length <= 2 ? parseInt('20' + yyDigits.padStart(2, '0'), 10) : parseInt(yyDigits, 10);
+    return new Date(anio, mIdx + 1, 0).getDate();
+}
+
+/**
+ * Extrae { year, month } (month 1..12) desde un nombre de pestaña de Movimientos (ej. 'NOVIEMBRE 2026- Mov...').
+ */
+function parseMonthYearFromTab(tabName) {
+    const text = normalizar(tabName);
+    if (!text) return null;
+    const mIdx = mesesLargo.findIndex(m => text.includes(normalizar(m)));
+    const yMatch = text.match(/\b(20\d{2})\b/);
+    if (mIdx === -1 || !yMatch) return null;
+    return { year: parseInt(yMatch[1], 10), month: mIdx + 1 };
+}
+
+/**
  * Formatea la tira de días para su escritura en Google Sheets.
  * Por defecto convierte los guiones ('-') y valores inactivos en celdas vacías ('')
  * para mantener la planilla limpia, preservando la capacidad de emitir guiones
  * si la operación incluye allowHyphens / imprimir_guiones = true (para botón futuro).
  */
-function formatDiasParaSheets(tiraRaw, { allowHyphens = false } = {}) {
-    if (!tiraRaw) return new Array(31).fill('');
+function formatDiasParaSheets(tiraRaw, { allowHyphens = false, daysInMonth = 31 } = {}) {
+    const targetDays = Math.max(28, Math.min(31, parseInt(daysInMonth, 10) || 31));
+    if (!tiraRaw) return new Array(targetDays).fill('');
     let arrDias = tiraRaw.includes(',') ? tiraRaw.split(',') : tiraRaw.split('');
     arrDias = arrDias.map(d => {
         const val = String(d || '').trim().toUpperCase();
@@ -103,10 +129,10 @@ function formatDiasParaSheets(tiraRaw, { allowHyphens = false } = {}) {
         }
         return val;
     });
-    while (arrDias.length < 31) {
+    while (arrDias.length < targetDays) {
         arrDias.push(allowHyphens ? '-' : '');
     }
-    return arrDias.slice(0, 31);
+    return arrDias.slice(0, targetDays);
 }
 
 // ==============================================================================
@@ -183,12 +209,14 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
     try {
         // 1. Obtener registros pendientes o bloqueos huérfanos (stale EN_PROCESO > 5m) en orden FIFO
         const { rows: pendingItems } = await client.query(`
-            SELECT id, entidad, destino_sheet, tipo_operacion, chofer_id, chofer_nombre, 
-                   dni_cuil, unidad_tractor, datos_nuevos, datos_previos, creado_el
-            FROM public.eor_sync_queue
-            WHERE estado_sync = 'PENDIENTE'
-               OR (estado_sync = 'EN_PROCESO' AND creado_el < NOW() - INTERVAL '5 minutes' AND COALESCE(reintentos, 0) < 5)
-            ORDER BY creado_el ASC
+            SELECT q.id, q.entidad, q.destino_sheet, q.tipo_operacion, q.chofer_id, q.chofer_nombre,
+                   q.dni_cuil, q.unidad_tractor, q.datos_nuevos, q.datos_previos, q.usuario, q.creado_el,
+                   c.legajo AS chofer_legajo
+            FROM public.eor_sync_queue q
+            LEFT JOIN public.choferes c ON c.id = q.chofer_id
+            WHERE q.estado_sync = 'PENDIENTE'
+               OR (q.estado_sync = 'EN_PROCESO' AND q.creado_el < NOW() - INTERVAL '5 minutes' AND COALESCE(q.reintentos, 0) < 5)
+            ORDER BY q.creado_el ASC
             LIMIT $1
         `, [batchLimit]);
 
@@ -234,7 +262,9 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                     groups.docVencimientos.push(item);
                 }
             } else if (ent === 'DIAGRAMA') {
-                const tab = item.destino_sheet || 'Mar-26';
+                const hoyAr = getFechaArgentina();
+                const defaultTab = `${mesesAbrev[hoyAr.getMonth()]}-${String(hoyAr.getFullYear()).slice(-2)}`;
+                const tab = item.destino_sheet || defaultTab;
                 if (!groups.diagramas[tab]) groups.diagramas[tab] = [];
                 groups.diagramas[tab].push(item);
             } else if (ent === 'ASIGNACION') {
@@ -466,10 +496,28 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                 const batchData = [];
                 const successIds = [];
                 const failedUnmatched = [];
+                const daysInMonth = getDaysInMonthForTab(tab);
+                const endColLetter = colToLetter(4 + daysInMonth - 1);
 
                 for (const item of items) {
                     const nomNorm = normalizar(item.chofer_nombre);
-                    const rowNum = mapNameToRow.get(nomNorm);
+                    const legajoNorm = String(item.chofer_legajo || item.datos_nuevos?.legajo || '').trim();
+                    let rowNum = (nomNorm && mapNameToRow.get(nomNorm))
+                              || (legajoNorm && legajoNorm !== 'null' && mapLegajoToRow.get(legajoNorm))
+                              || null;
+
+                    // Fallback por prefijo único (ej. nombres truncados a 30 caracteres en DB vs Sheets)
+                    if (!rowNum && nomNorm && nomNorm.length >= 15) {
+                        const prefixMatches = [];
+                        for (const [sheetName, rNum] of mapNameToRow.entries()) {
+                            if (sheetName.startsWith(nomNorm) || nomNorm.startsWith(sheetName)) {
+                                prefixMatches.push(rNum);
+                            }
+                        }
+                        if (prefixMatches.length === 1) {
+                            rowNum = prefixMatches[0];
+                        }
+                    }
 
                     if (rowNum) {
                         const tiraRaw = item.datos_nuevos?.tira_dias || '';
@@ -478,12 +526,12 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                             item.datos_nuevos?.con_guiones ||
                             item.datos_nuevos?.allowHyphens
                         );
-                        const arrDias = formatDiasParaSheets(tiraRaw, { allowHyphens });
+                        const arrDias = formatDiasParaSheets(tiraRaw, { allowHyphens, daysInMonth });
 
                         // Si viene rango específico (ej. días 1..14)
                         if (item.datos_nuevos?.dia_inicio && item.datos_nuevos?.dia_fin) {
-                            const dIni = parseInt(item.datos_nuevos.dia_inicio, 10);
-                            const dFin = parseInt(item.datos_nuevos.dia_fin, 10);
+                            const dIni = Math.max(1, parseInt(item.datos_nuevos.dia_inicio, 10));
+                            const dFin = Math.min(daysInMonth, parseInt(item.datos_nuevos.dia_fin, 10));
                             const colIni = colToLetter(4 + dIni - 1);
                             const colFin = colToLetter(4 + dFin - 1);
                             const sliceDias = arrDias.slice(dIni - 1, dFin);
@@ -493,15 +541,15 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                                 values: [sliceDias]
                             });
                         } else {
-                            // Mes completo E..AI
+                            // Mes completo ajustado a días reales del mes (ej. E..AH en meses de 30 días, E..AI en 31)
                             batchData.push({
-                                range: `'${tab}'!E${rowNum}:AI${rowNum}`,
+                                range: `'${tab}'!E${rowNum}:${endColLetter}${rowNum}`,
                                 values: [arrDias]
                             });
                         }
                         successIds.push(item.id);
                     } else {
-                        console.warn(`   ⚠️ Chofer no hallado en Diagrama [${tab}]: ${item.chofer_nombre}`);
+                        console.warn(`   ⚠️ Chofer no hallado en Diagrama [${tab}]: ${item.chofer_nombre} (Legajo: ${legajoNorm || '-'})`);
                         failedUnmatched.push(item);
                     }
                 }
@@ -623,15 +671,28 @@ async function processSyncQueue({ batchLimit = 50, dryRun = false } = {}) {
                     if (rowNum) {
                         const hoyAr = getFechaArgentina();
                         let diaNum = hoyAr.getDate();
+                        let targetYM = { year: hoyAr.getFullYear(), month: hoyAr.getMonth() + 1 };
                         if (item.datos_nuevos?.fecha) {
                             const dateStr = String(item.datos_nuevos.fecha).split('T')[0];
                             const parts = dateStr.split('-');
                             if (parts.length === 3) {
+                                targetYM = { year: parseInt(parts[0], 10), month: parseInt(parts[1], 10) };
                                 diaNum = parseInt(parts[2], 10);
                             } else {
                                 const dObj = new Date(item.datos_nuevos.fecha);
-                                if (!isNaN(dObj.getTime())) diaNum = dObj.getUTCDate();
+                                if (!isNaN(dObj.getTime())) {
+                                    targetYM = { year: dObj.getUTCFullYear(), month: dObj.getUTCMonth() + 1 };
+                                    diaNum = dObj.getUTCDate();
+                                }
                             }
+                        }
+
+                        // Guardia de cruce mensual: no escribir una asignación de otro mes sobre la planilla actual
+                        const tabMovYM = parseMonthYearFromTab(tabMov);
+                        if (tabMovYM && (tabMovYM.year !== targetYM.year || tabMovYM.month !== targetYM.month)) {
+                            console.warn(`   ⏭️ [MOVIMIENTOS] Omitiendo asignación fuera de mes (${targetYM.year}-${targetYM.month}) para pestaña [${tabMov}]`);
+                            successIds.push(item.id);
+                            continue;
                         }
 
                         // Col Chofer en Movimientos: 27 + 13*(dia - 1)
@@ -807,5 +868,7 @@ module.exports = {
     cleanCuil,
     formatToSheetDate,
     colToLetter,
+    getDaysInMonthForTab,
+    parseMonthYearFromTab,
     formatDiasParaSheets
 };

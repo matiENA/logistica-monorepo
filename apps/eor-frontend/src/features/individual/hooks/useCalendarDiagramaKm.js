@@ -1,7 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/api/apiClient';
 import { queryKeys } from '@/api/queryKeys';
-import { supabase } from '@/api/supabaseClient';
+import {
+  parseMesTab,
+  buildUpdatedTira,
+  calcularContabilizador,
+} from '@/utils/diagramaUtils';
+
+export { calcularContabilizador };
 
 const mesesAbrev = [
   'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -27,68 +33,6 @@ export function clasificarIsp(isp) {
   if (val < 1.20) return { nivel: 'verde', label: 'Excelente', color: '#10b981' };
   if (val <= 1.50) return { nivel: 'naranja', label: 'Atención', color: '#f59e0b' };
   return { nivel: 'rojo', label: 'Crítico', color: '#ef4444' };
-}
-
-/**
- * Función canónica para computar el JSON contabilizador a partir de la tira de días
- */
-export function calcularContabilizador(diasArr = []) {
-  let trabajados = 0;
-  let francos = 0;
-  let vacaciones = 0;
-  let ausencias = 0;
-  let inactivos = 0;
-
-  const desglose = {
-    enfermedad: 0,
-    art: 0,
-    indisposicion: 0,
-    suspension: 0,
-    ausencia: 0,
-    permiso: 0,
-    otros: 0,
-  };
-
-  const getBaseState = (val) => {
-    if (!val || val === '-' || val === '0') return '';
-    return String(val).toUpperCase().trim();
-  };
-
-  for (const val of diasArr) {
-    if (!val || val === '-' || val === '0' || val === 'NULL' || val === 'UNDEFINED') {
-      inactivos++;
-      continue;
-    }
-    const base = getBaseState(val);
-    if ((!isNaN(base) && base !== '') || base === 'O' || base === 'OPERATIVO') {
-      trabajados++;
-    } else if (['F', 'FSF', 'FRANCO', 'RPT'].includes(base)) {
-      francos++;
-    } else if (['V', 'VSF', 'VACACIONES'].includes(base)) {
-      vacaciones++;
-    } else if (['E', 'ART', 'IND', 'IIND', 'A', 'S', 'P', 'MED', 'SUSP', 'LIC'].some((k) => base.includes(k))) {
-      ausencias++;
-      if (base === 'E' || base.startsWith('MED')) desglose.enfermedad++;
-      else if (base === 'ART') desglose.art++;
-      else if (base.startsWith('IND')) desglose.indisposicion++;
-      else if (base === 'S' || base.startsWith('SUSP')) desglose.suspension++;
-      else if (base === 'A') desglose.ausencia++;
-      else if (base === 'P') desglose.permiso++;
-      else desglose.otros++;
-    } else {
-      desglose.otros++;
-    }
-  }
-
-  return {
-    total_evaluados: diasArr.length,
-    trabajados,
-    francos,
-    vacaciones,
-    ausencias,
-    inactivos,
-    desglose,
-  };
 }
 
 /**
@@ -195,38 +139,12 @@ export const useUpdateDiagramaRange = (choferId) => {
       if (!choferId) throw new Error('ID de chofer requerido para actualizar diagrama');
       const usuarioActivo = usuario || localStorage.getItem('usuarioActivo') || 'OPERADOR';
 
-      for (const tabKey in updatesPorMes) {
-        let tira = monthsMap[tabKey]?.tira_dias || '';
-        let arr = tira.length > 0 ? tira.split(',') : Array(31).fill('-');
-        while (arr.length < 31) arr.push('-');
-
-        updatesPorMes[tabKey].forEach(({ dia, valor }) => {
-          if (dia >= 1 && dia <= 31) {
-            arr[dia - 1] = valor;
-          }
-        });
-
-        const nuevaTira = arr.join(',');
-        const nuevoContabilizador = calcularContabilizador(arr);
-
-        const { error } = await supabase
-          .from('diagramas')
-          .update({
-            tira_dias: nuevaTira,
-            contabilizador: nuevoContabilizador,
-            actualizado_el: new Date().toISOString(),
-            actualizado_por: usuarioActivo,
-          })
-          .eq('chofer_id', choferId)
-          .eq('mes_tab', tabKey);
-
-        if (error) {
-          console.error(`❌ Error actualizando diagrama en mes ${tabKey}:`, error.message);
-          throw error;
-        }
-      }
-
-      return { success: true };
+      return await apiClient.upsertDiagramaRange({
+        choferId,
+        updatesPorMes,
+        monthsMap,
+        usuario: usuarioActivo,
+      });
     },
 
     // Mutación optimista sincrónica en memoria RAM (<16ms)
@@ -247,16 +165,14 @@ export const useUpdateDiagramaRange = (choferId) => {
         (oldData) => {
           if (!oldData) return oldData;
           const currentMonths = oldData.months || [];
+          const touchedTabs = new Set();
+
           const nextMonths = currentMonths.map((m) => {
             if (!updatesPorMes[m.mes_tab]) return m;
-            let tira = m.tira_dias || '';
-            let arr = tira.length > 0 ? tira.split(',') : Array(31).fill('-');
-            while (arr.length < 31) arr.push('-');
-            updatesPorMes[m.mes_tab].forEach(({ dia, valor }) => {
-              if (dia >= 1 && dia <= 31) {
-                arr[dia - 1] = valor;
-              }
-            });
+            touchedTabs.add(m.mes_tab);
+            const parsed = parseMesTab(m.mes_tab);
+            const daysInMonth = parsed?.daysInMonth || 31;
+            const arr = buildUpdatedTira(m.tira_dias || '', updatesPorMes[m.mes_tab], daysInMonth);
             const nuevaTira = arr.join(',');
             const nuevoContabilizador = calcularContabilizador(arr);
             return {
@@ -265,6 +181,32 @@ export const useUpdateDiagramaRange = (choferId) => {
               contabilizador: nuevoContabilizador,
             };
           });
+
+          // Si el mes (ej. Dic-26 o Ene-27) aún no existía en BD/vista, crear entrada optimista inmediata
+          Object.entries(updatesPorMes).forEach(([tabKey, dayUpdates]) => {
+            if (touchedTabs.has(tabKey)) return;
+            const parsed = parseMesTab(tabKey);
+            if (!parsed) return;
+            const arr = buildUpdatedTira('', dayUpdates, parsed.daysInMonth);
+            nextMonths.push({
+              diagrama_id: `optimistic-${tabKey}`,
+              chofer_id: choferId,
+              mes_tab: parsed.mesTab,
+              anio: parsed.anio,
+              mes_numero: parsed.mesNumero,
+              tira_dias: arr.join(','),
+              contabilizador: calcularContabilizador(arr),
+              km_mes_total: 0,
+              cant_viajes_mes: 0,
+              dias_km: {},
+              icm: null,
+              isp: null,
+              cant_infracciones: 0,
+              tiempo_conduccion_horas: 0,
+            });
+          });
+
+          nextMonths.sort((a, b) => (a.anio - b.anio) || (a.mes_numero - b.mes_numero));
 
           const nextMonthsMap = {};
           nextMonths.forEach((m) => {

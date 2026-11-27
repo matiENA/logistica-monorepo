@@ -439,13 +439,17 @@ app.all(['/sync', '/api/sync', '/api/sync/all'], async (req, res) => {
     try {
         const p = String(req.query?.p || req.body?.particion || req.query?.particion || 'all').toLowerCase();
         const { sincronizarMovimientosDesdeSheets } = require('./routes/movimientos');
-        const { sincronizarDiagramasDesdeSheets } = require('./routes/diagramasSync');
+        const { sincronizarDiagramasDesdeSheets, sincronizarVentanaDiagramasDesdeSheets } = require('./routes/diagramasSync');
         const { sincronizarKmDesdeSheets } = require('./routes/kmSync');
 
         const resultados = {};
+        const reqMesTab = req.body?.mesTab || req.query?.mesTab;
+        const reqAnio = req.body?.anio || req.query?.anio;
 
         if (p === '5' || p === 'diagramas') {
-            resultados.particion_5 = await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, req.body?.mesTab || req.query?.mesTab, req.body?.anio || req.query?.anio);
+            resultados.particion_5 = reqMesTab
+                ? await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, reqMesTab, reqAnio)
+                : await sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash);
         } else if (p === '7' || p === 'km') {
             resultados.particion_7 = await sincronizarKmDesdeSheets(cacheDatosGlobales, io, ioDash);
         } else if (p === '6' || p === 'movimientos') {
@@ -453,7 +457,9 @@ app.all(['/sync', '/api/sync', '/api/sync/all'], async (req, res) => {
         } else {
             // Sincronización completa autónoma (Partición 6, Partición 5 y Partición 7)
             resultados.particion_6 = await sincronizarMovimientosDesdeSheets(cacheDatosGlobales, io, ioDash, req.body?.dia || req.query?.dia);
-            resultados.particion_5 = await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, req.body?.mesTab || req.query?.mesTab, req.body?.anio || req.query?.anio);
+            resultados.particion_5 = reqMesTab
+                ? await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash, reqMesTab, reqAnio)
+                : await sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash);
             resultados.particion_7 = await sincronizarKmDesdeSheets(cacheDatosGlobales, io, ioDash);
         }
 

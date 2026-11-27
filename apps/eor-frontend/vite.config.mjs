@@ -8,9 +8,12 @@ import path from 'path';
 // Las variables se leen del .env de la raiz del proyecto; solo las VITE_* llegan al navegador.
 export default defineConfig(({ mode }) => {
   const rootDir = path.resolve(import.meta.dirname, '../..');
-  const env = loadEnv(mode, rootDir, '');
+  const env = {
+    ...loadEnv(mode, rootDir, ''),
+    ...loadEnv(mode, import.meta.dirname, ''),
+  };
   const port = parseInt(env.FRONT_PORT || '4000', 10);
-  const backend = env.BACKEND_URL || 'http://localhost:4005';
+  const backend = env.BACKEND_URL || 'http://localhost:3005';
 
   return {
     plugins: [react()],

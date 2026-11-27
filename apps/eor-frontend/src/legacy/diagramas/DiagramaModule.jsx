@@ -1,14 +1,27 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/api/supabaseClient';
 import { Calendar, Search } from 'lucide-react';
+import { getCurrentMesTab, getNovedadCode } from '@/utils/diagramaUtils';
+
+const MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+function buildMesesDisponibles() {
+  const now = new Date();
+  const list = [];
+  for (let offset = 1; offset >= -6; offset--) {
+    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    list.push(`${MESES_ABREV[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`);
+  }
+  return list;
+}
 
 export const DiagramaModule = () => {
-  const [mesTab, setMesTab] = useState('Sep-26');
+  const [mesTab, setMesTab] = useState(() => getCurrentMesTab());
   const [servicio, setServicio] = useState('TODOS');
   const [search, setSearch] = useState('');
 
-  const mesesDisponibles = ['Sep-26', 'Ago-26', 'Jul-26', 'Jun-26', 'May-26', 'Abr-26'];
+  const mesesDisponibles = useMemo(() => buildMesesDisponibles(), []);
   const servicios = ['TODOS', 'LIVIANO', 'METANOL', 'CAMPO', 'GLP', 'TDS', 'EURO'];
 
   const { data: diagramas, isLoading, isError, error } = useQuery({
@@ -39,14 +52,7 @@ export const DiagramaModule = () => {
     return matchNom || matchTr;
   });
 
-  const getDayClass = (val) => {
-    if (!val) return '';
-    const v = val.trim().toUpperCase();
-    if (v === 'F' || v.startsWith('F')) return 'franco';
-    if (v === 'V' || v.startsWith('V')) return 'vacaciones';
-    if (['E', 'ART', 'IND', 'S', 'A', 'P', 'MED'].some((k) => v.includes(k))) return 'ausencia';
-    return 'work';
-  };
+  const getDayClass = (val) => `novedad-${getNovedadCode(val)}`;
 
   return (
     <div className="module-container">
@@ -104,7 +110,7 @@ export const DiagramaModule = () => {
           <p style={{ marginTop: '0.5rem', color: 'var(--text-muted)' }}>Cargando diagrama mensual en memoria RAM...</p>
         </div>
       ) : isError ? (
-        <div style={{ padding: '2rem', color: '#dc2626' }}>Error: {error?.message}</div>
+        <div style={{ padding: '2rem', color: 'var(--danger)' }}>Error: {error?.message}</div>
       ) : (
         <div className="data-table-wrapper">
           <table className="data-table diagrama-grid-table">
@@ -141,8 +147,8 @@ export const DiagramaModule = () => {
                         </td>
                       );
                     })}
-                    <td style={{ textAlign: 'center', fontWeight: 800, color: '#1e40af' }}>{d.dias_trabajados}</td>
-                    <td style={{ textAlign: 'center', fontWeight: 800, color: '#64748b' }}>{d.dias_francos}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--novedad-f-text)' }}>{d.dias_trabajados}</td>
+                    <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--text-muted)' }}>{d.dias_francos}</td>
                   </tr>
                 );
               })}

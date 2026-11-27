@@ -1,4 +1,11 @@
 import { supabase } from './supabaseClient';
+import {
+  getCurrentMesTab,
+  parseMesTab,
+  buildUpdatedTira,
+  buildDiasMapFromArray,
+  calcularContabilizador,
+} from '@/utils/diagramaUtils';
 
 const IS_RENDER_HOST =
   typeof window !== 'undefined' &&
@@ -296,6 +303,51 @@ class ApiClient {
     }
   }
 
+  // 6.5 Upsert Atómico de Diagramas (BFF Node.js -> PostgreSQL ON CONFLICT -> eor_sync_queue)
+  async upsertDiagramaRange({ choferId, updatesPorMes, monthsMap = {}, usuario = 'OPERADOR' }) {
+    if (!choferId) throw new Error('choferId requerido para upsert de diagrama');
+    try {
+      const res = await this.fetchJson('/api/diagramas/upsert', {
+        method: 'POST',
+        body: JSON.stringify({ choferId, updatesPorMes, usuario }),
+      });
+      if (res && res.success) {
+        return res;
+      }
+    } catch (err) {
+      console.warn('⚠️ [ApiClient] Fallback a Supabase upsert para diagramas:', err.message);
+    }
+
+    // Fallback directo a Supabase con UPSERT real (incluyendo meses nuevos como Dic-26 / Ene-27)
+    const rowsToUpsert = [];
+    for (const [tabKey, dayUpdates] of Object.entries(updatesPorMes || {})) {
+      const parsed = parseMesTab(tabKey);
+      if (!parsed || !Array.isArray(dayUpdates) || dayUpdates.length === 0) continue;
+
+      const arr = buildUpdatedTira(monthsMap[tabKey]?.tira_dias || '', dayUpdates, parsed.daysInMonth);
+      rowsToUpsert.push({
+        chofer_id: choferId,
+        mes_tab: parsed.mesTab,
+        anio: parsed.anio,
+        mes_numero: parsed.mesNumero,
+        dias: buildDiasMapFromArray(arr, parsed.anio, parsed.mesNumero),
+        tira_dias: arr.join(','),
+        contabilizador: calcularContabilizador(arr),
+        actualizado_el: new Date().toISOString(),
+        actualizado_por: usuario,
+      });
+    }
+
+    if (rowsToUpsert.length > 0) {
+      const { error } = await supabase
+        .from('diagramas')
+        .upsert(rowsToUpsert, { onConflict: 'chofer_id,anio,mes_numero' });
+      if (error) throw error;
+    }
+
+    return { success: true, fuente: 'SUPABASE_UPSERT_FALLBACK' };
+  }
+
   async invalidateCalendario(choferId = null) {
     try {
       return await this.fetchJson('/api/views/invalidate-calendario', {
@@ -376,7 +428,7 @@ class ApiClient {
   }
 
   // 8. Grilla Operativa Mensual de Diagrama
-  async getDiagramaMensual(mesTab = 'Sep-26', servicio = 'TODOS', search = '') {
+  async getDiagramaMensual(mesTab = getCurrentMesTab(), servicio = 'TODOS', search = '') {
     try {
       const params = new URLSearchParams();
       params.set('mesTab', mesTab);

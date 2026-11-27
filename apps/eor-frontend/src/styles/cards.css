@@ -1229,79 +1229,80 @@ html.dark .daily-km-hr {
   border: 1px solid var(--border-subtle);
 }
 
-.daily-day-badge.day-badge-franco {
-  background-color: #b6d7a8;
-  color: #14532d;
-  border: 1px solid #86efac;
+.daily-day-badge.novedad-f {
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1px solid var(--novedad-f-border);
 }
 
-.daily-day-badge.day-badge-vacaciones {
-  background-color: #ffe599;
-  color: #78350f;
-  border: 1px solid #fde047;
+.daily-day-badge.novedad-fsf {
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1.5px dashed var(--novedad-f-border);
 }
 
-.daily-day-badge.day-badge-licencia {
-  background-color: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+.daily-day-badge.novedad-v {
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1px solid var(--novedad-v-border);
 }
 
-.daily-day-badge.day-badge-operativo {
-  background-color: #eff6ff;
-  color: #1d4ed8;
-  border: 2px solid #3b82f6;
+.daily-day-badge.novedad-vsf {
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1.5px dashed var(--novedad-v-border);
+}
+
+.daily-day-badge.novedad-act {
+  background-color: var(--novedad-act-bg);
+  color: var(--novedad-act-text);
+  border: 2px solid var(--novedad-act-border);
   font-weight: 800;
 }
 
-.daily-day-badge.day-badge-operativo.fatiga-warn {
-  background-color: #fff7ed;
-  color: #c2410c;
-  border: 2.5px solid #f97316;
+.daily-day-badge.novedad-e {
+  background-color: var(--novedad-e-bg);
+  color: var(--novedad-e-text);
+  border: 1px solid var(--novedad-e-border);
+}
+
+.daily-day-badge.novedad-a {
+  background-color: var(--novedad-a-bg);
+  color: var(--novedad-a-text);
+  border: 1px solid var(--novedad-a-border);
+  font-weight: 800;
+}
+
+.daily-day-badge.novedad-art {
+  background-color: var(--novedad-art-bg);
+  color: var(--novedad-art-text);
+  border: 1px solid var(--novedad-art-border);
+}
+
+.daily-day-badge.novedad-s {
+  background-color: var(--novedad-s-bg);
+  color: var(--novedad-s-text);
+  border: 1px solid var(--novedad-s-border);
+}
+
+.daily-day-badge.novedad-ind {
+  background-color: var(--novedad-ind-bg);
+  color: var(--novedad-ind-text);
+  border: 1px solid var(--novedad-ind-border);
+}
+
+.daily-day-badge.novedad-act.fatiga-warn {
+  background-color: var(--novedad-s-bg);
+  color: var(--novedad-s-text);
+  border: 2.5px solid var(--novedad-s);
   font-weight: 900;
 }
 
-.daily-day-badge.day-badge-operativo.fatiga-crit {
-  background-color: #fef2f2;
-  color: #b91c1c;
-  border: 2.5px solid #ef4444;
+.daily-day-badge.novedad-act.fatiga-crit {
+  background-color: var(--novedad-a-bg);
+  color: var(--novedad-a-text);
+  border: 2.5px solid var(--novedad-a);
   font-weight: 900;
-}
-
-html.dark .daily-day-badge.day-badge-franco {
-  background-color: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-  border: 1px solid rgba(34, 197, 94, 0.4);
-}
-
-html.dark .daily-day-badge.day-badge-vacaciones {
-  background-color: rgba(234, 179, 8, 0.18);
-  color: #fde047;
-  border: 1px solid rgba(234, 179, 8, 0.4);
-}
-
-html.dark .daily-day-badge.day-badge-licencia {
-  background-color: rgba(239, 68, 68, 0.18);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-}
-
-html.dark .daily-day-badge.day-badge-operativo {
-  background-color: rgba(59, 130, 246, 0.18);
-  color: #93c5fd;
-  border: 2px solid rgba(59, 130, 246, 0.5);
-}
-
-html.dark .daily-day-badge.day-badge-operativo.fatiga-warn {
-  background-color: rgba(249, 115, 22, 0.2);
-  color: #fdba74;
-  border: 2.5px solid #f97316;
-}
-
-html.dark .daily-day-badge.day-badge-operativo.fatiga-crit {
-  background-color: rgba(239, 68, 68, 0.22);
-  color: #fca5a5;
-  border: 2.5px solid #ef4444;
 }
 
 .daily-day-badge-val {

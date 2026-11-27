@@ -117,13 +117,14 @@ async function resolveTabNameMovimientos(spreadsheetId, fallbackName = "NOVIEMBR
     }
 }
 
-async function resolveTabNameDiagramas(spreadsheetId, fallbackName = "Sep-26") {
+async function resolveTabNameDiagramas(spreadsheetId, fallbackName = null) {
+    const hoyAr = getFechaArgentina();
+    const mesAbrev = mesesAbrev[hoyAr.getMonth()];
+    const anioAbrev = String(hoyAr.getFullYear()).slice(-2);
+    const expectedTab = `${mesAbrev}-${anioAbrev}`;
+    const resolvedFallback = fallbackName || expectedTab;
     try {
         const titles = await getSheetTitles(spreadsheetId);
-        const hoyAr = getFechaArgentina();
-        const mesAbrev = mesesAbrev[hoyAr.getMonth()];
-        const anioAbrev = String(hoyAr.getFullYear()).slice(-2);
-        const expectedTab = `${mesAbrev}-${anioAbrev}`;
 
         const foundExact = titles.find(t => t.toLowerCase() === expectedTab.toLowerCase());
         if (foundExact) return foundExact;
@@ -131,10 +132,10 @@ async function resolveTabNameDiagramas(spreadsheetId, fallbackName = "Sep-26") {
         const foundPartial = titles.find(t => t.toLowerCase().includes(mesAbrev.toLowerCase()) && t.includes(anioAbrev));
         if (foundPartial) return foundPartial;
 
-        return fallbackName;
+        return resolvedFallback;
     } catch (err) {
         console.warn('⚠️ No se pudo resolver automáticamente la pestaña de Diagramas:', err.message);
-        return fallbackName;
+        return resolvedFallback;
     }
 }
 

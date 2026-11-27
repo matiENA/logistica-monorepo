@@ -904,93 +904,70 @@ html.dark .calendar-day-cell.fatiga-crit {
   color: #fca5a5;
 }
 
-.calendar-day-cell.status-activo {
-  background-color: #eff6ff;
-  border: 2px solid #3b82f6;
-  color: #1d4ed8;
+.calendar-day-cell.novedad-act {
+  background-color: var(--novedad-act-bg);
+  border: 1.5px solid var(--novedad-act-border);
+  color: var(--novedad-act-text);
   font-weight: 800;
 }
 
-html.dark .calendar-day-cell.status-activo {
-  background-color: rgba(59, 130, 246, 0.18);
-  border-color: #60a5fa;
-  color: #93c5fd;
+.calendar-day-cell.novedad-f {
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1px solid var(--novedad-f-border);
 }
 
-.calendar-day-cell.status-franco {
-  background-color: #b6d7a8;
-  color: #1e293b;
-  border: 1px solid #93c5fd00;
+.calendar-day-cell.novedad-fsf {
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1.5px dashed var(--novedad-f-border);
 }
 
-html.dark .calendar-day-cell.status-franco {
-  background-color: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.40);
+.calendar-day-cell.novedad-v {
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1px solid var(--novedad-v-border);
 }
 
-.calendar-day-cell.status-fsf {
-  background-color: #b6d7a8;
-  color: #1e293b;
-  border: 1px solid #93c5fd00;
+.calendar-day-cell.novedad-vsf {
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1.5px dashed var(--novedad-v-border);
 }
 
-html.dark .calendar-day-cell.status-fsf {
-  background-color: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.40);
+.calendar-day-cell.novedad-e {
+  background-color: var(--novedad-e-bg);
+  color: var(--novedad-e-text);
+  border: 1px solid var(--novedad-e-border);
 }
 
-.calendar-day-cell.status-vacaciones {
-  background-color: #ffe599;
-  color: #1e293b;
-  border: 1px solid #93c5fd00;
-}
-
-html.dark .calendar-day-cell.status-vacaciones {
-  background-color: rgba(234, 179, 8, 0.18);
-  color: #fde047;
-  border-color: rgba(234, 179, 8, 0.40);
-}
-
-.calendar-day-cell.status-vsf {
-  background-color: #ffe599;
-  color: #1e293b;
-  border: 1px solid #93c5fd00;
-}
-
-html.dark .calendar-day-cell.status-vsf {
-  background-color: rgba(234, 179, 8, 0.18);
-  color: #fde047;
-  border-color: rgba(234, 179, 8, 0.40);
-}
-
-.calendar-day-cell.status-ausencia {
-  background-color: #e06666;
-  color: #450a0a;
-  border: 1px solid #93c5fd00;
-}
-
-html.dark .calendar-day-cell.status-ausencia {
-  background-color: rgba(239, 68, 68, 0.20);
-  color: #fca5a5;
-  border-color: rgba(239, 68, 68, 0.42);
-}
-
-.calendar-day-cell.status-ind {
-  background-color: var(--novedad-ind-bg, #f1f5f9);
-  color: var(--novedad-ind-text, #334155);
-  border: 1px solid var(--novedad-ind-border, #cbd5e1);
+.calendar-day-cell.novedad-a {
+  background-color: var(--novedad-a-bg);
+  color: var(--novedad-a-text);
+  border: 1px solid var(--novedad-a-border);
   font-weight: 800;
 }
 
-html.dark .calendar-day-cell.status-ind {
-  background-color: var(--novedad-ind-bg, rgba(100, 116, 139, 0.20));
-  color: var(--novedad-ind-text, #cbd5e1);
-  border-color: var(--novedad-ind-border, rgba(148, 163, 184, 0.35));
+.calendar-day-cell.novedad-art {
+  background-color: var(--novedad-art-bg);
+  color: var(--novedad-art-text);
+  border: 1px solid var(--novedad-art-border);
 }
 
-.calendar-day-cell.status-default {
+.calendar-day-cell.novedad-s {
+  background-color: var(--novedad-s-bg);
+  color: var(--novedad-s-text);
+  border: 1px solid var(--novedad-s-border);
+}
+
+.calendar-day-cell.novedad-ind {
+  background-color: var(--novedad-ind-bg);
+  color: var(--novedad-ind-text);
+  border: 1px solid var(--novedad-ind-border);
+  font-weight: 800;
+}
+
+.calendar-day-cell.novedad-default {
   background-color: var(--bg-surface-muted);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
@@ -1401,103 +1378,53 @@ html.dark .btn-range-activo:hover:not(:disabled) {
 }
 
 .btn-range-franco {
-  background-color: #b6d7a8;
-  color: #1e293b;
-  border: 1px solid #86efac;
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1px solid var(--novedad-f-border);
 }
 
 .btn-range-franco:hover:not(:disabled) {
-  background-color: #a3cc93;
-}
-
-html.dark .btn-range-franco {
-  background-color: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.4);
-}
-
-html.dark .btn-range-franco:hover:not(:disabled) {
-  background-color: rgba(34, 197, 94, 0.28);
+  filter: brightness(0.95);
 }
 
 .btn-range-fsf {
-  background-color: #b6d7a8;
-  color: #1e293b;
-  border: 1px solid #86efac;
+  background-color: var(--novedad-f-bg);
+  color: var(--novedad-f-text);
+  border: 1.5px dashed var(--novedad-f-border);
 }
 
 .btn-range-fsf:hover:not(:disabled) {
-  background-color: #a3cc93;
-}
-
-html.dark .btn-range-fsf {
-  background-color: rgba(34, 197, 94, 0.18);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.4);
-}
-
-html.dark .btn-range-fsf:hover:not(:disabled) {
-  background-color: rgba(34, 197, 94, 0.28);
+  filter: brightness(0.95);
 }
 
 .btn-range-vacaciones {
-  background-color: #ffe599;
-  color: #1e293b;
-  border: 1px solid #fde047;
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1px solid var(--novedad-v-border);
 }
 
 .btn-range-vacaciones:hover:not(:disabled) {
-  background-color: #fcd777;
-}
-
-html.dark .btn-range-vacaciones {
-  background-color: rgba(234, 179, 8, 0.18);
-  color: #fde047;
-  border-color: rgba(234, 179, 8, 0.4);
-}
-
-html.dark .btn-range-vacaciones:hover:not(:disabled) {
-  background-color: rgba(234, 179, 8, 0.28);
+  filter: brightness(0.95);
 }
 
 .btn-range-vsf {
-  background-color: #ffe599;
-  color: #1e293b;
-  border: 1px solid #fde047;
+  background-color: var(--novedad-v-bg);
+  color: var(--novedad-v-text);
+  border: 1.5px dashed var(--novedad-v-border);
 }
 
 .btn-range-vsf:hover:not(:disabled) {
-  background-color: #fcd777;
-}
-
-html.dark .btn-range-vsf {
-  background-color: rgba(234, 179, 8, 0.18);
-  color: #fde047;
-  border-color: rgba(234, 179, 8, 0.4);
-}
-
-html.dark .btn-range-vsf:hover:not(:disabled) {
-  background-color: rgba(234, 179, 8, 0.28);
+  filter: brightness(0.95);
 }
 
 .btn-range-licencia {
-  background-color: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+  background-color: var(--novedad-e-bg);
+  color: var(--novedad-e-text);
+  border: 1px solid var(--novedad-e-border);
 }
 
 .btn-range-licencia:hover:not(:disabled) {
-  background-color: #fecaca;
-}
-
-html.dark .btn-range-licencia {
-  background-color: rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
-  border-color: rgba(248, 113, 113, 0.4);
-}
-
-html.dark .btn-range-licencia:hover:not(:disabled) {
-  background-color: rgba(239, 68, 68, 0.3);
+  filter: brightness(0.95);
 }
 
 .btn-range-limpiar {

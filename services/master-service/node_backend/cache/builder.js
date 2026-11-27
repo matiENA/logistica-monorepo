@@ -1830,12 +1830,12 @@ function iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash) {
         }, 5 * 60 * 1000);
     }, 15 * 1000); // Primer barrido a los 15s tras el arranque
 
-    // 📅 Sincronización autónoma de Partición 5 (Días Diagrama - EOR)
+    // 📅 Sincronización autónoma de Partición 5 (Días Diagrama - EOR: Mes vigente + próximo mes disponible)
     setTimeout(() => {
         try {
-            const { sincronizarDiagramasDesdeSheets } = require('../routes/diagramasSync');
-            console.log("🚀 [Partición 5 Auto-Sync] Disparando barrido inicial de Días Diagrama...");
-            sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash).catch(e => {
+            const { sincronizarVentanaDiagramasDesdeSheets } = require('../routes/diagramasSync');
+            console.log("🚀 [Partición 5 Auto-Sync] Disparando barrido inicial de Días Diagrama (ventana activa)...");
+            sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash).catch(e => {
                 console.warn("⚠️ [Partición 5 Auto-Sync] Advertencia en ciclo inicial:", e.message);
             });
         } catch (eReq) {
@@ -1844,9 +1844,9 @@ function iniciarParticionesAutoSync(cacheDatosGlobales, io, ioDash) {
 
         setInterval(async () => {
             try {
-                console.log("⏱️ [Partición 5 Auto-Sync] Sincronizando Días Diagrama desde Google Sheets...");
-                const { sincronizarDiagramasDesdeSheets } = require('../routes/diagramasSync');
-                await sincronizarDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash);
+                console.log("⏱️ [Partición 5 Auto-Sync] Sincronizando Días Diagrama (ventana activa) desde Google Sheets...");
+                const { sincronizarVentanaDiagramasDesdeSheets } = require('../routes/diagramasSync');
+                await sincronizarVentanaDiagramasDesdeSheets(cacheDatosGlobales, io, ioDash);
             } catch (eSync) {
                 console.warn("⚠️ [Partición 5 Auto-Sync] Error en ciclo periódico:", eSync.message);
             }
