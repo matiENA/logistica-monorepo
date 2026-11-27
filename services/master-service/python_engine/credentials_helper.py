@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Optional, List
 from google.oauth2.service_account import Credentials
 
-# Prevenir caídas por timeout en llamadas pesadas a Google Sheets (configurable por SOCKET_TIMEOUT, default 600s / 10m)
-SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "600"))
+# Prevenir caídas por timeout en llamadas pesadas a Google Sheets (configurable por SOCKET_TIMEOUT, default 1200s / 20m)
+SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "1200"))
 socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
 DEFAULT_SCOPES = [

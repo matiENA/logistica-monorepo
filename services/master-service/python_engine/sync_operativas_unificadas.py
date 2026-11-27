@@ -43,11 +43,11 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-# Prevenir caídas por timeout de sockets en Google API (configurable vía SOCKET_TIMEOUT, default 600s / 10m)
-SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "600"))
+# Prevenir caídas por timeout de sockets en Google API (configurable vía SOCKET_TIMEOUT, default 1200s / 20m)
+SOCKET_TIMEOUT = int(os.getenv("SOCKET_TIMEOUT", "1200"))
 socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
-def api_call_with_retry(api_req: Any, max_retries: int = 5, initial_delay: float = 5.0) -> Any:
+def api_call_with_retry(api_req: Any, max_retries: int = 8, initial_delay: float = 5.0) -> Any:
     """
     Ejecuta una petición de Google Sheets API con reintento automático y backoff exponencial
     ante errores 500, 502 (Bad Gateway), 503, 504, caídas de gateway, socket timeouts o micro-cortes.

@@ -171,7 +171,7 @@ function fechaBaseDesdeTitulo(titulo) {
 
 async function getSheetsInstance() {
   const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
-  google.options({ timeout: 300000 });
+  google.options({ timeout: 1200000 });
 
   // 1. Variable de entorno con JSON string o Base64 (estándar para Render Cloud)
   const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_CREDENTIALS_JSON;

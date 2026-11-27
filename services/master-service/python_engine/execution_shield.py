@@ -67,7 +67,7 @@ class ExecutionShield:
             # Trabajo protegido
             ...
     """
-    def __init__(self, task_name: str = "Sincronización", max_age_seconds: int = 300):
+    def __init__(self, task_name: str = "Sincronización", max_age_seconds: int = 3600):
         self.task_name = task_name
         self.max_age_seconds = max_age_seconds
         self.acquired = False

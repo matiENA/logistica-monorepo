@@ -23,6 +23,26 @@ services:
         value: America/Argentina/Buenos_Aires
       - key: ENABLE_SCHEDULER
         value: "true"
+      - key: DEFAULT_TASK_TIMEOUT
+        value: "3600"
+      - key: SOCKET_TIMEOUT
+        value: "1200"
+      - key: TIMEOUT_POLL_VACIO
+        value: "3600"
+      - key: TIMEOUT_DISPO
+        value: "3600"
+      - key: TIMEOUT_UNIFIED
+        value: "3600"
+      - key: TIMEOUT_ALL
+        value: "3600"
+      - key: TIMEOUT_CORDILLERA
+        value: "1800"
+      - key: TIMEOUT_CONF_VIAJE
+        value: "1800"
+      - key: TIMEOUT_BAJAS
+        value: "1800"
+      - key: TIMEOUT_LIMPIAR
+        value: "1800"
       - key: NODE_TLS_REJECT_UNAUTHORIZED
         value: "0"
       # Conexión Directa a PostgreSQL (Pooler puerto 6543)

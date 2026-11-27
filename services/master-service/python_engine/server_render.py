@@ -76,24 +76,24 @@ EXECUTION_STATE: Dict[str, Any] = {
 EXECUTION_LOCK = threading.Lock()
 
 # ==============================================================================
-# CONFIGURACIÓN RESILIENTE DE TIMEOUTS Y MÁRGENES (CONFIGURABLE POR ENV VARS)
+# CONFIGURACIÓN RESILIENTE DE TIMEOUTS Y MÁRGENES MÁXIMOS (CONFIGURABLE POR ENV VARS)
 # ==============================================================================
-# Margen general ampliado por defecto a 1800s (30 min) para evitar cortes prematuros
-# en planillas extensas (ej. análisis multi-día, rotaciones de fin de mes o cuellos de botella).
-DEFAULT_TASK_TIMEOUT = int(os.getenv("DEFAULT_TASK_TIMEOUT", "1800"))
+# Margen general ampliado al máximo seguro (3600s / 60 min) para cubrir holgadamente
+# Merge Virtual dual-month, pintado dual de disponibilidad y recálculos pesados de Google Sheets.
+DEFAULT_TASK_TIMEOUT = int(os.getenv("DEFAULT_TASK_TIMEOUT", "3600"))
 
 BASE_TIMEOUTS: Dict[str, int] = {
-    "poll_vacio": int(os.getenv("TIMEOUT_POLL_VACIO", "1800")),     # 30 min (cubre holgadamente escaneos pesados de ~880s)
-    "unified": int(os.getenv("TIMEOUT_UNIFIED", "1800")),           # 30 min
-    "all": int(os.getenv("TIMEOUT_ALL", "1800")),                   # 30 min
-    "cordillera": int(os.getenv("TIMEOUT_CORDILLERA", "600")),      # 10 min (antes 5 min)
-    "conf_viaje": int(os.getenv("TIMEOUT_CONF_VIAJE", "600")),      # 10 min (antes 5 min)
-    "tracking": int(os.getenv("TIMEOUT_TRACKING", "600")),          # 10 min (antes 5 min)
-    "vacio": int(os.getenv("TIMEOUT_VACIO", "600")),                # 10 min (antes 5 min)
-    "seguimiento": int(os.getenv("TIMEOUT_SEGUIMIENTO", "600")),    # 10 min (antes 5 min)
-    "dispo": int(os.getenv("TIMEOUT_DISPO", "600")),                # 10 min (antes 3 min)
-    "bajas": int(os.getenv("TIMEOUT_BAJAS", "600")),                # 10 min (antes 3 min)
-    "limpiar": int(os.getenv("TIMEOUT_LIMPIAR", "600"))             # 10 min (antes 5 min)
+    "poll_vacio": int(os.getenv("TIMEOUT_POLL_VACIO", "3600")),     # 60 min (cubre Merge Virtual Nov+Dic)
+    "unified": int(os.getenv("TIMEOUT_UNIFIED", "3600")),           # 60 min
+    "all": int(os.getenv("TIMEOUT_ALL", "3600")),                   # 60 min
+    "dispo": int(os.getenv("TIMEOUT_DISPO", "3600")),               # 60 min (cubre pintado dual Nov+Dic)
+    "cordillera": int(os.getenv("TIMEOUT_CORDILLERA", "1800")),     # 30 min
+    "conf_viaje": int(os.getenv("TIMEOUT_CONF_VIAJE", "1800")),     # 30 min
+    "tracking": int(os.getenv("TIMEOUT_TRACKING", "1800")),         # 30 min
+    "vacio": int(os.getenv("TIMEOUT_VACIO", "1800")),               # 30 min
+    "seguimiento": int(os.getenv("TIMEOUT_SEGUIMIENTO", "1800")),   # 30 min
+    "bajas": int(os.getenv("TIMEOUT_BAJAS", "1800")),               # 30 min
+    "limpiar": int(os.getenv("TIMEOUT_LIMPIAR", "1800"))            # 30 min
 }
 
 def get_timeout_for_task(key: str, override_timeout: Optional[int] = None) -> int:
@@ -463,7 +463,7 @@ def get_status():
     return {
         "time": datetime.now().isoformat(),
         "default_task_timeout_seconds": DEFAULT_TASK_TIMEOUT,
-        "socket_timeout_seconds": int(os.getenv("SOCKET_TIMEOUT", "600")),
+        "socket_timeout_seconds": int(os.getenv("SOCKET_TIMEOUT", "1200")),
         "configured_timeouts_seconds": {k: get_timeout_for_task(k) for k in BASE_TIMEOUTS},
         "tasks": EXECUTION_STATE
     }
