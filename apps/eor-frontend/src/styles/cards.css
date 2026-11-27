@@ -1292,16 +1292,16 @@ html.dark .daily-km-hr {
 }
 
 .daily-day-badge.novedad-act.fatiga-warn {
-  background-color: var(--novedad-s-bg);
-  color: var(--novedad-s-text);
-  border: 2.5px solid var(--novedad-s);
+  background-color: var(--fatiga-warn-bg);
+  color: var(--fatiga-warn-text);
+  border: 2px solid var(--fatiga-warn-border);
   font-weight: 900;
 }
 
 .daily-day-badge.novedad-act.fatiga-crit {
-  background-color: var(--novedad-a-bg);
-  color: var(--novedad-a-text);
-  border: 2.5px solid var(--novedad-a);
+  background-color: var(--fatiga-crit-bg);
+  color: var(--fatiga-crit-text);
+  border: 2px solid var(--fatiga-crit-border);
   font-weight: 900;
 }
 

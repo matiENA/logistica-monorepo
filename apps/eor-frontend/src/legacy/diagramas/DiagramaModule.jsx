@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/api/supabaseClient';
 import { Calendar, Search } from 'lucide-react';
-import { getCurrentMesTab, getNovedadCode } from '@/utils/diagramaUtils';
+import { getCurrentMesTab, getDiagramaStatusClasses } from '@/utils/diagramaUtils';
 
 const MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
@@ -52,7 +52,7 @@ export const DiagramaModule = () => {
     return matchNom || matchTr;
   });
 
-  const getDayClass = (val) => `novedad-${getNovedadCode(val)}`;
+  const getDayClass = (val) => getDiagramaStatusClasses(val);
 
   return (
     <div className="module-container">

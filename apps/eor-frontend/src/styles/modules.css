@@ -276,6 +276,8 @@ html.dark .badge-flota-diag-empty {
 }
 
 .day-badge.novedad-act { background-color: var(--novedad-act-bg); color: var(--novedad-act-text); border: 1px solid var(--novedad-act-border); }
+.day-badge.novedad-act.fatiga-warn { background-color: var(--fatiga-warn-bg); color: var(--fatiga-warn-text); border: 1.5px solid var(--fatiga-warn-border); font-weight: 900; }
+.day-badge.novedad-act.fatiga-crit { background-color: var(--fatiga-crit-bg); color: var(--fatiga-crit-text); border: 1.5px solid var(--fatiga-crit-border); font-weight: 900; }
 .day-badge.novedad-f { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border: 1px solid var(--novedad-f-border); font-weight: 800; }
 .day-badge.novedad-fsf { background-color: var(--novedad-f-bg); color: var(--novedad-f-text); border: 1.5px dashed var(--novedad-f-border); font-weight: 800; }
 .day-badge.novedad-v { background-color: var(--novedad-v-bg); color: var(--novedad-v-text); border: 1px solid var(--novedad-v-border); }

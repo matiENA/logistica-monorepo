@@ -81,6 +81,30 @@ function guardarConfig(cfg) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
 }
 
+function resolverPlanillasActivas(cfg = null) {
+  const envMulti = process.env.DISPO_SPREADSHEET_IDS;
+  if (envMulti && envMulti.trim()) {
+    const ids = envMulti
+      .split(',')
+      .map(s => {
+        const m = s.trim().match(/\/d\/([a-zA-Z0-9-_]+)/);
+        return m ? m[1] : s.trim();
+      })
+      .filter(Boolean);
+    if (ids.length > 0) return [...new Set(ids)];
+  }
+
+  const config = cfg || cargarConfig();
+  if (Array.isArray(config.spreadsheetIdsActivos) && config.spreadsheetIdsActivos.length > 0) {
+    const ids = config.spreadsheetIdsActivos
+      .map(s => String(s || '').trim())
+      .filter(Boolean);
+    if (ids.length > 0) return [...new Set(ids)];
+  }
+
+  return config.spreadsheetId ? [config.spreadsheetId] : [];
+}
+
 const DEFAULTS = {
   uniQMSheet: 'base datos Uni QM',
   serviciosHeaders: [
@@ -521,6 +545,7 @@ async function ejecutarPintado(options = {}, onLog = null) {
 module.exports = {
   cargarConfig,
   guardarConfig,
+  resolverPlanillasActivas,
   inspeccionarPlanilla,
   ejecutarPintado,
   getSheetsInstance,

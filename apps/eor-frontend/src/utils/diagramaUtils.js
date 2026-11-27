@@ -77,6 +77,23 @@ export function getNovedadCode(val) {
   return 'default';
 }
 
+/**
+ * Devuelve las clases CSS canónicas de estado y fatiga para cualquier celda/badge
+ * (Calendario Individual, Vista Diaria y Grilla Mensual).
+ */
+export function getDiagramaStatusClasses(val) {
+  const code = getNovedadCode(val);
+  if (code === 'act' && val) {
+    const base = getBaseState(val);
+    const num = parseInt(base, 10);
+    if (!isNaN(num)) {
+      if (num >= 22) return 'novedad-act fatiga-crit';
+      if (num >= 18) return 'novedad-act fatiga-warn';
+    }
+  }
+  return `novedad-${code}`;
+}
+
 export function calcularContabilizador(diasArr = []) {
   let trabajados = 0;
   let francos = 0;

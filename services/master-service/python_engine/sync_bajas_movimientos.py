@@ -100,6 +100,9 @@ OCTUBRE_TAB_NAME = "OCTUBRE 2026- Mov.Unidades y Choferes"
 NOVIEMBRE_MOV_ID = "1z66kNDjMki1k9csQevuyhfz50dYoHrQro4wPj-Yt-hc"
 NOVIEMBRE_TAB_NAME = "NOVIEMBRE 2026- Mov.Unidades y Choferes"
 
+DICIEMBRE_MOV_ID = "14QpWY9KvOVj2Yinn5F1hOiSkTxASYwLc-Cd7F2rFO_k"
+DICIEMBRE_TAB_NAME = "DICIEMBRE 2026- Mov.Unidades y Choferes"
+
 MESES_ES = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
@@ -251,7 +254,9 @@ def resolver_hoja_para_fecha(dt: date, config: Dict[str, Any]) -> Tuple[str, str
         if ym_env == (dt.year, dt.month):
             return env_mov_id, env_tab_name
 
-    # 3. Fallbacks estáticos históricos
+    # 3. Fallbacks estáticos históricos / puente
+    if dt.year == 2026 and dt.month == 12:
+        return DICIEMBRE_MOV_ID, DICIEMBRE_TAB_NAME
     if dt.year == 2026 and dt.month == 11:
         return NOVIEMBRE_MOV_ID, NOVIEMBRE_TAB_NAME
     if dt.year == 2026 and dt.month == 10:
@@ -517,6 +522,13 @@ class BajasDiagramaSync:
             while cur_date <= f_obj:
                 dia_num = cur_date.day
                 sheet_id, tab_name = resolver_hoja_para_fecha(cur_date, self.config)
+
+                # Guardia de cruce mensual: no escribir días de un mes futuro aún no rotado sobre la planilla del mes actual
+                tab_ym = _parse_mes_anio(tab_name)
+                if tab_ym and tab_ym != (cur_date.year, cur_date.month):
+                    cur_date += timedelta(days=1)
+                    continue
+
                 sheet_id_num = self.get_sheet_id_num(sheet_id, tab_name)
                 map_ute_to_row, map_tractor_to_row = self.get_units_row_map(sheet_id, tab_name)
 

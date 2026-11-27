@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Disclosure, DisclosureButton, DisclosurePanel, Transition } from '@headlessui/react';
 import { ChevronDown, ChevronUp, Copy, Check, MessageCircle, AlertTriangle, Truck, ExternalLink, Calendar, ShieldAlert } from 'lucide-react';
 import { getDriverDayStatus, calculateDriverReturn } from '../hooks/useDailyDrivers';
+import { getDiagramaStatusClasses } from '@/utils/diagramaUtils';
 import { UnitAssignModal } from '@/features/flota/components/UnitAssignModal';
 import { copyToClipboard } from '@/utils/clipboard';
 import { buildUnifiedVencimientos } from '@/utils/vencimientosHelper';
@@ -59,9 +60,12 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
     }
   };
 
-  // 4. Semáforo cromático del Badge de Estado (gobernado por tokens --novedad-* en theme.css / cards.css)
-  const badgeTypeClass = `novedad-${dayStatus.novedadCode || 'default'}`;
-  const badgeFatigaClass = dayStatus.cons >= 22 ? 'fatiga-crit' : dayStatus.cons >= 18 ? 'fatiga-warn' : '';
+  // 4. Semáforo cromático del Badge de Estado (misma regla canónica que Calendario, gobernada por theme.css)
+  const rawStatusClasses = getDiagramaStatusClasses(dayStatus.raw);
+  const badgeStatusClasses =
+    rawStatusClasses === 'novedad-default' && dayStatus.novedadCode && dayStatus.novedadCode !== 'default'
+      ? `novedad-${dayStatus.novedadCode}`
+      : rawStatusClasses;
 
   // Helper para fechas legibles
   const fmtDate = (d) => {
@@ -315,7 +319,7 @@ export const DailyDriverCard = ({ driver, fechaContexto, kmInfo, onSelectDriver,
 
                 {/* Badge Principal del Estado del Día (Fatiga / F / V / IND) */}
                 <div
-                  className={`daily-day-badge ${badgeTypeClass} ${badgeFatigaClass}`}
+                  className={`daily-day-badge ${badgeStatusClasses}`}
                   title={`Estado: ${dayStatus.raw} (${dayStatus.type}) • Fecha: ${displayDate}${driver.diagrama_tipo ? ' • Tipo: ' + driver.diagrama_tipo : ''}`}
                 >
                   <span className="daily-day-badge-val">{dayStatus.raw}</span>

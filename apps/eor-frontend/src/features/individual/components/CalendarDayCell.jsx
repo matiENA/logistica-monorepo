@@ -1,5 +1,5 @@
 import React from 'react';
-import { getNovedadCode } from '@/utils/diagramaUtils';
+import { getDiagramaStatusClasses } from '@/utils/diagramaUtils';
 
 export const CalendarDayCell = ({
   dayNum,
@@ -13,19 +13,7 @@ export const CalendarDayCell = ({
   kmTooltip,
   onClick,
 }) => {
-  const getStatusClass = (val) => {
-    const code = getNovedadCode(val);
-    if (code === 'act' && val) {
-      const num = parseInt(String(val).trim(), 10);
-      if (!isNaN(num)) {
-        if (num >= 22) return 'novedad-act fatiga-crit';
-        if (num >= 18) return 'novedad-act fatiga-warn';
-      }
-    }
-    return `novedad-${code}`;
-  };
-
-  const statusClass = getStatusClass(rawStatus);
+  const statusClass = getDiagramaStatusClasses(rawStatus);
 
   return (
     <div

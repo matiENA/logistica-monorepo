@@ -51,10 +51,10 @@
   /* ==============================================================
      🎨 NOVEDADES Y ESTADOS DE DIAGRAMA (EOR DESIGN SYSTEM)
      ============================================================== */
-  --novedad-f: #3b82f6;
-  --novedad-f-bg: #eff6ff;
-  --novedad-f-text: #1d4ed8;
-  --novedad-f-border: #bfdbfe;
+  --novedad-f: #059669;
+  --novedad-f-bg: #f0fdf4;
+  --novedad-f-text: #166534;
+  --novedad-f-border: #bbf7d0;
 
   --novedad-e: #f43f5e;
   --novedad-e-bg: #ffe4e6;
@@ -66,10 +66,19 @@
   --novedad-v-text: #065f46;
   --novedad-v-border: #a7f3d0;
 
-  --novedad-act: #059669;
-  --novedad-act-bg: #f0fdf4;
-  --novedad-act-text: #166534;
-  --novedad-act-border: #bbf7d0;
+  --novedad-act: #3b82f6;
+  --novedad-act-bg: #eff6ff;
+  --novedad-act-text: #1d4ed8;
+  --novedad-act-border: #bfdbfe;
+
+  /* Días acumulados operativos (Fatiga WCAG 2.2 AA — distintos a Normal y a Ausente) */
+  --fatiga-warn-bg: #fef9c3;
+  --fatiga-warn-text: #854d0e;
+  --fatiga-warn-border: #ca8a04;
+
+  --fatiga-crit-bg: #fef2f2;
+  --fatiga-crit-text: #b91c1c;
+  --fatiga-crit-border: #dc2626;
 
   --novedad-s: #f97316;
   --novedad-s-bg: #fff7ed;
@@ -123,9 +132,9 @@ html.dark {
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
 
   /* 🌙 Novedades en Modo Oscuro */
-  --novedad-f-bg: rgba(59, 130, 246, 0.18);
-  --novedad-f-text: #93c5fd;
-  --novedad-f-border: rgba(96, 165, 250, 0.35);
+  --novedad-f-bg: rgba(5, 150, 105, 0.18);
+  --novedad-f-text: #86efac;
+  --novedad-f-border: rgba(34, 197, 94, 0.35);
 
   --novedad-e-bg: rgba(244, 63, 94, 0.18);
   --novedad-e-text: #fecdd3;
@@ -135,9 +144,18 @@ html.dark {
   --novedad-v-text: #6ee7b7;
   --novedad-v-border: rgba(52, 211, 153, 0.35);
 
-  --novedad-act-bg: rgba(5, 150, 105, 0.18);
-  --novedad-act-text: #86efac;
-  --novedad-act-border: rgba(34, 197, 94, 0.35);
+  --novedad-act-bg: rgba(59, 130, 246, 0.18);
+  --novedad-act-text: #93c5fd;
+  --novedad-act-border: rgba(96, 165, 250, 0.35);
+
+  /* Días acumulados operativos (Fatiga en Modo Oscuro) */
+  --fatiga-warn-bg: rgba(234, 179, 8, 0.16);
+  --fatiga-warn-text: #fde047;
+  --fatiga-warn-border: #eab308;
+
+  --fatiga-crit-bg: rgba(239, 68, 68, 0.14);
+  --fatiga-crit-text: #fca5a5;
+  --fatiga-crit-border: #ef4444;
 
   --novedad-s-bg: rgba(249, 115, 22, 0.18);
   --novedad-s-text: #fed7aa;

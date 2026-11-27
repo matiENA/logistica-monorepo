@@ -848,7 +848,7 @@ html.dark .calendar-day-cell.selected {
   line-height: 1;
 }
 
-.calendar-day-cell.status-default .day-corner-number {
+.calendar-day-cell.novedad-default .day-corner-number {
   color: var(--text-muted);
   opacity: 1;
 }
@@ -867,48 +867,26 @@ html.dark .calendar-day-cell.selected .day-corner-number {
   justify-content: center;
 }
 
-/* Colores de Fatiga e Indicadores */
-.calendar-day-cell.fatiga-normal {
-  background-color: #ffffff;
-  border: 2px solid #60a5fa;
-  color: #2563eb;
-}
-
-html.dark .calendar-day-cell.fatiga-normal {
-  background-color: rgba(59, 130, 246, 0.16);
-  border-color: rgba(96, 165, 250, 0.55);
-  color: #93c5fd;
-}
-
-.calendar-day-cell.fatiga-warn {
-  background-color: #ffffff;
-  border: 2px solid #fb923c;
-  color: #c2410c;
-}
-
-html.dark .calendar-day-cell.fatiga-warn {
-  background-color: rgba(249, 115, 22, 0.20);
-  border-color: #f97316;
-  color: #fdba74;
-}
-
-.calendar-day-cell.fatiga-crit {
-  background-color: #ffffff;
-  border: 2px solid #ef4444;
-  color: #b91c1c;
-}
-
-html.dark .calendar-day-cell.fatiga-crit {
-  background-color: rgba(239, 68, 68, 0.22);
-  border-color: #ef4444;
-  color: #fca5a5;
-}
-
+/* Estados de Diagrama y Días Acumulados (Tokens Globales en theme.css) */
 .calendar-day-cell.novedad-act {
   background-color: var(--novedad-act-bg);
   border: 1.5px solid var(--novedad-act-border);
   color: var(--novedad-act-text);
   font-weight: 800;
+}
+
+.calendar-day-cell.novedad-act.fatiga-warn {
+  background-color: var(--fatiga-warn-bg);
+  border: 2px solid var(--fatiga-warn-border);
+  color: var(--fatiga-warn-text);
+  font-weight: 900;
+}
+
+.calendar-day-cell.novedad-act.fatiga-crit {
+  background-color: var(--fatiga-crit-bg);
+  border: 2px solid var(--fatiga-crit-border);
+  color: var(--fatiga-crit-text);
+  font-weight: 900;
 }
 
 .calendar-day-cell.novedad-f {
